@@ -2074,12 +2074,11 @@ mod tests {
         layout.insert("helper".to_string(), Position { x: 12.0, y: 34.0 });
         save_layout(root.clone(), "src/a.py".into(), layout.clone()).unwrap();
 
-        let loaded = load_layout(root, "src/a.py".into()).unwrap().unwrap();
+        let loaded = load_layout(root.clone(), "src/a.py".into()).unwrap().unwrap();
         assert_eq!(loaded, layout);
-        assert!(metadata_path(&temp_root("round-trip"))
-            .parent()
-            .unwrap()
-            .exists());
+        let metadata = metadata_path(&root);
+        assert!(metadata.exists());
+        assert!(metadata.parent().unwrap().exists());
     }
 
     #[test]
