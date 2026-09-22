@@ -41,10 +41,41 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        if child.kind() == "function_definition" {
-            if let Some(def) = function_def(child, source, None) {
-                defs.push(def);
+        match child.kind() {
+            "function_definition" => {
+                if let Some(def) = function_def(child, source, None) {
+                    defs.push(def);
+                }
             }
+            "class_definition" => {
+                let class_name = child
+                    .child_by_field_name("name")
+                    .and_then(|n| n.utf8_text(source.as_bytes()).ok())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some(body) = child.child_by_field_name("body") {
+                    let mut inner_cursor = body.walk();
+                    for inner in body.children(&mut inner_cursor) {
+                        if inner.kind() == "function_definition" {
+                            if let Some(def) =
+                                function_def(inner, source, Some(class_name.clone()))
+                            {
+                                defs.push(def);
+                            }
+                        }
+                    }
+                }
+                defs.push(Def {
+                    id: class_name.clone(),
+                    kind: NodeKind::Class,
+                    name: class_name,
+                    params: Vec::new(),
+                    returns: Vec::new(),
+                    parent: None,
+                    body: None,
+                });
+            }
+            _ => {}
         }
     }
     defs
@@ -211,5 +242,39 @@ def main():
     fn sets_file_path() {
         let result = parse(SOURCE);
         assert_eq!(result.file_path, "src/main.py");
+    }
+
+    const CLASS_SOURCE: &str = "\
+class Greeter:
+    def greet(self, name):
+        return name
+
+    def hello(self):
+        return self.greet(\"world\")
+
+def run():
+    g = Greeter()
+    return g.hello()
+";
+
+    #[test]
+    fn extracts_classes_and_methods() {
+        let result = parse(CLASS_SOURCE);
+        let class = result.nodes.iter().find(|n| n.id == "Greeter").unwrap();
+        assert_eq!(class.kind, NodeKind::Class);
+        assert!(class.parent.is_none());
+
+        let greet = result.nodes.iter().find(|n| n.id == "Greeter.greet").unwrap();
+        assert_eq!(greet.kind, NodeKind::Method);
+        assert_eq!(greet.parent.as_deref(), Some("Greeter"));
+        assert_eq!(greet.params, vec!["self", "name"]);
+    }
+
+    #[test]
+    fn class_node_has_no_params_or_returns() {
+        let result = parse(CLASS_SOURCE);
+        let class = result.nodes.iter().find(|n| n.id == "Greeter").unwrap();
+        assert!(class.params.is_empty());
+        assert!(class.returns.is_empty());
     }
 }
