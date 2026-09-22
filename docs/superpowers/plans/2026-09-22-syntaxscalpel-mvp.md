@@ -1472,6 +1472,14 @@ function magnitude(p: Point): number {
         let result = parse("function dist({ x, y }) {\n  return x;\n}\n");
         assert_eq!(result.nodes[0].params, vec!["{ x, y }"]);
     }
+
+    #[test]
+    fn unowned_object_method_is_a_function() {
+        let result = parse("export default {\n  handler() {\n    return 1;\n  }\n};\n");
+        let handler = result.nodes.iter().find(|n| n.id == "handler").unwrap();
+        assert_eq!(handler.kind, NodeKind::Function);
+        assert!(handler.parent.is_none());
+    }
 }
 ```
 
@@ -1664,7 +1672,11 @@ fn collect_methods_in_object<'a>(
                     Some(o) => format!("{o}.{}", def.name),
                     None => def.name.clone(),
                 };
-                def.kind = NodeKind::Method;
+                def.kind = if owner.is_some() {
+                    NodeKind::Method
+                } else {
+                    NodeKind::Function
+                };
                 if !defs.iter().any(|existing| existing.id == def.id) {
                     defs.push(def);
                 }
@@ -1805,7 +1817,7 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml parser::jsts`
-Expected: 6 tests PASS. **Resolved at implementation time (installed crates):** `tree-sitter-typescript` 0.23.2 ships no JavaScript grammar and no `LANGUAGE_JAVASCRIPT`; the working setup adds `tree-sitter-javascript` (`cargo add tree-sitter-javascript --manifest-path src-tauri/Cargo.toml`) and uses `tree_sitter_javascript::LANGUAGE` for `.js`/`.jsx`, with `tree_sitter_typescript::LANGUAGE_TYPESCRIPT` for `.ts`/`.tsx`. The TypeScript grammar's class body field is `body` (not `class_body`). If the crate API differs in another environment:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
+Expected: 7 tests PASS. **Resolved at implementation time (installed crates):** `tree-sitter-typescript` 0.23.2 ships no JavaScript grammar and no `LANGUAGE_JAVASCRIPT`; the working setup adds `tree-sitter-javascript` (`cargo add tree-sitter-javascript --manifest-path src-tauri/Cargo.toml`) and uses `tree_sitter_javascript::LANGUAGE` for `.js`/`.jsx`, with `tree_sitter_typescript::LANGUAGE_TYPESCRIPT` for `.ts`/`.tsx`. The TypeScript grammar's class body field is `body` (not `class_body`). If the crate API differs in another environment:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
 
 ```powershell
 rg -n "pub (const|fn) (LANGUAGE|language)" "$env:USERPROFILE\.cargo\registry\src\*\tree-sitter-typescript-*\bindings\rust\*.rs"
