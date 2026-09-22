@@ -474,7 +474,7 @@ const edges: GraphEdge[] = [
   { source: "main", target: "add" },
   { source: "main", target: "helper" },
   { source: "other", target: "main" },
-  { source: "unrelated", target: "far" },
+  { source: "unrelated", target: "isolated" },
 ];
 
 describe("traceNeighbors", () => {
@@ -1131,10 +1131,30 @@ Add to the `tests` module in `src-tauri/src/parser/python.rs`:
     }
 
     #[test]
-    fn does_not_create_self_edges_or_duplicate_edges() {
+    fn does_not_create_self_edges() {
         let source = "def loop():\n    loop()\n    loop()\n";
         let result = parse(source);
         assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn deduplicates_repeated_calls() {
+        let source = "\
+def helper():
+    return 1
+
+def main():
+    helper()
+    helper()
+";
+        let result = parse(source);
+        assert_eq!(
+            result.edges,
+            vec![GraphEdge {
+                source: "main".into(),
+                target: "helper".into(),
+            }]
+        );
     }
 
     #[test]
@@ -1452,6 +1472,14 @@ function magnitude(p: Point): number {
         let result = parse("function dist({ x, y }) {\n  return x;\n}\n");
         assert_eq!(result.nodes[0].params, vec!["{ x, y }"]);
     }
+
+    #[test]
+    fn unowned_object_method_is_a_function() {
+        let result = parse("export default {\n  handler() {\n    return 1;\n  }\n};\n");
+        let handler = result.nodes.iter().find(|n| n.id == "handler").unwrap();
+        assert_eq!(handler.kind, NodeKind::Function);
+        assert!(handler.parent.is_none());
+    }
 }
 ```
 
@@ -1479,7 +1507,7 @@ fn grammar_for(file_path: &str) -> tree_sitter::Language {
     if file_path.ends_with(".ts") || file_path.ends_with(".tsx") {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     } else {
-        tree_sitter_typescript::LANGUAGE_JAVASCRIPT.into()
+        tree_sitter_javascript::LANGUAGE.into()
     }
 }
 
@@ -1521,7 +1549,7 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
             }
             "class_declaration" => {
                 let class_name = node_text(child.child_by_field_name("name"), source);
-                if let Some(body) = child.child_by_field_name("class_body") {
+                if let Some(body) = child.child_by_field_name("body") {
                     let mut inner = body.walk();
                     for member in body.children(&mut inner) {
                         if member.kind() == "method_definition" {
@@ -1644,7 +1672,11 @@ fn collect_methods_in_object<'a>(
                     Some(o) => format!("{o}.{}", def.name),
                     None => def.name.clone(),
                 };
-                def.kind = NodeKind::Method;
+                def.kind = if owner.is_some() {
+                    NodeKind::Method
+                } else {
+                    NodeKind::Function
+                };
                 if !defs.iter().any(|existing| existing.id == def.id) {
                     defs.push(def);
                 }
@@ -1785,7 +1817,7 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml parser::jsts`
-Expected: 6 tests PASS. **If the crate API differs:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
+Expected: 7 tests PASS. **Resolved at implementation time (installed crates):** `tree-sitter-typescript` 0.23.2 ships no JavaScript grammar and no `LANGUAGE_JAVASCRIPT`; the working setup adds `tree-sitter-javascript` (`cargo add tree-sitter-javascript --manifest-path src-tauri/Cargo.toml`) and uses `tree_sitter_javascript::LANGUAGE` for `.js`/`.jsx`, with `tree_sitter_typescript::LANGUAGE_TYPESCRIPT` for `.ts`/`.tsx`. The TypeScript grammar's class body field is `body` (not `class_body`). If the crate API differs in another environment:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
 
 ```powershell
 rg -n "pub (const|fn) (LANGUAGE|language)" "$env:USERPROFILE\.cargo\registry\src\*\tree-sitter-typescript-*\bindings\rust\*.rs"
@@ -2042,12 +2074,11 @@ mod tests {
         layout.insert("helper".to_string(), Position { x: 12.0, y: 34.0 });
         save_layout(root.clone(), "src/a.py".into(), layout.clone()).unwrap();
 
-        let loaded = load_layout(root, "src/a.py".into()).unwrap().unwrap();
+        let loaded = load_layout(root.clone(), "src/a.py".into()).unwrap().unwrap();
         assert_eq!(loaded, layout);
-        assert!(metadata_path(&temp_root("round-trip"))
-            .parent()
-            .unwrap()
-            .exists());
+        let metadata = metadata_path(&root);
+        assert!(metadata.exists());
+        assert!(metadata.parent().unwrap().exists());
     }
 
     #[test]
@@ -2603,11 +2634,22 @@ export function FileExplorer({ root, onOpenFolder, onSelectFile, selectedFile }:
   useEffect(() => {
     if (!root) {
       setEntries([]);
+      setError(null);
       return;
     }
+    let cancelled = false;
+    setEntries([]);
+    setError(null);
     listDirectory(root, "")
-      .then(setEntries)
-      .catch((e) => setError(String(e)));
+      .then((next) => {
+        if (!cancelled) setEntries(next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [root]);
 
   const pickFolder = useCallback(async () => {
@@ -3057,7 +3099,7 @@ Note: this hook's returned function must only be passed to React Flow's `onNodeD
 Create `src/features/shell/ContentPane.tsx`:
 
 ```tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LayoutMap } from "../../shared/types";
 import { useFileContent } from "./useFileContent";
 import { useLayoutAutosave } from "../graph/useLayoutAutosave";
@@ -3074,6 +3116,13 @@ interface Props {
 export function ContentPane({ root, filePath, onDragStop }: Props) {
   const state = useFileContent(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // A selection belongs to one file. Without this reset, switching files keeps the
+  // old node id, traceNeighbors finds no match, and every node in the new graph
+  // renders dimmed until the user clicks.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [filePath]);
 
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;
@@ -3181,6 +3230,8 @@ export default function App() {
   );
 }
 ```
+
+**Resolved at implementation time:** the installed `react-resizable-panels@4` exports `Group`, `Panel`, `Separator` (not `PanelGroup`/`PanelResizeHandle`), and `defaultSize`/`minSize` take percentage strings (`"22%"`, `"50%"`) rather than bare numbers (v4 reads bare numbers as pixels). The implementation uses those names/sizes; layout behavior is identical. `src/App.css` did not exist in the worktree, so its deletion was a no-op.
 
 Before running the build, update `src/main.tsx` to import the shell from its feature folder and delete the template's old `src/App.tsx` and `src/App.css`:
 
