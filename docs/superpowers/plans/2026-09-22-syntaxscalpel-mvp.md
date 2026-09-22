@@ -3099,7 +3099,7 @@ Note: this hook's returned function must only be passed to React Flow's `onNodeD
 Create `src/features/shell/ContentPane.tsx`:
 
 ```tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LayoutMap } from "../../shared/types";
 import { useFileContent } from "./useFileContent";
 import { useLayoutAutosave } from "../graph/useLayoutAutosave";
@@ -3116,6 +3116,13 @@ interface Props {
 export function ContentPane({ root, filePath, onDragStop }: Props) {
   const state = useFileContent(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // A selection belongs to one file. Without this reset, switching files keeps the
+  // old node id, traceNeighbors finds no match, and every node in the new graph
+  // renders dimmed until the user clicks.
+  useEffect(() => {
+    setSelectedId(null);
+  }, [filePath]);
 
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;
