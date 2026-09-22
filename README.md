@@ -13,9 +13,9 @@ Local-first desktop app that dissects source files into interactive node graphs 
 
 ## Requirements
 
-- Node.js 20+
+- Node.js 20.19+
 - Rust (stable toolchain)
-- Windows 10/11 with WebView2 (included by default)
+- Windows 10/11 with WebView2 (ships with Windows 11 and is normally present on Windows 10 via Microsoft Edge)
 
 ## Development
 
