@@ -75,12 +75,25 @@ mod tests {
     fn read_markdown_returns_raw_text() {
         let root = fixture();
         let path = Path::new(&root).join("README.md");
-        assert_eq!(read_markdown(path.to_string_lossy().to_string()).unwrap(), "# hi\n");
+        assert_eq!(
+            read_markdown(path.to_string_lossy().to_string(), String::new()).unwrap(),
+            "# hi\n"
+        );
+    }
+
+    #[test]
+    fn read_markdown_resolves_relative_path_against_root() {
+        let root = std::env::temp_dir().join(format!("scalpel-fs-md-rel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("sub.md"), "# sub\n").unwrap();
+        let root = root.to_string_lossy().to_string();
+        assert_eq!(read_markdown("sub.md".into(), root.clone()).unwrap(), "# sub\n");
     }
 
     #[test]
     fn read_markdown_errors_on_missing_file() {
-        assert!(read_markdown("C:/definitely/missing.md".into()).is_err());
+        assert!(read_markdown("C:/definitely/missing.md".into(), String::new()).is_err());
     }
 }
 
@@ -126,6 +139,7 @@ pub fn list_directory(root: String, rel_path: String) -> Result<Vec<FileEntry>, 
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn read_markdown(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+pub fn read_markdown(path: String, root: String) -> Result<String, String> {
+    let full = Path::new(&root).join(&path);
+    std::fs::read_to_string(&full).map_err(|e| format!("{}: {e}", full.display()))
 }

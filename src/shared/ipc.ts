@@ -12,8 +12,8 @@ export function listDirectory(root: string, relPath: string): Promise<FileEntry[
   return invoke<FileEntry[]>("list_directory", { root, relPath });
 }
 
-export function readMarkdown(path: string): Promise<string> {
-  return invoke<string>("read_markdown", { path });
+export function readMarkdown(path: string, root: string): Promise<string> {
+  return invoke<string>("read_markdown", { path, root });
 }
 
 export function parsePython(path: string, root: string): Promise<ParseResult> {

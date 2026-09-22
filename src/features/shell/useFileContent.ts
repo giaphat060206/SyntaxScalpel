@@ -32,7 +32,7 @@ export function useFileContent(
         case "jsts":
           return { status: "graph", result: await parseJsTs(filePath, root) };
         case "markdown":
-          return { status: "markdown", content: await readMarkdown(filePath) };
+          return { status: "markdown", content: await readMarkdown(filePath, root) };
         default:
           return { status: "error", message: "Unsupported file type" };
       }
