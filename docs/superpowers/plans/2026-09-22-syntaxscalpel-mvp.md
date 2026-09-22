@@ -3224,6 +3224,8 @@ export default function App() {
 }
 ```
 
+**Resolved at implementation time:** the installed `react-resizable-panels@4` exports `Group`, `Panel`, `Separator` (not `PanelGroup`/`PanelResizeHandle`), and `defaultSize`/`minSize` take percentage strings (`"22%"`, `"50%"`) rather than bare numbers (v4 reads bare numbers as pixels). The implementation uses those names/sizes; layout behavior is identical. `src/App.css` did not exist in the worktree, so its deletion was a no-op.
+
 Before running the build, update `src/main.tsx` to import the shell from its feature folder and delete the template's old `src/App.tsx` and `src/App.css`:
 
 ```tsx
