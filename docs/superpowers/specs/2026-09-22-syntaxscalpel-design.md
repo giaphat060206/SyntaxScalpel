@@ -15,7 +15,7 @@ Onboarding onto undocumented codebases is slow. SyntaxScalpel turns a Python fil
 ### MoSCoW (MVP scope)
 - **Must:** Tauri shell + OS file access; Rust backend routing by extension (Tree-sitter for `.py`, raw string for `.md`); Tauri IPC bridge; React Flow node graph of Python functions; react-markdown rendering.
 - **Should:** Resizable split-pane (md + graph side by side); cross-node tracing (1-hop highlight); local JSON storage (`.scalpel/metadata.json`) via Rust.
-- **Could (post-MVP):** JS/Go grammars; local AI summarization (Ollama `localhost:11434`); OpenRouter BYOK.
+- **Could (post-MVP):** Additional languages per the Language Roadmap (§3); local AI summarization (Ollama `localhost:11434`); OpenRouter BYOK.
 - **Won't:** Code editing; cloud DBs/accounts/telemetry; real-time collab.
 
 ## 2. Decisions (from brainstorming)
@@ -86,6 +86,39 @@ interface ParseResult {
   filePath: string;      // project-relative
 }
 ```
+
+These payload shapes are language-agnostic. Every language extraction module must emit them; the frontend renders whatever arrives without per-language changes.
+
+### Extension routing
+
+Frontend routes by file extension to a parse command. One Rust command per language:
+
+| Extension(s) | Command | Language module |
+|---|---|---|
+| `.py` | `parse_python` | Python (MVP) |
+| `.js`, `.jsx` | `parse_javascript` | JS (Tier 1) |
+| `.ts`, `.tsx` | `parse_typescript` | TS (Tier 1) |
+| `.go` | `parse_go` | Go (Tier 1) |
+| `.c`, `.h` | `parse_c` | C (Tier 2) |
+| `.cpp`, `.cc`, `.hpp` | `parse_cpp` | C++ (Tier 2) |
+| `.java` | `parse_java` | Java (Tier 2) |
+| `.cs` | `parse_csharp` | C# (Tier 2) |
+| `.rs` | `parse_rust` | Rust (Tier 2) |
+| `.md` | `read_markdown` | docs viewer |
+| other | — | toast "Unsupported file type" |
+
+Each language module: Tree-sitter grammar (cargo crate) + per-language extraction code walking that grammar's AST into the shared payload shapes.
+
+### Language roadmap
+
+| Tier | Languages | Cost driver |
+|---|---|---|
+| 0 (MVP) | Python | Baseline extraction pattern |
+| 1 (next) | JS, TS, Go, JSX/TSX | Cheapest grammars; function-style code; existing extraction pattern applies as-is |
+| 2 | C, C++, Java, C#, Rust | Per-language extraction modules + edge-resolution rules: Java methods always class-nested; C headers/prototypes; C++ overloads/templates complicate call matching |
+| Deferred | HTML, CSS | HTML = DOM/tag tree, not callable units — needs a tree-view feature type, not a call graph. CSS = selectors/rules, no calls — plain viewer or special view, never a graph |
+
+Roadmap is documented intent under "Could Have" — no Must/Should MVP scope changes. Each new tier-N language is one extraction module + one grammar crate + tests; no frontend or payload changes.
 
 ### Extraction rules (Rust, Tree-sitter Python)
 - Nodes: top-level `function_definition` → `function`; top-level `class_definition` → `class`; `function_definition` inside class body → `method` with `parent` = class id.
@@ -174,5 +207,5 @@ interface ParseResult {
 - Project-wide call graphs.
 - Cloud anything (DB, accounts, telemetry).
 - Collaborative editing.
-- Additional languages (JS/Go).
+- Additional languages (see Language Roadmap §3 — documented intent, not MVP).
 - AI summarization (Ollama / OpenRouter).
