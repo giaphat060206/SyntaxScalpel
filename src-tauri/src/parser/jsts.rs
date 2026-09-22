@@ -37,12 +37,86 @@ pub fn parse_source(
 
     let defs = collect_defs(tree.root_node(), source);
     let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
+    let edges = collect_edges(&defs, source);
 
     Ok(ParseResult {
         nodes,
-        edges: Vec::new(),
+        edges,
         file_path: file_path.to_string(),
     })
+}
+
+fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
+    let mut targets: HashMap<&str, &str> = HashMap::new();
+    for def in defs {
+        if def.kind != NodeKind::Class {
+            targets.insert(def.id.as_str(), def.id.as_str());
+            targets.insert(def.name.as_str(), def.id.as_str());
+        }
+    }
+
+    let mut edges: Vec<GraphEdge> = Vec::new();
+    for def in defs {
+        let Some(body) = def.body else { continue };
+        let mut calls = Vec::new();
+        collect_calls(body, source, &mut calls);
+        for name in calls {
+            let Some(target) = targets.get(name.as_str()) else {
+                continue;
+            };
+            if *target == def.id.as_str() {
+                continue;
+            }
+            let edge = GraphEdge {
+                source: def.id.clone(),
+                target: target.to_string(),
+            };
+            if !edges
+                .iter()
+                .any(|e| e.source == edge.source && e.target == edge.target)
+            {
+                edges.push(edge);
+            }
+        }
+    }
+    edges
+}
+
+fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
+    if node.kind() == "call_expression" || node.kind() == "new_expression" {
+        if let Some(callee) = node
+            .child_by_field_name("function")
+            .or_else(|| node.child_by_field_name("constructor"))
+        {
+            match callee.kind() {
+                "identifier" => {
+                    let text = node_text(Some(callee), source);
+                    if !text.is_empty() {
+                        out.push(text);
+                    }
+                }
+                "member_expression" => {
+                    if let Some(prop) = callee.child_by_field_name("property") {
+                        let text = node_text(Some(prop), source);
+                        if !text.is_empty() {
+                            out.push(text);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if matches!(
+            child.kind(),
+            "function_declaration" | "function" | "arrow_function" | "class_declaration"
+        ) {
+            continue;
+        }
+        collect_calls(child, source, out);
+    }
 }
 
 fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
@@ -423,5 +497,41 @@ function magnitude(p: Point): number {
         let handler = result.nodes.iter().find(|n| n.id == "handler").unwrap();
         assert_eq!(handler.kind, NodeKind::Function);
         assert!(handler.parent.is_none());
+    }
+
+    #[test]
+    fn links_function_and_method_calls() {
+        let result = parse(SOURCE);
+        assert!(result.edges.contains(&GraphEdge {
+            source: "run".into(),
+            target: "mul".into(),
+        }));
+        assert!(result.edges.contains(&GraphEdge {
+            source: "run".into(),
+            target: "Calc.double".into(),
+        }));
+        assert!(result.edges.contains(&GraphEdge {
+            source: "Calc.double".into(),
+            target: "add".into(),
+        }));
+    }
+
+    #[test]
+    fn constructor_is_not_an_edge() {
+        let result = parse(SOURCE);
+        assert!(!result.edges.iter().any(|e| e.target == "Calc"));
+    }
+
+    #[test]
+    fn ignores_callbacks_imports_and_builtins() {
+        let source = "\
+import { readFile } from \"fs\";
+
+function run(items) {
+  return items.map((x) => x).concat(console.log(items));
+}
+";
+        let result = parse(source);
+        assert!(result.edges.is_empty());
     }
 }
