@@ -29,10 +29,11 @@ pub fn parse_source(
 
     let defs = collect_defs(tree.root_node(), source);
     let nodes = defs.iter().map(to_node).collect();
+    let edges = collect_edges(&defs, source);
 
     Ok(ParseResult {
         nodes,
-        edges: Vec::new(),
+        edges,
         file_path: file_path.to_string(),
     })
 }
@@ -179,6 +180,68 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
+fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
+    let mut targets: HashMap<&str, &str> = HashMap::new();
+    for def in defs {
+        if def.kind != NodeKind::Class {
+            targets.insert(def.id.as_str(), def.id.as_str());
+            targets.insert(def.name.as_str(), def.id.as_str());
+        }
+    }
+
+    let mut edges: Vec<GraphEdge> = Vec::new();
+    for def in defs {
+        let Some(body) = def.body else { continue };
+        let mut calls = Vec::new();
+        collect_calls(body, source, &mut calls);
+        for name in calls {
+            let Some(target) = targets.get(name.as_str()) else {
+                continue;
+            };
+            if *target == def.id.as_str() {
+                continue;
+            }
+            let edge = GraphEdge {
+                source: def.id.clone(),
+                target: target.to_string(),
+            };
+            if !edges.iter().any(|e| e.source == edge.source && e.target == edge.target) {
+                edges.push(edge);
+            }
+        }
+    }
+    edges
+}
+
+fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
+    if node.kind() == "call" {
+        if let Some(function) = node.child_by_field_name("function") {
+            match function.kind() {
+                "identifier" => {
+                    if let Ok(text) = function.utf8_text(source.as_bytes()) {
+                        out.push(text.to_string());
+                    }
+                }
+                "attribute" => {
+                    if let Some(attr) = function.child_by_field_name("attribute") {
+                        if let Ok(text) = attr.utf8_text(source.as_bytes()) {
+                            out.push(text.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "function_definition" || child.kind() == "class_definition" {
+            continue;
+        }
+        collect_calls(child, source, out);
+    }
+}
+
 fn to_node(def: &Def) -> GraphNode {
     GraphNode {
         id: def.id.clone(),
@@ -276,5 +339,55 @@ def run():
         let class = result.nodes.iter().find(|n| n.id == "Greeter").unwrap();
         assert!(class.params.is_empty());
         assert!(class.returns.is_empty());
+    }
+
+    #[test]
+    fn links_function_calls_within_file() {
+        let result = parse(SOURCE);
+        assert_eq!(
+            result.edges,
+            vec![GraphEdge {
+                source: "main".into(),
+                target: "add".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn links_method_calls_and_constructor_is_not_an_edge() {
+        let result = parse(CLASS_SOURCE);
+        assert!(result.edges.contains(&GraphEdge {
+            source: "Greeter.hello".into(),
+            target: "Greeter.greet".into(),
+        }));
+        assert!(result.edges.contains(&GraphEdge {
+            source: "run".into(),
+            target: "Greeter.hello".into(),
+        }));
+        // `Greeter()` is a class constructor reference: never an edge.
+        assert!(!result.edges.iter().any(|e| e.target == "Greeter"));
+    }
+
+    #[test]
+    fn does_not_create_self_edges_or_duplicate_edges() {
+        let source = "def loop():\n    loop()\n    loop()\n";
+        let result = parse(source);
+        assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn ignores_imports_and_builtins() {
+        let source = "\
+import math
+
+def area(r):
+    return math.pi * r
+
+def show(x):
+    print(x)
+    return x
+";
+        let result = parse(source);
+        assert!(result.edges.is_empty());
     }
 }
