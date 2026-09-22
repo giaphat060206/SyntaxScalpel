@@ -1131,10 +1131,30 @@ Add to the `tests` module in `src-tauri/src/parser/python.rs`:
     }
 
     #[test]
-    fn does_not_create_self_edges_or_duplicate_edges() {
+    fn does_not_create_self_edges() {
         let source = "def loop():\n    loop()\n    loop()\n";
         let result = parse(source);
         assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn deduplicates_repeated_calls() {
+        let source = "\
+def helper():
+    return 1
+
+def main():
+    helper()
+    helper()
+";
+        let result = parse(source);
+        assert_eq!(
+            result.edges,
+            vec![GraphEdge {
+                source: "main".into(),
+                target: "helper".into(),
+            }]
+        );
     }
 
     #[test]
