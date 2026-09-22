@@ -15,7 +15,9 @@ struct Def<'a> {
 }
 
 fn grammar_for(file_path: &str) -> tree_sitter::Language {
-    if file_path.ends_with(".ts") || file_path.ends_with(".tsx") {
+    if file_path.ends_with(".tsx") {
+        tree_sitter_typescript::LANGUAGE_TSX.into()
+    } else if file_path.ends_with(".ts") {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     } else {
         tree_sitter_javascript::LANGUAGE.into()
@@ -483,6 +485,14 @@ function magnitude(p: Point): number {
         let result = parse_source(TS, "src/math.ts", &HashMap::new()).unwrap();
         let names: Vec<&str> = result.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["magnitude"]);
+    }
+
+    #[test]
+    fn parses_tsx_with_jsx() {
+        let source =
+            "function Greeting({ name }: { name: string }) {\n  return <div>{name}</div>;\n}\n";
+        let result = parse_source(source, "src/app.tsx", &HashMap::new()).unwrap();
+        assert!(result.nodes.iter().any(|n| n.name == "Greeting"));
     }
 
     #[test]
