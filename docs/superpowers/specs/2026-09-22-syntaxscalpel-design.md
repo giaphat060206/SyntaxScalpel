@@ -89,6 +89,8 @@ interface ParseResult {
 
 These payload shapes are language-agnostic. Every language extraction module must emit them; the frontend renders whatever arrives without per-language changes.
 
+**Serialization requirement:** the Rust-side `GraphNode`, `GraphEdge`, and `ParseResult` structs (and all nested types) must derive `serde::Serialize` (camelCase field naming to match the TS shapes above). Without it, values cannot cross the Tauri v2 IPC boundary — commands fail to serialize.
+
 ### Extension routing
 
 Frontend routes by file extension to a parse command. One Rust command per language:
@@ -193,6 +195,7 @@ Applies to `.js`, `.jsx`, `.ts`, `.tsx` via one module and the `parse_js_ts` com
 
 - Key = project-relative file path. Node id matches payload node ids.
 - Auto-save debounced 500 ms after drag end.
+- **Drag event targeting:** the save must hook React Flow's `onNodeDragStop` event only — never `onNodesChange`, which fires on every pixel of mouse movement during a drag and would spam IPC writes (disk thrashing). `onNodeDragStop` fires exactly once per completed drag; debounce on top is defense-in-depth.
 - Missing `.scalpel/` → created on save. Corrupt JSON → ignored, fresh start.
 
 ## 7. Error handling
