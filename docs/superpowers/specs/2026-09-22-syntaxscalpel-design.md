@@ -10,10 +10,10 @@ SyntaxScalpel is a local-first, native desktop application that dissects complex
 Name: **SyntaxScalpel** (user-confirmed; repo folder `SyntaxScalper` predates the decision — logos will be reused, folder name is cosmetic).
 
 ### Purpose
-Onboarding onto undocumented codebases is slow. SyntaxScalpel turns a Python file into a clickable call graph and renders Markdown specs alongside it, so a developer can compare design docs against implementation structure visually.
+Onboarding onto undocumented codebases is slow. SyntaxScalpel turns a source file (Python or JavaScript/TypeScript in MVP) into a clickable call graph and renders Markdown specs alongside it, so a developer can compare design docs against implementation structure visually.
 
 ### MoSCoW (MVP scope)
-- **Must:** Tauri shell + OS file access; Rust backend routing by extension (Tree-sitter for `.py`, raw string for `.md`); Tauri IPC bridge; React Flow node graph of Python functions; react-markdown rendering.
+- **Must:** Tauri shell + OS file access; Rust backend routing by extension (Tree-sitter for `.py`/`.js`/`.jsx`/`.ts`/`.tsx`, raw string for `.md`); Tauri IPC bridge; React Flow node graphs for Python and JavaScript/TypeScript functions; react-markdown rendering.
 - **Should:** Resizable split-pane (md + graph side by side); cross-node tracing (1-hop highlight); local JSON storage (`.scalpel/metadata.json`) via Rust.
 - **Could (post-MVP):** Additional languages per the Language Roadmap (§3); local AI summarization (Ollama `localhost:11434`); OpenRouter BYOK.
 - **Won't:** Code editing; cloud DBs/accounts/telemetry; real-time collab.
@@ -96,8 +96,7 @@ Frontend routes by file extension to a parse command. One Rust command per langu
 | Extension(s) | Command | Language module |
 |---|---|---|
 | `.py` | `parse_python` | Python (MVP) |
-| `.js`, `.jsx` | `parse_javascript` | JS (Tier 1) |
-| `.ts`, `.tsx` | `parse_typescript` | TS (Tier 1) |
+| `.js`, `.jsx`, `.ts`, `.tsx` | `parse_js_ts` | JS/TS shared module (MVP) |
 | `.go` | `parse_go` | Go (Tier 1) |
 | `.c`, `.h` | `parse_c` | C (Tier 2) |
 | `.cpp`, `.cc`, `.hpp` | `parse_cpp` | C++ (Tier 2) |
@@ -107,14 +106,14 @@ Frontend routes by file extension to a parse command. One Rust command per langu
 | `.md` | `read_markdown` | docs viewer |
 | other | — | toast "Unsupported file type" |
 
-Each language module: Tree-sitter grammar (cargo crate) + per-language extraction code walking that grammar's AST into the shared payload shapes.
+Each language module: Tree-sitter grammar (cargo crate) + per-language extraction code walking that grammar's AST into the shared payload shapes. JS and TS share one module: `tree-sitter-typescript` parses JS/JSX/TS/TSX as a superset of `tree-sitter-javascript`.
 
 ### Language roadmap
 
 | Tier | Languages | Cost driver |
 |---|---|---|
-| 0 (MVP) | Python | Baseline extraction pattern |
-| 1 (next) | JS, TS, Go, JSX/TSX | Cheapest grammars; function-style code; existing extraction pattern applies as-is |
+| 0 (MVP) | Python; JS, TS, JSX/TSX | Python = baseline extraction pattern. JS/TS = shared module via `tree-sitter-typescript` superset; arrow functions + object methods need extra rules; ~1.5–2x Python module effort |
+| 1 (next) | Go | Function-style; existing extraction pattern applies as-is |
 | 2 | C, C++, Java, C#, Rust | Per-language extraction modules + edge-resolution rules: Java methods always class-nested; C headers/prototypes; C++ overloads/templates complicate call matching |
 | Deferred | HTML, CSS | HTML = DOM/tag tree, not callable units — needs a tree-view feature type, not a call graph. CSS = selectors/rules, no calls — plain viewer or special view, never a graph |
 
@@ -127,10 +126,23 @@ Roadmap is documented intent under "Could Have" — no Must/Should MVP scope cha
 - Edges: call-expression inside function/method body whose callee name matches a top-level function or method name in the same file. Calls resolving to nothing (imports, builtins, unknown) produce no edge.
 - Class constructor references are not edges (MVP); only explicit call matches.
 
+### Extraction rules (Rust, JS/TS shared module)
+Applies to `.js`, `.jsx`, `.ts`, `.tsx` via one module and the `parse_js_ts` command (`tree-sitter-typescript` grammar handles all four).
+
+- Nodes:
+  - `function_declaration` → `function`.
+  - Variable declarator whose value is an arrow function or function expression (`const x = () => {}`, `const x = function () {}`) → `function` named `x`.
+  - `class_declaration` → `class`; `method_definition` inside → `method` with `parent` = class id.
+  - Object-literal methods (`{ foo() {} }`) → `method` with `parent` = owning variable/class id when determinable; otherwise standalone `function`.
+- Inputs: parameters from signature (regular, default, rest, destructured — destructured/complex params render as written, e.g. `{ a, b }`).
+- Outputs: identifiers in `return` statements; empty for implicit-return arrow functions unless expression is a simple identifier.
+- Edges: call-expression / `new` expression callee name matching an in-file function or method name. Callbacks passed as arguments (`arr.map(cb)`) are external calls — no edge, per global rule.
+- Skipped: interfaces, type aliases, type annotations, generics, decorators, `export`/`import` statements (imports produce no edges, per "in-file calls only").
+
 ## 4. Workflows
 
 ### Code workflow
-1. User clicks `.py` in explorer.
+1. User clicks a code file in explorer (`.py` example below; `parse_js_ts` flow is identical for `.js`/`.jsx`/`.ts`/`.tsx`).
 2. Frontend invokes `parse_python(path)`.
 3. Rust: read file → Tree-sitter parse → extract nodes/edges → load positions from `.scalpel/metadata.json` → return JSON.
 4. GraphView renders React Flow graph: sharp orthogonal edges, cyan nodes.
