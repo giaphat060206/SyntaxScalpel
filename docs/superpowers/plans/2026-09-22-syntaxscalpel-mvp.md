@@ -20,7 +20,7 @@
 - Edges are in-file calls only. Class names are never edge targets. No self-edges. No edges for imports, builtins, or callbacks.
 - `save_layout` fires from `onNodeDragStop` ONLY — never `onNodesChange` (fires per pixel, thrashes disk). Debounce 500 ms as defense-in-depth.
 - All Tauri commands return `Result<T, String>`; never panic.
-- Layout file: `<projectRoot>/.scalpel/metadata.json`, keyed by project-relative path.
+- Layout file: `<projectRoot>/.scalpel/metadata.json`, keyed by project-relative path. A save replaces that file's entry, so the frontend must send positions for **all** nodes in the file, not just the dragged one.
 - Unsupported extension → toast "Unsupported file type".
 - Commit after every task. Never commit secrets.
 
@@ -91,6 +91,17 @@ npm create tauri-app@latest scalpel-scaffold --prefix $tmp -- --template react-t
 Copy-Item -Recurse -Force "$tmp\scalpel-scaffold\*" "D:\College\Personal Projects\SyntaxScalper\"
 Remove-Item -Recurse -Force $tmp
 ```
+
+**Fallback if that command errors:** `create-tauri-app` flag support varies by version. If `--prefix`, `--identifier`, or `--yes` is rejected, do it in two steps instead:
+
+```powershell
+$tmp = "C:\Users\THISPC~1\AppData\Local\Temp\opencode\scalpel-scaffold"
+Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+npm create tauri-app@latest scalpel-scaffold -- --template react-ts --manager npm
+```
+
+Run that with the shell's working directory set to `$tmp` (pass `workdir`), answer prompts for identifier `com.syntaxscalpel.app`, then copy the generated contents into the repo root and delete `$tmp` as above. After scaffolding, open `src-tauri/tauri.conf.json` and confirm `"identifier": "com.syntaxscalpel.app"`; set it if the tool skipped it.
 
 - [ ] **Step 2: Install JS dependencies**
 
@@ -1774,7 +1785,13 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml parser::jsts`
-Expected: 6 tests PASS. If `LANGUAGE_TYPESCRIPT` / `LANGUAGE_JAVASCRIPT` names differ in the installed crate version, run `cargo doc -p tree-sitter-typescript --no-deps` or `cargo tree -p tree-sitter-typescript` and use the exported constant names (`language_typescript()` / `language_javascript()` return `LanguageFn` and work with the same `.into()` call).
+Expected: 6 tests PASS. **If the crate API differs:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
+
+```powershell
+rg -n "pub (const|fn) (LANGUAGE|language)" "$env:USERPROFILE\.cargo\registry\src\*\tree-sitter-typescript-*\bindings\rust\*.rs"
+```
+
+Then use whatever that prints; both forms work with `.into()` when building the `Language` passed to `set_language`. If the crate has no Rust bindings file, use `cargo doc -p tree-sitter-typescript --no-deps --open` and read the exported items.
 
 - [ ] **Step 5: Commit**
 
@@ -2797,23 +2814,61 @@ export function CodeNode({ data }: NodeProps) {
 Create `src/features/graph/GraphView.tsx`:
 
 ```tsx
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect } from "react";
 import {
   Background,
   Controls,
   ReactFlow,
+  useEdgesState,
+  useNodesState,
   type Edge,
   type Node,
   type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { LayoutMap, ParseResult } from "../../shared/types";
-import { buildFlow } from "./flow";
+import type { GraphEdge, LayoutMap, ParseResult } from "../../shared/types";
+import { buildFlow, type FlowEdge, type FlowNode } from "./flow";
 import { traceNeighbors } from "./trace";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { EmptyState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
+
+function visibilityOf(id: string, edges: GraphEdge[], selectedId: string | null) {
+  const traced = selectedId ? traceNeighbors(edges, selectedId) : null;
+  return {
+    highlighted: traced ? traced.has(id) : false,
+    dimmed: traced ? !traced.has(id) : false,
+  };
+}
+
+function toFlowNode(node: FlowNode, selectedId: string | null, edges: GraphEdge[]): Node {
+  return {
+    id: node.id,
+    type: node.type,
+    position: node.position,
+    parentId: node.parentId,
+    extent: node.extent,
+    style: node.style,
+    draggable: node.data.node.kind !== "class",
+    data: {
+      node: node.data.node,
+      ...visibilityOf(node.id, edges, selectedId),
+    } satisfies CodeNodeData,
+  };
+}
+
+function toFlowEdge(edge: FlowEdge, selectedId: string | null): Edge {
+  const active =
+    selectedId !== null && (edge.source === selectedId || edge.target === selectedId);
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    type: edge.type,
+    style: { stroke: active ? "#3DF0A8" : "#00F0FF", strokeWidth: 2 },
+  };
+}
 
 interface Props {
   result: ParseResult;
@@ -2823,46 +2878,38 @@ interface Props {
 }
 
 export function GraphView({ result, selectedId, onSelect, onDragStop }: Props) {
-  const flow = useMemo(() => buildFlow(result), [result]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  const nodes: Node[] = useMemo(() => {
-    const traced = selectedId
-      ? traceNeighbors(result.edges, selectedId)
-      : null;
-    return flow.nodes.map((node) => ({
-      id: node.id,
-      type: node.type,
-      position: node.position,
-      parentId: node.parentId,
-      extent: node.extent,
-      style: node.style,
-      draggable: node.data.node.kind !== "class",
-      data: {
-        node: node.data.node,
-        highlighted: traced ? traced.has(node.id) : false,
-        dimmed: traced ? !traced.has(node.id) : false,
-      } satisfies CodeNodeData,
-    }));
-  }, [flow.nodes, result.edges, selectedId]);
+  // Rebuild the flow whenever a different file is parsed.
+  useEffect(() => {
+    const flow = buildFlow(result);
+    setNodes(flow.nodes.map((node) => toFlowNode(node, null, result.edges)));
+    setEdges(flow.edges.map((edge) => toFlowEdge(edge, null)));
+  }, [result, setNodes, setEdges]);
 
-  const edges: Edge[] = useMemo(
-    () =>
-      flow.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: edge.type,
+  // Re-decorate for trace highlighting without touching positions the user dragged.
+  useEffect(() => {
+    setNodes((current) =>
+      current.map((node) => ({
+        ...node,
+        data: { ...node.data, ...visibilityOf(node.id, result.edges, selectedId) },
+      }))
+    );
+    setEdges((current) =>
+      current.map((edge) => ({
+        ...edge,
         style: {
           stroke:
-            selectedId &&
+            selectedId !== null &&
             (edge.source === selectedId || edge.target === selectedId)
               ? "#3DF0A8"
               : "#00F0FF",
           strokeWidth: 2,
         },
-      })),
-    [flow.edges, selectedId]
-  );
+      }))
+    );
+  }, [selectedId, result.edges, setNodes, setEdges]);
 
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => onSelect(node.id),
@@ -2871,11 +2918,17 @@ export function GraphView({ result, selectedId, onSelect, onDragStop }: Props) {
 
   const handleDragStop: NodeMouseHandler = useCallback(
     (_event, node) => {
+      // Save the FULL layout, not just the dragged node. `save_layout` replaces the
+      // entry for this file, so sending one node would erase every other node's
+      // saved position on the next open.
       const positions: LayoutMap = {};
-      positions[node.id] = { x: node.position.x, y: node.position.y };
+      for (const current of nodes) {
+        const position = current.id === node.id ? node.position : current.position;
+        positions[current.id] = { x: position.x, y: position.y };
+      }
       onDragStop(positions);
     },
-    [onDragStop]
+    [nodes, onDragStop]
   );
 
   if (result.nodes.length === 0) {
@@ -2883,10 +2936,17 @@ export function GraphView({ result, selectedId, onSelect, onDragStop }: Props) {
   }
 
   return (
-    <div className="h-full bg-bg">
+    <div className="relative h-full bg-bg">
+      {result.nodes.length > 5000 && (
+        <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded border border-yellow-500/40 bg-panel px-3 py-1 text-xs text-yellow-300">
+          Large file: {result.nodes.length} nodes — performance may degrade
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         onNodeClick={handleNodeClick}
         onNodeDragStop={handleDragStop}
@@ -2901,6 +2961,8 @@ export function GraphView({ result, selectedId, onSelect, onDragStop }: Props) {
   );
 }
 ```
+
+Why `useNodesState`/`useEdgesState`: React Flow v2 (`@xyflow/react`) treats `nodes`/`edges` as controlled. Without `onNodesChange`, dragging has no internal effect and nodes snap back, which breaks layout persistence. The state hooks supply those handlers. The second effect re-applies trace styling to the *current* nodes (preserving dragged positions) instead of rebuilding from `buildFlow`, so toggling trace never resets a user's layout.
 
 - [ ] **Step 3: Write the state components**
 
@@ -3296,7 +3358,7 @@ git commit -m "docs: add README"
 | Testing (cargo test, Vitest) | every Rust/TS task |
 | Out of scope | not built |
 
-Gap check: "<5000 node warning banner" from the spec's error table is not implemented as a task. Adding it as a one-line frontend guard would still need a task; recorded here as a known deviation — MVP ships without the banner because the spec marks it as a non-virtualized best-effort case. If required, add a `GraphView` prop that renders a warning when `result.nodes.length > 5000`.
+Gap check: the "<5000 node warning banner" from the spec's error table is now implemented inside Task 17 (Step 2 renders a banner when `result.nodes.length > 5000`). No remaining spec gaps.
 
 **Placeholder scan:** no "TBD"/"TODO"/"implement later". Every code step contains complete code. Task 5's caption numbering (`auto-layout`) is fully specified. Task 10 notes crate-version constant fallback explicitly rather than leaving it vague.
 
