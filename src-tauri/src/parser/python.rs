@@ -17,7 +17,7 @@ struct Def<'a> {
 pub fn parse_source(
     source: &str,
     file_path: &str,
-    _layout: &HashMap<String, Position>,
+    layout: &HashMap<String, Position>,
 ) -> Result<ParseResult, String> {
     let mut parser = Parser::new();
     parser
@@ -28,7 +28,7 @@ pub fn parse_source(
         .ok_or_else(|| "failed to parse source".to_string())?;
 
     let defs = collect_defs(tree.root_node(), source);
-    let nodes = defs.iter().map(to_node).collect();
+    let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
     let edges = collect_edges(&defs, source);
 
     Ok(ParseResult {
@@ -242,7 +242,7 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn to_node(def: &Def) -> GraphNode {
+fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
     GraphNode {
         id: def.id.clone(),
         kind: def.kind.clone(),
@@ -250,7 +250,7 @@ fn to_node(def: &Def) -> GraphNode {
         params: def.params.clone(),
         returns: def.returns.clone(),
         parent: def.parent.clone(),
-        position: None,
+        position: layout.get(&def.id).cloned(),
     }
 }
 
@@ -409,5 +409,21 @@ def show(x):
 ";
         let result = parse(source);
         assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn applies_saved_positions_by_node_id() {
+        let mut layout = HashMap::new();
+        layout.insert("helper".to_string(), Position { x: 12.0, y: 34.0 });
+        let result =
+            parse_source("def helper():\n    return 1\n", "src/a.py", &layout).unwrap();
+        assert_eq!(result.nodes[0].position, Some(Position { x: 12.0, y: 34.0 }));
+    }
+
+    #[test]
+    fn leaves_position_none_when_not_in_layout() {
+        let result = parse_source("def helper():\n    return 1\n", "src/a.py", &HashMap::new())
+            .unwrap();
+        assert_eq!(result.nodes[0].position, None);
     }
 }
