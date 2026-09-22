@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LayoutMap } from "../../shared/types";
 import { useFileContent } from "./useFileContent";
 import { GraphView } from "../graph/GraphView";
@@ -14,6 +14,10 @@ interface Props {
 export function ContentPane({ root, filePath, onDragStop }: Props) {
   const state = useFileContent(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedId(null);
+  }, [filePath]);
 
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;
