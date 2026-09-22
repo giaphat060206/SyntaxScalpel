@@ -39,26 +39,34 @@ src-tauri/src/
   parser/python.rs         Python extraction
   parser/jsts.rs           JS/TS extraction
 src/
-  main.tsx                 React entrypoint
-  App.tsx                  shell + panel layout + file state
-  index.css                Tailwind + theme
-  types.ts                 shared TS payload types
-  ipc.ts                   typed invoke wrappers
-  lib/extensions.ts        extension → route
-  lib/extensions.test.ts
-  lib/trace.ts             1-hop trace set
-  lib/trace.test.ts
-  lib/flow.ts              ParseResult → React Flow nodes/edges (positions, parentId)
-  lib/flow.test.ts
-  hooks/useFileContent.ts  load by extension (loading/error/graph/markdown states)
-  hooks/useLayoutAutosave.ts  onNodeDragStop → debounced save_layout
-  components/FileExplorer.tsx
-  components/ContentPane.tsx
-  components/GraphView.tsx
-  components/CodeNode.tsx
-  components/MarkdownView.tsx
-  components/StateViews.tsx  ErrorState + EmptyState
+  main.tsx                     React entrypoint
+  index.css                    Tailwind + theme
+  shared/
+    types.ts                   payload types (GraphNode, ParseResult, LayoutMap)
+    ipc.ts                     typed invoke wrappers
+    extensions.ts              extension → route
+    extensions.test.ts
+    StateViews.tsx             ErrorState + EmptyState
+  features/
+    explorer/
+      FileExplorer.tsx
+    graph/
+      GraphView.tsx            React Flow canvas
+      CodeNode.tsx             custom node (function/class/method)
+      flow.ts                  ParseResult → React Flow nodes/edges
+      flow.test.ts
+      trace.ts                 1-hop trace set
+      trace.test.ts
+      useLayoutAutosave.ts     onNodeDragStop → debounced save_layout
+    markdown/
+      MarkdownView.tsx
+    shell/
+      App.tsx                  root component + panel layout + file state
+      ContentPane.tsx
+      useFileContent.ts        load by extension (loading/error/graph/markdown)
 ```
+
+Feature folders group code that changes together: graph rendering logic lives with the graph, markdown with markdown, the explorer with the explorer. `shared/` holds the cross-feature kernel (payload types, IPC wrappers, extension routing, state views).
 
 ---
 
@@ -122,7 +130,7 @@ export default {
 npm install -D @tailwindcss/typography
 ```
 
-Replace `src/index.css` (or `src/App.css` if the template uses it — keep only one global stylesheet and import it in `main.tsx`):
+Replace `src/index.css` (or whatever global stylesheet the template created — keep only one and import it in `main.tsx`; delete `src/App.css` if present and remove its import):
 
 ```css
 @tailwind base;
@@ -318,7 +326,7 @@ git commit -m "feat(rust): add serde-serializable graph payload models"
 ### Task 3: Frontend payload types + extension routing
 
 **Files:**
-- Create: `src/types.ts`, `src/lib/extensions.ts`, `src/lib/extensions.test.ts`
+- Create: `src/shared/types.ts`, `src/shared/extensions.ts`, `src/shared/extensions.test.ts`
 
 **Interfaces:**
 - Consumes: nothing
@@ -328,7 +336,7 @@ git commit -m "feat(rust): add serde-serializable graph payload models"
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/lib/extensions.test.ts`:
+Create `src/shared/extensions.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
@@ -367,9 +375,9 @@ describe("routeForExtension", () => {
 Run: `npm test -- extensions`
 Expected: FAIL — cannot resolve `./extensions`.
 
-- [ ] **Step 3: Write `src/types.ts` and `src/lib/extensions.ts`**
+- [ ] **Step 3: Write `src/shared/types.ts` and `src/shared/extensions.ts`**
 
-Create `src/types.ts`:
+Create `src/shared/types.ts`:
 
 ```ts
 export type NodeKind = "function" | "class" | "method";
@@ -403,7 +411,7 @@ export interface ParseResult {
 export type LayoutMap = Record<string, Position>;
 ```
 
-Create `src/lib/extensions.ts`:
+Create `src/shared/extensions.ts`:
 
 ```ts
 export type FileRoute = "python" | "jsts" | "markdown" | "unsupported";
@@ -427,7 +435,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/types.ts src/lib/extensions.ts src/lib/extensions.test.ts
+git add src/shared/types.ts src/shared/extensions.ts src/shared/extensions.test.ts
 git commit -m "feat(ui): add payload types and extension routing"
 ```
 
@@ -436,20 +444,20 @@ git commit -m "feat(ui): add payload types and extension routing"
 ### Task 4: 1-hop trace logic
 
 **Files:**
-- Create: `src/lib/trace.ts`, `src/lib/trace.test.ts`
+- Create: `src/features/graph/trace.ts`, `src/features/graph/trace.test.ts`
 
 **Interfaces:**
-- Consumes: `GraphEdge` from `src/types.ts`
+- Consumes: `GraphEdge` from `src/shared/types.ts`
 - Produces: `traceNeighbors(edges: GraphEdge[], nodeId: string): Set<string>` — the node plus its direct callers and callees.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/lib/trace.test.ts`:
+Create `src/features/graph/trace.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
 import { traceNeighbors } from "./trace";
-import type { GraphEdge } from "../types";
+import type { GraphEdge } from "../../shared/types";
 
 const edges: GraphEdge[] = [
   { source: "main", target: "add" },
@@ -482,10 +490,10 @@ Expected: FAIL — cannot resolve `./trace`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `src/lib/trace.ts`:
+Create `src/features/graph/trace.ts`:
 
 ```ts
-import type { GraphEdge } from "../types";
+import type { GraphEdge } from "../../shared/types";
 
 export function traceNeighbors(edges: GraphEdge[], nodeId: string): Set<string> {
   const hits = new Set<string>([nodeId]);
@@ -505,7 +513,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/lib/trace.ts src/lib/trace.test.ts
+git add src/features/graph/trace.ts src/features/graph/trace.test.ts
 git commit -m "feat(ui): add 1-hop neighbor trace"
 ```
 
@@ -514,10 +522,10 @@ git commit -m "feat(ui): add 1-hop neighbor trace"
 ### Task 5: ParseResult → React Flow mapping
 
 **Files:**
-- Create: `src/lib/flow.ts`, `src/lib/flow.test.ts`
+- Create: `src/features/graph/flow.ts`, `src/features/graph/flow.test.ts`
 
 **Interfaces:**
-- Consumes: `ParseResult`, `GraphNode`, `GraphEdge` from `src/types.ts`
+- Consumes: `ParseResult`, `GraphNode`, `GraphEdge` from `src/shared/types.ts`
 - Produces:
   - `interface FlowNode { id: string; type: "scalpel"; position: Position; parentId?: string; extent?: "parent"; data: { node: GraphNode }; style?: { width: number; height: number } }`
   - `interface FlowEdge { id: string; source: string; target: string; type: "step" }`
@@ -527,12 +535,12 @@ Rules: use `node.position` when present, else auto-layout — top-level nodes in
 
 - [ ] **Step 1: Write the failing test**
 
-Create `src/lib/flow.test.ts`:
+Create `src/features/graph/flow.test.ts`:
 
 ```ts
 import { describe, it, expect } from "vitest";
 import { buildFlow } from "./flow";
-import type { ParseResult } from "../types";
+import type { ParseResult } from "../../shared/types";
 
 const result: ParseResult = {
   filePath: "src/main.py",
@@ -600,10 +608,10 @@ Expected: FAIL — cannot resolve `./flow`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `src/lib/flow.ts`:
+Create `src/features/graph/flow.ts`:
 
 ```ts
-import type { GraphEdge, GraphNode, ParseResult, Position } from "../types";
+import type { GraphEdge, GraphNode, ParseResult, Position } from "../../shared/types";
 
 export interface FlowNode {
   id: string;
@@ -683,7 +691,7 @@ Expected: PASS (5 tests).
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/lib/flow.ts src/lib/flow.test.ts
+git add src/features/graph/flow.ts src/features/graph/flow.test.ts
 git commit -m "feat(ui): map parse results to React Flow nodes and edges"
 ```
 
@@ -2406,15 +2414,15 @@ git commit -m "feat(rust): add filesystem, parse, and layout tauri commands"
 ### Task 14: Typed IPC wrappers + file loading hook
 
 **Files:**
-- Create: `src/ipc.ts`, `src/hooks/useFileContent.ts`
+- Create: `src/shared/ipc.ts`, `src/features/shell/useFileContent.ts`
 
 **Interfaces:**
-- Consumes: `invoke` from `@tauri-apps/api/core`; `types.ts`; `lib/extensions.ts`
+- Consumes: `invoke` from `@tauri-apps/api/core`; `shared/types.ts`; `shared/extensions.ts`
 - Produces:
   - `ipc.ts`: `listDirectory(root, relPath): Promise<FileEntry[]>`, `readMarkdown(path): Promise<string>`, `parsePython(path, root): Promise<ParseResult>`, `parseJsTs(path, root): Promise<ParseResult>`, `loadLayout(root, relPath): Promise<LayoutMap | null>`, `saveLayout(root, relPath, layout): Promise<void>`; `FileEntry { name: string; path: string; isDir: boolean; children: FileEntry[] }`
   - `useFileContent(root: string | null, filePath: string | null): FileState` where `FileState = { status: "idle" } | { status: "loading" } | { status: "error"; message: string } | { status: "graph"; result: ParseResult } | { status: "markdown"; content: string }`
 
-- [ ] **Step 1: Write `src/ipc.ts`**
+- [ ] **Step 1: Write `src/shared/ipc.ts`**
 
 ```ts
 import { invoke } from "@tauri-apps/api/core";
@@ -2456,13 +2464,13 @@ export function saveLayout(
 }
 ```
 
-- [ ] **Step 2: Write `src/hooks/useFileContent.ts`**
+- [ ] **Step 2: Write `src/features/shell/useFileContent.ts`**
 
 ```ts
 import { useEffect, useState } from "react";
-import type { ParseResult } from "../types";
-import { routeForExtension } from "../lib/extensions";
-import { parseJsTs, parsePython, readMarkdown } from "../ipc";
+import type { ParseResult } from "../../shared/types";
+import { routeForExtension } from "../../shared/extensions";
+import { parseJsTs, parsePython, readMarkdown } from "../../shared/ipc";
 
 export type FileState =
   | { status: "idle" }
@@ -2526,7 +2534,7 @@ Expected: build succeeds (the hook is unused so far; that is fine for TypeScript
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add src/ipc.ts src/hooks/useFileContent.ts
+git add src/shared/ipc.ts src/features/shell/useFileContent.ts
 git commit -m "feat(ui): add typed IPC wrappers and file content hook"
 ```
 
@@ -2535,11 +2543,11 @@ git commit -m "feat(ui): add typed IPC wrappers and file content hook"
 ### Task 15: File explorer with OS folder picker
 
 **Files:**
-- Create: `src/components/FileExplorer.tsx`
+- Create: `src/features/explorer/FileExplorer.tsx`
 - Modify: `src-tauri/src/lib.rs` (register dialog plugin), `src-tauri/Cargo.toml`, `src-tauri/capabilities/default.json`
 
 **Interfaces:**
-- Consumes: `listDirectory`, `FileEntry` from `src/ipc.ts`; `open` from `@tauri-apps/plugin-dialog`
+- Consumes: `listDirectory`, `FileEntry` from `src/shared/ipc.ts`; `open` from `@tauri-apps/plugin-dialog`
 - Produces: `<FileExplorer root={root} onOpenFolder={(root) => void} onSelectFile={(relPath) => void} />`
 
 - [ ] **Step 1: Install and register the dialog plugin**
@@ -2562,7 +2570,7 @@ In `src-tauri/capabilities/default.json`, add `"dialog:default"` to the `permiss
 ```tsx
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { listDirectory, type FileEntry } from "../ipc";
+import { listDirectory, type FileEntry } from "../../shared/ipc";
 
 interface Props {
   root: string | null;
@@ -2650,7 +2658,7 @@ Expected: both succeed.
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add package.json package-lock.json src/components/FileExplorer.tsx src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/lib.rs src-tauri/capabilities/default.json
+git add package.json package-lock.json src/features/explorer/FileExplorer.tsx src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/src/lib.rs src-tauri/capabilities/default.json
 git commit -m "feat(ui): file explorer with OS folder picker"
 ```
 
@@ -2659,7 +2667,7 @@ git commit -m "feat(ui): file explorer with OS folder picker"
 ### Task 16: Markdown viewer
 
 **Files:**
-- Create: `src/components/MarkdownView.tsx`
+- Create: `src/features/markdown/MarkdownView.tsx`
 
 **Interfaces:**
 - Consumes: `content: string`
@@ -2707,7 +2715,7 @@ Expected: succeeds.
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add src/components/MarkdownView.tsx src/index.css
+git add src/features/markdown/MarkdownView.tsx src/index.css
 git commit -m "feat(ui): render markdown with gfm and syntax highlighting"
 ```
 
@@ -2716,21 +2724,21 @@ git commit -m "feat(ui): render markdown with gfm and syntax highlighting"
 ### Task 17: Node graph rendering
 
 **Files:**
-- Create: `src/components/CodeNode.tsx`, `src/components/GraphView.tsx`
+- Create: `src/features/graph/CodeNode.tsx`, `src/features/graph/GraphView.tsx`
 
 **Interfaces:**
-- Consumes: `buildFlow`, `FlowNode` from `src/lib/flow.ts`; `GraphNode` from `src/types.ts`; `ParsedResult` via `result: ParseResult`
+- Consumes: `buildFlow`, `FlowNode` from `src/features/graph/flow.ts`; `GraphNode` from `src/shared/types.ts`; `ParsedResult` via `result: ParseResult`
 - Produces:
   - `<CodeNode data={{ node: GraphNode; highlighted: boolean; dimmed: boolean }} />`
   - `<GraphView result={ParseResult} selectedId={string | null} onSelect={(id: string | null) => void} onDragStop={(positions: LayoutMap) => void} />`
 
 - [ ] **Step 1: Write the custom node**
 
-Create `src/components/CodeNode.tsx`:
+Create `src/features/graph/CodeNode.tsx`:
 
 ```tsx
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import type { GraphNode } from "../types";
+import type { GraphNode } from "../../shared/types";
 
 export interface CodeNodeData extends Record<string, unknown> {
   node: GraphNode;
@@ -2786,7 +2794,7 @@ export function CodeNode({ data }: NodeProps) {
 
 - [ ] **Step 2: Write the graph view**
 
-Create `src/components/GraphView.tsx`:
+Create `src/features/graph/GraphView.tsx`:
 
 ```tsx
 import { useCallback, useMemo } from "react";
@@ -2799,11 +2807,11 @@ import {
   type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { LayoutMap, ParseResult } from "../types";
-import { buildFlow } from "../lib/flow";
-import { traceNeighbors } from "../lib/trace";
+import type { LayoutMap, ParseResult } from "../../shared/types";
+import { buildFlow } from "./flow";
+import { traceNeighbors } from "./trace";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
-import { EmptyState } from "./StateViews";
+import { EmptyState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
 
@@ -2892,15 +2900,11 @@ export function GraphView({ result, selectedId, onSelect, onDragStop }: Props) {
     </div>
   );
 }
-
-export { traceNeighbors };
 ```
-
-The `export { traceNeighbors }` line is removed in Task 18 — it exists only so this file compiles standalone if `trace` is not yet imported elsewhere. Delete it while implementing this task if `noUnusedLocals` complains.
 
 - [ ] **Step 3: Write the state components**
 
-Create `src/components/StateViews.tsx`:
+Create `src/shared/StateViews.tsx`:
 
 ```tsx
 export function EmptyState({ message }: { message: string }) {
@@ -2928,7 +2932,7 @@ Expected: succeeds.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/components/CodeNode.tsx src/components/GraphView.tsx src/components/StateViews.tsx
+git add src/features/graph/CodeNode.tsx src/features/graph/GraphView.tsx src/shared/StateViews.tsx
 git commit -m "feat(ui): render react flow node graph with orthogonal edges"
 ```
 
@@ -2937,8 +2941,9 @@ git commit -m "feat(ui): render react flow node graph with orthogonal edges"
 ### Task 18: Content pane, autosave, and app shell
 
 **Files:**
-- Create: `src/hooks/useLayoutAutosave.ts`, `src/components/ContentPane.tsx`
-- Modify: `src/App.tsx`
+- Create: `src/features/graph/useLayoutAutosave.ts`, `src/features/shell/ContentPane.tsx`, `src/features/shell/App.tsx`
+- Modify: `src/main.tsx`
+- Delete: `src/App.tsx` and `src/App.css` (template leftovers)
 
 **Interfaces:**
 - Consumes: `useFileContent`, `GraphView`, `MarkdownView`, `ErrorState`, `EmptyState`, `saveLayout`, `loadLayout`
@@ -2949,12 +2954,12 @@ git commit -m "feat(ui): render react flow node graph with orthogonal edges"
 
 - [ ] **Step 1: Write the autosave hook**
 
-Create `src/hooks/useLayoutAutosave.ts`:
+Create `src/features/graph/useLayoutAutosave.ts`:
 
 ```ts
 import { useCallback, useEffect, useRef } from "react";
-import type { LayoutMap } from "../types";
-import { saveLayout } from "../ipc";
+import type { LayoutMap } from "../../shared/types";
+import { saveLayout } from "../../shared/ipc";
 
 export function useLayoutAutosave(
   root: string | null,
@@ -2987,16 +2992,16 @@ Note: this hook's returned function must only be passed to React Flow's `onNodeD
 
 - [ ] **Step 2: Write the content pane**
 
-Create `src/components/ContentPane.tsx`:
+Create `src/features/shell/ContentPane.tsx`:
 
 ```tsx
 import { useState } from "react";
-import type { LayoutMap } from "../types";
-import { useFileContent } from "../hooks/useFileContent";
-import { useLayoutAutosave } from "../hooks/useLayoutAutosave";
-import { GraphView } from "./GraphView";
-import { MarkdownView } from "./MarkdownView";
-import { ErrorState, EmptyState } from "./StateViews";
+import type { LayoutMap } from "../../shared/types";
+import { useFileContent } from "./useFileContent";
+import { useLayoutAutosave } from "../graph/useLayoutAutosave";
+import { GraphView } from "../graph/GraphView";
+import { MarkdownView } from "../markdown/MarkdownView";
+import { ErrorState, EmptyState } from "../../shared/StateViews";
 
 interface Props {
   root: string | null;
@@ -3033,16 +3038,15 @@ export function ContentPane({ root, filePath, onDragStop }: Props) {
 
 - [ ] **Step 3: Write the app shell**
 
-Replace `src/App.tsx`:
+Replace `src/features/shell/App.tsx` (create the file — the template's `src/App.tsx` is deleted in the next step):
 
 ```tsx
 import { useCallback, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { FileExplorer } from "./components/FileExplorer";
-import { ContentPane } from "./components/ContentPane";
-import { useLayoutAutosave } from "./hooks/useLayoutAutosave";
-import type { LayoutMap } from "./types";
-import "./App.css";
+import { FileExplorer } from "../explorer/FileExplorer";
+import { ContentPane } from "./ContentPane";
+import { useLayoutAutosave } from "../graph/useLayoutAutosave";
+import type { LayoutMap } from "../../shared/types";
 
 export default function App() {
   const [root, setRoot] = useState<string | null>(null);
@@ -3116,7 +3120,24 @@ export default function App() {
 }
 ```
 
-Ensure `src/App.css` is an empty file or remove its import. If the template already has `App.css`, empty it so it does not override theme colors.
+Before running the build, update `src/main.tsx` to import the shell from its feature folder and delete the template's old `src/App.tsx` and `src/App.css`:
+
+```tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./features/shell/App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+```powershell
+Remove-Item -LiteralPath "src\App.tsx","src\App.css" -ErrorAction SilentlyContinue
+```
 
 - [ ] **Step 4: Verify build and tests**
 
@@ -3132,7 +3153,7 @@ Expected: both succeed.
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add src/App.tsx src/App.css src/components/ContentPane.tsx src/hooks/useLayoutAutosave.ts
+git add src/main.tsx src/features/shell/App.tsx src/features/shell/ContentPane.tsx src/features/graph/useLayoutAutosave.ts
 git commit -m "feat(ui): resizable shell, split view, and drag-stop autosave"
 ```
 
