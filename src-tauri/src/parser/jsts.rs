@@ -183,7 +183,11 @@ fn collect_methods_in_object<'a>(
                     Some(o) => format!("{o}.{}", def.name),
                     None => def.name.clone(),
                 };
-                def.kind = NodeKind::Method;
+                def.kind = if owner.is_some() {
+                    NodeKind::Method
+                } else {
+                    NodeKind::Function
+                };
                 if !defs.iter().any(|existing| existing.id == def.id) {
                     defs.push(def);
                 }
@@ -411,5 +415,13 @@ function magnitude(p: Point): number {
     fn destructured_params_render_as_written() {
         let result = parse("function dist({ x, y }) {\n  return x;\n}\n");
         assert_eq!(result.nodes[0].params, vec!["{ x, y }"]);
+    }
+
+    #[test]
+    fn unowned_object_method_is_a_function() {
+        let result = parse("export default {\n  handler() {\n    return 1;\n  }\n};\n");
+        let handler = result.nodes.iter().find(|n| n.id == "handler").unwrap();
+        assert_eq!(handler.kind, NodeKind::Function);
+        assert!(handler.parent.is_none());
     }
 }
