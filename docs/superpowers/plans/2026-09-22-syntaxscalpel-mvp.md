@@ -474,7 +474,7 @@ const edges: GraphEdge[] = [
   { source: "main", target: "add" },
   { source: "main", target: "helper" },
   { source: "other", target: "main" },
-  { source: "unrelated", target: "far" },
+  { source: "unrelated", target: "isolated" },
 ];
 
 describe("traceNeighbors", () => {
