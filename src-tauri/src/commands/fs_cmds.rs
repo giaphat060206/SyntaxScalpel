@@ -10,6 +10,8 @@ const SKIPPED_DIRS: [&str; 8] = [
     ".git", "node_modules", "target", "dist", ".scalpel", "__pycache__", ".venv", "venv",
 ];
 
+const MAX_DEPTH: usize = 12;
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileEntry {
@@ -99,6 +101,17 @@ mod tests {
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn list_directory(root: String, rel_path: String) -> Result<Vec<FileEntry>, String> {
+    list_directory_inner(root, rel_path, 0)
+}
+
+fn list_directory_inner(
+    root: String,
+    rel_path: String,
+    depth: usize,
+) -> Result<Vec<FileEntry>, String> {
+    if depth >= MAX_DEPTH {
+        return Ok(Vec::new());
+    }
     let base = Path::new(&root).join(&rel_path);
     let read = std::fs::read_dir(&base).map_err(|e| e.to_string())?;
     let mut entries = Vec::new();
@@ -107,14 +120,19 @@ pub fn list_directory(root: String, rel_path: String) -> Result<Vec<FileEntry>, 
         let item = item.map_err(|e| e.to_string())?;
         let name = item.file_name().to_string_lossy().to_string();
         let full = item.path();
-        let is_dir = full.is_dir();
+        let file_type = item.file_type().map_err(|e| e.to_string())?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let is_dir = file_type.is_dir();
 
         if is_dir {
             if SKIPPED_DIRS.contains(&name.as_str()) || name.starts_with('.') {
                 continue;
             }
             let child_rel = relative_path(&root, &full.to_string_lossy());
-            let children = list_directory(root.clone(), child_rel).unwrap_or_default();
+            let children =
+                list_directory_inner(root.clone(), child_rel, depth + 1).unwrap_or_default();
             if children.is_empty() {
                 continue;
             }
