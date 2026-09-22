@@ -12,7 +12,15 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::fs_cmds::list_directory,
+            commands::fs_cmds::read_markdown,
+            commands::parse::parse_python,
+            commands::parse::parse_js_ts,
+            commands::layout::load_layout,
+            commands::layout::save_layout,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

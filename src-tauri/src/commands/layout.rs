@@ -88,6 +88,7 @@ mod tests {
     }
 }
 
+#[tauri::command(rename_all = "camelCase")]
 pub fn load_layout(
     root: String,
     rel_path: String,
@@ -95,6 +96,7 @@ pub fn load_layout(
     Ok(read_metadata(&root).layouts.get(&rel_path).cloned())
 }
 
+#[tauri::command(rename_all = "camelCase")]
 pub fn save_layout(
     root: String,
     rel_path: String,
