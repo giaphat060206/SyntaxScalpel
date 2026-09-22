@@ -2634,11 +2634,22 @@ export function FileExplorer({ root, onOpenFolder, onSelectFile, selectedFile }:
   useEffect(() => {
     if (!root) {
       setEntries([]);
+      setError(null);
       return;
     }
+    let cancelled = false;
+    setEntries([]);
+    setError(null);
     listDirectory(root, "")
-      .then(setEntries)
-      .catch((e) => setError(String(e)));
+      .then((next) => {
+        if (!cancelled) setEntries(next);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [root]);
 
   const pickFolder = useCallback(async () => {
