@@ -1499,7 +1499,7 @@ fn grammar_for(file_path: &str) -> tree_sitter::Language {
     if file_path.ends_with(".ts") || file_path.ends_with(".tsx") {
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()
     } else {
-        tree_sitter_typescript::LANGUAGE_JAVASCRIPT.into()
+        tree_sitter_javascript::LANGUAGE.into()
     }
 }
 
@@ -1541,7 +1541,7 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
             }
             "class_declaration" => {
                 let class_name = node_text(child.child_by_field_name("name"), source);
-                if let Some(body) = child.child_by_field_name("class_body") {
+                if let Some(body) = child.child_by_field_name("body") {
                     let mut inner = body.walk();
                     for member in body.children(&mut inner) {
                         if member.kind() == "method_definition" {
@@ -1805,7 +1805,7 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml parser::jsts`
-Expected: 6 tests PASS. **If the crate API differs:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
+Expected: 6 tests PASS. **Resolved at implementation time (installed crates):** `tree-sitter-typescript` 0.23.2 ships no JavaScript grammar and no `LANGUAGE_JAVASCRIPT`; the working setup adds `tree-sitter-javascript` (`cargo add tree-sitter-javascript --manifest-path src-tauri/Cargo.toml`) and uses `tree_sitter_javascript::LANGUAGE` for `.js`/`.jsx`, with `tree_sitter_typescript::LANGUAGE_TYPESCRIPT` for `.ts`/`.tsx`. The TypeScript grammar's class body field is `body` (not `class_body`). If the crate API differs in another environment:** `tree-sitter-typescript` has exported the grammar under slightly different names across versions (`LANGUAGE_TYPESCRIPT`/`LANGUAGE_JAVASCRIPT` constants vs `language_typescript()`/`language_javascript()` functions returning `LanguageFn`). Find the truth before guessing:
 
 ```powershell
 rg -n "pub (const|fn) (LANGUAGE|language)" "$env:USERPROFILE\.cargo\registry\src\*\tree-sitter-typescript-*\bindings\rust\*.rs"
