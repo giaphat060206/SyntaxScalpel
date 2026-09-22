@@ -204,29 +204,6 @@ fn collect_declarators<'a>(
             if let Some(def) = def {
                 defs.push(def);
             }
-        } else if value.kind() == "object" {
-            collect_declarators_in_object(value, source, Some(name), defs);
-        }
-    }
-}
-
-fn collect_declarators_in_object<'a>(
-    object: Node<'a>,
-    source: &str,
-    owner: Option<String>,
-    defs: &mut Vec<Def<'a>>,
-) {
-    let mut cursor = object.walk();
-    for pair in object.children(&mut cursor) {
-        if pair.kind() != "pair" {
-            continue;
-        }
-        let Some(value) = pair.child_by_field_name("value") else {
-            continue;
-        };
-        if value.kind() == "object" {
-            let name = node_text(pair.child_by_field_name("key"), source);
-            collect_declarators_in_object(value, source, Some(name), defs);
         }
     }
 }
