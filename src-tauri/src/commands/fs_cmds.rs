@@ -38,8 +38,9 @@ fn is_supported(name: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn fixture() -> String {
-        let dir = std::env::temp_dir().join(format!("scalpel-fs-{}", std::process::id()));
+    fn fixture(tag: &str) -> String {
+        let dir =
+            std::env::temp_dir().join(format!("scalpel-fs-{}-{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::create_dir_all(dir.join("node_modules")).unwrap();
@@ -52,7 +53,7 @@ mod tests {
 
     #[test]
     fn lists_supported_files_and_skips_ignored_dirs() {
-        let root = fixture();
+        let root = fixture("list");
         let entries = list_directory(root.clone(), "".into()).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"README.md"));
@@ -67,7 +68,7 @@ mod tests {
 
     #[test]
     fn entry_paths_are_project_relative_with_forward_slashes() {
-        let root = fixture();
+        let root = fixture("paths");
         let entries = list_directory(root, "".into()).unwrap();
         let readme = entries.iter().find(|e| e.name == "README.md").unwrap();
         assert_eq!(readme.path, "README.md");
@@ -75,7 +76,7 @@ mod tests {
 
     #[test]
     fn read_markdown_returns_raw_text() {
-        let root = fixture();
+        let root = fixture("md");
         let path = Path::new(&root).join("README.md");
         assert_eq!(
             read_markdown(path.to_string_lossy().to_string(), String::new()).unwrap(),
