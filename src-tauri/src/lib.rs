@@ -19,6 +19,7 @@ pub fn run() {
             commands::fs_cmds::read_markdown,
             commands::parse::parse_python,
             commands::parse::parse_js_ts,
+            commands::parse::analyze_imports,
             commands::layout::load_layout,
             commands::layout::save_layout,
         ])

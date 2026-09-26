@@ -5,6 +5,7 @@ use crate::commands::fs_cmds::relative_path;
 use crate::commands::layout::load_layout;
 use crate::models::{ParseResult, Position};
 use crate::parser;
+use crate::parser::imports::ImportAnalysis;
 
 fn parse_with<F>(path: String, root: String, parse: F) -> Result<ParseResult, String>
 where
@@ -26,6 +27,11 @@ pub fn parse_python(path: String, root: String) -> Result<ParseResult, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn parse_js_ts(path: String, root: String) -> Result<ParseResult, String> {
     parse_with(path, root, parser::jsts::parse_source)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn analyze_imports(path: String, root: String) -> Result<ImportAnalysis, String> {
+    parser::imports::analyze(&path, &root)
 }
 
 #[cfg(test)]
