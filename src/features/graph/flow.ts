@@ -53,7 +53,7 @@ export function buildFlow(result: ParseResult): { nodes: FlowNode[]; edges: Flow
         type: "scalpel",
         parentId: node.id,
         extent: "parent",
-        position: child.position ?? { x: 20, y: 50 + METHOD_ROW * index },
+        position: child.position ?? { x: 20, y: 76 + METHOD_ROW * index },
         data: { node: child },
       });
     });
