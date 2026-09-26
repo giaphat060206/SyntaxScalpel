@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LayoutMap, ParseResult } from "./types";
+import type { ImportAnalysis, LayoutMap, ParseResult } from "./types";
 
 export interface FileEntry {
   name: string;
@@ -22,6 +22,10 @@ export function parsePython(path: string, root: string): Promise<ParseResult> {
 
 export function parseJsTs(path: string, root: string): Promise<ParseResult> {
   return invoke<ParseResult>("parse_js_ts", { path, root });
+}
+
+export function analyzeImports(path: string, root: string): Promise<ImportAnalysis> {
+  return invoke<ImportAnalysis>("analyze_imports", { path, root });
 }
 
 export function loadLayout(root: string, relPath: string): Promise<LayoutMap | null> {
