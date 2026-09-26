@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LayoutMap } from "../../shared/types";
 import { useFileContent } from "./useFileContent";
+import { useImports } from "./useImports";
 import { GraphView } from "../graph/GraphView";
 import { MarkdownView } from "../markdown/MarkdownView";
 import { ErrorState, EmptyState } from "../../shared/StateViews";
+import { saveLayout } from "../../shared/ipc";
 
 interface Props {
   root: string | null;
@@ -13,11 +15,21 @@ interface Props {
 
 export function ContentPane({ root, filePath, onDragStop }: Props) {
   const state = useFileContent(root, filePath);
+  const imports = useImports(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedId(null);
   }, [filePath]);
+
+  const handleResetLayout = useCallback(() => {
+    if (!root || !filePath) {
+      return;
+    }
+    saveLayout(root, filePath, {}).catch((error) =>
+      console.error("reset layout failed", error)
+    );
+  }, [root, filePath]);
 
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;
@@ -34,9 +46,11 @@ export function ContentPane({ root, filePath, onDragStop }: Props) {
   return (
     <GraphView
       result={state.result}
+      imports={imports}
       selectedId={selectedId}
       onSelect={setSelectedId}
       onDragStop={onDragStop}
+      onResetLayout={handleResetLayout}
     />
   );
 }
