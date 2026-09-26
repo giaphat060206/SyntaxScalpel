@@ -10,6 +10,8 @@ struct Def<'a> {
     name: String,
     params: Vec<String>,
     returns: Vec<String>,
+    uses: Vec<String>,
+    value: Option<String>,
     parent: Option<String>,
     body: Option<Node<'a>>,
 }
@@ -27,7 +29,8 @@ pub fn parse_source(
         .parse(source, None)
         .ok_or_else(|| "failed to parse source".to_string())?;
 
-    let defs = collect_defs(tree.root_node(), source);
+    let imported = imported_names(source, file_path);
+    let defs = collect_defs(tree.root_node(), source, &imported);
     let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
     let edges = collect_edges(&defs, source);
 
@@ -38,13 +41,13 @@ pub fn parse_source(
     })
 }
 
-fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
+fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         match child.kind() {
             "function_definition" => {
-                if let Some(def) = function_def(child, source, None) {
+                if let Some(def) = function_def(child, source, None, imported) {
                     defs.push(def);
                 }
             }
@@ -54,12 +57,14 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
                     .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                     .unwrap_or("")
                     .to_string();
+                let mut class_uses = Vec::new();
                 if let Some(body) = child.child_by_field_name("body") {
+                    class_uses = uses_in(body, source, imported);
                     let mut inner_cursor = body.walk();
                     for inner in body.children(&mut inner_cursor) {
                         if inner.kind() == "function_definition" {
                             if let Some(def) =
-                                function_def(inner, source, Some(class_name.clone()))
+                                function_def(inner, source, Some(class_name.clone()), imported)
                             {
                                 defs.push(def);
                             }
@@ -72,9 +77,16 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
                     name: class_name,
                     params: Vec::new(),
                     returns: Vec::new(),
+                    uses: class_uses,
+                    value: None,
                     parent: None,
                     body: None,
                 });
+            }
+            "expression_statement" => {
+                if let Some(def) = variable_def(child, source, imported) {
+                    defs.push(def);
+                }
             }
             _ => {}
         }
@@ -82,7 +94,12 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
     defs
 }
 
-fn function_def<'a>(node: Node<'a>, source: &str, parent: Option<String>) -> Option<Def<'a>> {
+fn function_def<'a>(
+    node: Node<'a>,
+    source: &str,
+    parent: Option<String>,
+    imported: &[String],
+) -> Option<Def<'a>> {
     let name = node
         .child_by_field_name("name")?
         .utf8_text(source.as_bytes())
@@ -100,6 +117,7 @@ fn function_def<'a>(node: Node<'a>, source: &str, parent: Option<String>) -> Opt
     let params = parameter_names(node, source);
     let body = node.child_by_field_name("body")?;
     let returns = return_names(body, source);
+    let uses = uses_in(body, source, imported);
 
     Some(Def {
         id,
@@ -107,9 +125,102 @@ fn function_def<'a>(node: Node<'a>, source: &str, parent: Option<String>) -> Opt
         name,
         params,
         returns,
+        uses,
+        value: None,
         parent,
         body: Some(body),
     })
+}
+
+fn variable_def<'a>(
+    statement: Node<'a>,
+    source: &str,
+    imported: &[String],
+) -> Option<Def<'a>> {
+    let mut cursor = statement.walk();
+    let assignment = statement
+        .named_children(&mut cursor)
+        .find(|child| child.kind() == "assignment")?;
+    let left = assignment.child_by_field_name("left")?;
+    if left.kind() != "identifier" {
+        return None;
+    }
+    let name = left.utf8_text(source.as_bytes()).ok()?.to_string();
+    let raw_value = assignment
+        .child_by_field_name("right")
+        .map(|right| collapse_whitespace(&node_text(right, source)));
+    let value = raw_value.as_deref().map(|text| truncate(text, 60));
+    let uses = raw_value
+        .as_deref()
+        .map(|text| uses_in_text(text, imported))
+        .unwrap_or_default();
+
+    Some(Def {
+        id: name.clone(),
+        kind: NodeKind::Variable,
+        name,
+        params: Vec::new(),
+        returns: Vec::new(),
+        uses,
+        value,
+        parent: None,
+        body: None,
+    })
+}
+
+fn imported_names(source: &str, file_path: &str) -> Vec<String> {
+    crate::parser::imports::extract_imports(source, file_path)
+        .into_iter()
+        .flat_map(|entry| entry.names)
+        .collect()
+}
+
+fn uses_in(node: Node, source: &str, imported: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_uses(node, source, imported, &mut out);
+    out
+}
+
+fn collect_uses(node: Node, source: &str, imported: &[String], out: &mut Vec<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "identifier" => {
+                let text = node_text(child, source);
+                if imported.iter().any(|name| name == &text) && !out.contains(&text) {
+                    out.push(text);
+                }
+            }
+            "function_definition" | "class_definition" | "lambda" => continue,
+            _ => collect_uses(child, source, imported, out),
+        }
+    }
+}
+
+fn uses_in_text(text: &str, imported: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in imported {
+        if text.contains(name.as_str()) && !out.contains(name) {
+            out.push(name.clone());
+        }
+    }
+    out
+}
+
+fn node_text(node: Node, source: &str) -> String {
+    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        format!("{}…", text.chars().take(max).collect::<String>())
+    }
 }
 
 fn parameter_names(node: Node, source: &str) -> Vec<String> {
@@ -183,7 +294,7 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
 fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
     let mut targets: HashMap<&str, &str> = HashMap::new();
     for def in defs {
-        if def.kind != NodeKind::Class {
+        if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
             targets.insert(def.id.as_str(), def.id.as_str());
             targets.insert(def.name.as_str(), def.id.as_str());
         }
@@ -249,6 +360,8 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
         name: def.name.clone(),
         params: def.params.clone(),
         returns: def.returns.clone(),
+        uses: def.uses.clone(),
+        value: def.value.clone(),
         parent: def.parent.clone(),
         position: layout.get(&def.id).cloned(),
     }
@@ -299,6 +412,49 @@ def main():
     fn function_without_return_has_empty_returns() {
         let result = parse("def shout(x):\n    print(x)\n");
         assert_eq!(result.nodes[0].returns, Vec::<String>::new());
+    }
+
+    #[test]
+    fn extracts_module_level_variables() {
+        let result = parse("DEFAULT_NODES = 4900\nPATH_SEPARATOR = \" -> \"\n");
+        let nodes: Vec<(&str, &Option<String>)> = result
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Variable)
+            .map(|n| (n.name.as_str(), &n.value))
+            .collect();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].0, "DEFAULT_NODES");
+        assert_eq!(nodes[0].1.as_deref(), Some("4900"));
+        assert_eq!(nodes[1].1.as_deref(), Some("\" -> \""));
+        assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn records_which_imports_a_function_uses() {
+        let source = "\
+from os import getpid
+from utils.constants import DEFAULT_NODES
+
+def build():
+    return DEFAULT_NODES + getpid()
+";
+        let result = parse(source);
+        let build = result.nodes.iter().find(|n| n.name == "build").unwrap();
+        assert!(build.uses.contains(&"DEFAULT_NODES".to_string()));
+        assert!(build.uses.contains(&"getpid".to_string()));
+    }
+
+    #[test]
+    fn docstrings_are_not_variables() {
+        let result = parse("\"\"\"Module docstring.\"\"\"\n\nX = 1\n");
+        let variables: Vec<&str> = result
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Variable)
+            .map(|n| n.name.as_str())
+            .collect();
+        assert_eq!(variables, vec!["X"]);
     }
 
     #[test]

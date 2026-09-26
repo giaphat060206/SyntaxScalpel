@@ -6,6 +6,7 @@ pub enum NodeKind {
     Function,
     Class,
     Method,
+    Variable,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,6 +23,9 @@ pub struct GraphNode {
     pub name: String,
     pub params: Vec<String>,
     pub returns: Vec<String>,
+    pub uses: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +57,8 @@ mod tests {
             name: "greet".into(),
             params: vec!["self".into(), "name".into()],
             returns: vec!["name".into()],
+            uses: vec!["imported_thing".into()],
+            value: None,
             parent: Some("Greeter".into()),
             position: None,
         }
@@ -64,8 +70,17 @@ mod tests {
         assert_eq!(json["id"], "Greeter.greet");
         assert_eq!(json["kind"], "method");
         assert_eq!(json["params"][0], "self");
+        assert_eq!(json["uses"][0], "imported_thing");
         assert_eq!(json["parent"], "Greeter");
         assert!(json.get("position").is_none());
+    }
+
+    #[test]
+    fn graph_node_includes_value_when_set() {
+        let mut node = sample_node();
+        node.value = Some("42".into());
+        let json = serde_json::to_value(node).unwrap();
+        assert_eq!(json["value"], "42");
     }
 
     #[test]

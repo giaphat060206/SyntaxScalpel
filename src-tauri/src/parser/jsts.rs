@@ -10,6 +10,8 @@ struct Def<'a> {
     name: String,
     params: Vec<String>,
     returns: Vec<String>,
+    uses: Vec<String>,
+    value: Option<String>,
     parent: Option<String>,
     body: Option<Node<'a>>,
 }
@@ -37,7 +39,8 @@ pub fn parse_source(
         .parse(source, None)
         .ok_or_else(|| "failed to parse source".to_string())?;
 
-    let defs = collect_defs(tree.root_node(), source);
+    let imported = imported_names(source, file_path);
+    let defs = collect_defs(tree.root_node(), source, &imported);
     let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
     let edges = collect_edges(&defs, source);
 
@@ -51,7 +54,7 @@ pub fn parse_source(
 fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
     let mut targets: HashMap<&str, &str> = HashMap::new();
     for def in defs {
-        if def.kind != NodeKind::Class {
+        if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
             targets.insert(def.id.as_str(), def.id.as_str());
             targets.insert(def.name.as_str(), def.id.as_str());
         }
@@ -121,28 +124,33 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
+fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
         match child.kind() {
             "function_declaration" => {
-                if let Some(def) = declared_function(child, source, None) {
+                if let Some(def) = declared_function(child, source, None, imported) {
                     defs.push(def);
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
-                collect_declarators(child, source, None, &mut defs);
+                collect_declarators(child, source, None, &mut defs, imported);
             }
             "class_declaration" => {
                 let class_name = node_text(child.child_by_field_name("name"), source);
+                let mut class_uses = Vec::new();
                 if let Some(body) = child.child_by_field_name("body") {
+                    class_uses = uses_in(body, source, imported);
                     let mut inner = body.walk();
                     for member in body.children(&mut inner) {
                         if member.kind() == "method_definition" {
-                            if let Some(def) =
-                                declared_function(member, source, Some(class_name.clone()))
-                            {
+                            if let Some(def) = declared_function(
+                                member,
+                                source,
+                                Some(class_name.clone()),
+                                imported,
+                            ) {
                                 defs.push(def);
                             }
                         }
@@ -155,6 +163,8 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
                         name: class_name,
                         params: Vec::new(),
                         returns: Vec::new(),
+                        uses: class_uses,
+                        value: None,
                         parent: None,
                         body: None,
                     });
@@ -163,7 +173,7 @@ fn collect_defs<'a>(root: Node<'a>, source: &str) -> Vec<Def<'a>> {
             _ => {}
         }
     }
-    collect_object_methods(root, source, &mut defs);
+    collect_object_methods(root, source, imported, &mut defs);
     defs
 }
 
@@ -172,6 +182,7 @@ fn collect_declarators<'a>(
     source: &str,
     parent: Option<String>,
     defs: &mut Vec<Def<'a>>,
+    imported: &[String],
 ) {
     let mut cursor = declaration.walk();
     for declarator in declaration.children(&mut cursor) {
@@ -186,7 +197,7 @@ fn collect_declarators<'a>(
             value.kind(),
             "arrow_function" | "function" | "function_expression"
         ) {
-            let mut def = declared_function(value, source, parent.clone());
+            let mut def = declared_function(value, source, parent.clone(), imported);
             if let Some(def) = def.as_mut() {
                 if !name.is_empty() {
                     def.name = name.clone();
@@ -204,17 +215,41 @@ fn collect_declarators<'a>(
             if let Some(def) = def {
                 defs.push(def);
             }
+        } else if value.kind() != "object" {
+            // Plain constant/variable: `const MAX = 10;`
+            let name_node = declarator.child_by_field_name("name");
+            if name_node.map(|n| n.kind()) == Some("identifier") && !name.is_empty() {
+                defs.push(Def {
+                    id: name.clone(),
+                    kind: NodeKind::Variable,
+                    name,
+                    params: Vec::new(),
+                    returns: Vec::new(),
+                    uses: uses_in_text(&node_text(Some(value), source), imported),
+                    value: Some(truncate(
+                        &collapse_whitespace(&node_text(Some(value), source)),
+                        60,
+                    )),
+                    parent: None,
+                    body: None,
+                });
+            }
         }
     }
 }
 
-fn collect_object_methods<'a>(root: Node<'a>, source: &str, defs: &mut Vec<Def<'a>>) {
+fn collect_object_methods<'a>(
+    root: Node<'a>,
+    source: &str,
+    imported: &[String],
+    defs: &mut Vec<Def<'a>>,
+) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "object" {
-                collect_methods_in_object(child, source, None, defs);
+                collect_methods_in_object(child, source, None, imported, defs);
             }
             stack.push(child);
         }
@@ -225,13 +260,14 @@ fn collect_methods_in_object<'a>(
     object: Node<'a>,
     source: &str,
     owner_override: Option<String>,
+    imported: &[String],
     defs: &mut Vec<Def<'a>>,
 ) {
     let owner = owner_override.or_else(|| ancestor_variable_name(object, source));
     let mut cursor = object.walk();
     for member in object.children(&mut cursor) {
         if member.kind() == "method_definition" {
-            if let Some(mut def) = declared_function(member, source, owner.clone()) {
+            if let Some(mut def) = declared_function(member, source, owner.clone(), imported) {
                 def.id = match &owner {
                     Some(o) => format!("{o}.{}", def.name),
                     None => def.name.clone(),
@@ -267,6 +303,7 @@ fn declared_function<'a>(
     node: Node<'a>,
     source: &str,
     parent: Option<String>,
+    imported: &[String],
 ) -> Option<Def<'a>> {
     let name = node_text(node.child_by_field_name("name"), source);
     if name.is_empty() && node.kind() != "arrow_function" && node.kind() != "function_expression" {
@@ -288,6 +325,11 @@ fn declared_function<'a>(
         Some(b) => vec![node_text(Some(b), source)],
         None => Vec::new(),
     };
+    let uses = match body {
+        Some(b) if b.kind() == "statement_block" => uses_in(b, source, imported),
+        Some(b) => uses_in_text(&node_text(Some(b), source), imported),
+        None => Vec::new(),
+    };
 
     Some(Def {
         id,
@@ -295,9 +337,54 @@ fn declared_function<'a>(
         name,
         params,
         returns,
+        uses,
+        value: None,
         parent,
         body: node.child_by_field_name("body"),
     })
+}
+
+fn imported_names(source: &str, file_path: &str) -> Vec<String> {
+    crate::parser::imports::extract_imports(source, file_path)
+        .into_iter()
+        .flat_map(|entry| entry.names)
+        .collect()
+}
+
+fn uses_in(node: Node, source: &str, imported: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    collect_uses(node, source, imported, &mut out);
+    out
+}
+
+fn collect_uses(node: Node, source: &str, imported: &[String], out: &mut Vec<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "type_identifier" | "property_identifier" => {
+                let text = node_text(Some(child), source);
+                if imported.iter().any(|name| name == &text) && !out.contains(&text) {
+                    out.push(text);
+                }
+            }
+            "function_declaration"
+            | "function"
+            | "arrow_function"
+            | "class_declaration"
+            | "method_definition" => continue,
+            _ => collect_uses(child, source, imported, out),
+        }
+    }
+}
+
+fn uses_in_text(text: &str, imported: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for name in imported {
+        if text.contains(name.as_str()) && !out.contains(name) {
+            out.push(name.clone());
+        }
+    }
+    out
 }
 
 fn parameter_names(node: Node, source: &str) -> Vec<String> {
@@ -365,6 +452,18 @@ fn node_text(node: Option<Node>, source: &str) -> String {
         .to_string()
 }
 
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        format!("{}…", text.chars().take(max).collect::<String>())
+    }
+}
+
 fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
     GraphNode {
         id: def.id.clone(),
@@ -372,6 +471,8 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
         name: def.name.clone(),
         params: def.params.clone(),
         returns: def.returns.clone(),
+        uses: def.uses.clone(),
+        value: def.value.clone(),
         parent: def.parent.clone(),
         position: layout.get(&def.id).cloned(),
     }
@@ -446,6 +547,34 @@ function run() {
         assert_eq!(helper.kind, NodeKind::Method);
         assert_eq!(helper.parent.as_deref(), Some("utils"));
         assert_eq!(helper.params, vec!["x"]);
+    }
+
+    #[test]
+    fn extracts_top_level_constants() {
+        let result = parse("const MAX_NODES = 4900;\nconst NAME = \"grid\";\n");
+        let vars: Vec<(&str, Option<&str>)> = result
+            .nodes
+            .iter()
+            .filter(|n| n.kind == NodeKind::Variable)
+            .map(|n| (n.name.as_str(), n.value.as_deref()))
+            .collect();
+        assert_eq!(
+            vars,
+            vec![
+                ("MAX_NODES", Some("4900")),
+                ("NAME", Some("\"grid\""))
+            ]
+        );
+        assert!(result.edges.is_empty());
+    }
+
+    #[test]
+    fn records_which_imports_a_function_uses() {
+        let source =
+            "import { MAX_NODES } from \"./constants\";\n\nfunction pick() {\n  return MAX_NODES;\n}\n";
+        let result = parse(source);
+        let pick = result.nodes.iter().find(|n| n.name == "pick").unwrap();
+        assert_eq!(pick.uses, vec!["MAX_NODES".to_string()]);
     }
 
     #[test]
