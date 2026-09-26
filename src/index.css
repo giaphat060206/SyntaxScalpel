@@ -10,3 +10,27 @@ html, body, #root {
   background: #1E2329;
   color: #FFFFFF;
 }
+
+/* React Flow controls: default white buttons + white currentColor icons made
+   them invisible against the dark theme. Force the panel palette. */
+.react-flow__controls {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+}
+
+.react-flow__controls-button {
+  background: #161B20;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: #00F0FF;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(0, 240, 255, 0.12);
+}
+
+.react-flow__controls-button svg {
+  fill: #00F0FF;
+  color: #00F0FF;
+}
