@@ -149,7 +149,7 @@ fn variable_def<'a>(
     let raw_value = assignment
         .child_by_field_name("right")
         .map(|right| collapse_whitespace(&node_text(right, source)));
-    let value = raw_value.as_deref().map(|text| truncate(text, 60));
+    let value = raw_value.clone();
     let uses = raw_value
         .as_deref()
         .map(|text| uses_in_text(text, imported))
@@ -213,14 +213,6 @@ fn node_text(node: Node, source: &str) -> String {
 
 fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(max).collect::<String>())
-    }
 }
 
 fn parameter_names(node: Node, source: &str) -> Vec<String> {
@@ -443,6 +435,20 @@ def build():
         let build = result.nodes.iter().find(|n| n.name == "build").unwrap();
         assert!(build.uses.contains(&"DEFAULT_NODES".to_string()));
         assert!(build.uses.contains(&"getpid".to_string()));
+    }
+
+    #[test]
+    fn keeps_long_variable_values_untruncated() {
+        let long = "a".repeat(150);
+        let source = format!("LONG_VALUE = \"{long}\"\n");
+        let result = parse(&source);
+        let node = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "LONG_VALUE")
+            .unwrap();
+        let expected = format!("\"{long}\"");
+        assert_eq!(node.value.as_deref(), Some(expected.as_str()));
     }
 
     #[test]

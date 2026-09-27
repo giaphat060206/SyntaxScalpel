@@ -226,10 +226,7 @@ fn collect_declarators<'a>(
                     params: Vec::new(),
                     returns: Vec::new(),
                     uses: uses_in_text(&node_text(Some(value), source), imported),
-                    value: Some(truncate(
-                        &collapse_whitespace(&node_text(Some(value), source)),
-                        60,
-                    )),
+                    value: Some(collapse_whitespace(&node_text(Some(value), source))),
                     parent: None,
                     body: None,
                 });
@@ -456,14 +453,6 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        format!("{}…", text.chars().take(max).collect::<String>())
-    }
-}
-
 fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
     GraphNode {
         id: def.id.clone(),
@@ -575,6 +564,20 @@ function run() {
         let result = parse(source);
         let pick = result.nodes.iter().find(|n| n.name == "pick").unwrap();
         assert_eq!(pick.uses, vec!["MAX_NODES".to_string()]);
+    }
+
+    #[test]
+    fn keeps_long_constant_values_untruncated() {
+        let long = "b".repeat(150);
+        let source = format!("const LONG_VALUE = \"{long}\";\n");
+        let result = parse_source(&source, "src/app.js", &HashMap::new()).unwrap();
+        let node = result
+            .nodes
+            .iter()
+            .find(|n| n.name == "LONG_VALUE")
+            .unwrap();
+        let expected = format!("\"{long}\"");
+        assert_eq!(node.value.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
