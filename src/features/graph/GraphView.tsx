@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -8,9 +9,9 @@ import {
 import {
   Background,
   Controls,
+  MarkerType,
   ReactFlow,
   ReactFlowProvider,
-  useEdgesState,
   useNodesState,
   useReactFlow,
   type Edge,
@@ -26,9 +27,10 @@ import type {
   LayoutMap,
   ParseResult,
 } from "../../shared/types";
-import { buildFlow, type FlowEdge, type FlowNode } from "./flow";
+import { buildFlow, type FlowNode } from "./flow";
 import { traceNeighbors } from "./trace";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
+import { colorForNode } from "./colors";
 import { EmptyState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
@@ -93,6 +95,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
       draggable: true,
       data: {
         special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
+        color: colorForNode(IMPORTS_NODE_ID),
         highlighted: false,
         dimmed: false,
       } satisfies CodeNodeData,
@@ -113,6 +116,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
           title: `IMPORTED BY (${imports.importedBy.length})`,
           lines: importerLines,
         },
+        color: colorForNode(IMPORTED_BY_NODE_ID),
         highlighted: false,
         dimmed: false,
       } satisfies CodeNodeData,
@@ -123,6 +127,93 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
 function nodeHeight(node: Node): number {
   const styleHeight = (node.style as { height?: number } | undefined)?.height;
   return node.measured?.height ?? node.height ?? styleHeight ?? 96;
+}
+
+function absolutePosition(node: Node, byId: Map<string, Node>): { x: number; y: number } {
+  if (node.parentId) {
+    const parent = byId.get(node.parentId);
+    if (parent) {
+      return {
+        x: parent.position.x + node.position.x,
+        y: parent.position.y + node.position.y,
+      };
+    }
+  }
+  return node.position;
+}
+
+/**
+ * Pick the handles that face the other node so edges leave from the side
+ * (right→left) when blocks are side by side, and top/bottom when stacked.
+ */
+function pickHandles(
+  source: Node,
+  target: Node,
+  byId: Map<string, Node>
+): { sourceHandle?: string; targetHandle?: string } {
+  const from = absolutePosition(source, byId);
+  const to = absolutePosition(target, byId);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    return dx > 0
+      ? { sourceHandle: "r-out", targetHandle: "l-in" }
+      : { sourceHandle: "l-out", targetHandle: "r-in" };
+  }
+  return dy > 0
+    ? { sourceHandle: "b-out", targetHandle: "t-in" }
+    : { sourceHandle: "t-out", targetHandle: "b-in" };
+}
+
+/**
+ * Near-square grid positions for a set of nodes: 9 -> 3x3, 10 -> 3 cols x 4
+ * rows, 16 -> 4x4. Column widths come from each column's widest block.
+ */
+function arrangeGrid(
+  items: Node[],
+  startX: number,
+  startY: number,
+  gapX: number,
+  gapY: number
+): {
+  positions: { x: number; y: number }[];
+  right: number;
+  bottom: number;
+} {
+  const count = items.length;
+  const cols = Math.max(1, Math.floor(Math.sqrt(count)));
+  const columnWidths = new Array<number>(cols).fill(0);
+  const rowHeights: number[] = [];
+  items.forEach((node, index) => {
+    const column = index % cols;
+    const row = Math.floor(index / cols);
+    const width =
+      (node.style as { width?: number } | undefined)?.width ?? CHILD_WIDTH;
+    columnWidths[column] = Math.max(columnWidths[column], width);
+    rowHeights[row] = Math.max(rowHeights[row] ?? 0, nodeHeight(node));
+  });
+
+  const columnX: number[] = [];
+  let cursorX = startX;
+  for (let column = 0; column < cols; column++) {
+    columnX[column] = cursorX;
+    cursorX += columnWidths[column] + gapX;
+  }
+  const rowY: number[] = [];
+  let cursorY = startY;
+  for (let row = 0; row < rowHeights.length; row++) {
+    rowY[row] = cursorY;
+    cursorY += rowHeights[row] + gapY;
+  }
+
+  return {
+    positions: items.map((_, index) => ({
+      x: columnX[index % cols],
+      y: rowY[Math.floor(index / cols)],
+    })),
+    right: cursorX - gapX,
+    bottom: cursorY - gapY,
+  };
 }
 
 /**
@@ -153,49 +244,18 @@ function reflowLayout(current: Node[]): Node[] {
     const header = compact ? 80 : CLASS_HEADER;
     const gapX = compact ? 10 : CHILD_GAP;
     const gapY = compact ? 10 : CHILD_GAP;
-    const count = children.length;
-    // Near-square grid: 9 -> 3x3, 10 -> 3 cols x 4 rows, 16 -> 4x4.
-    const cols = Math.max(1, Math.floor(Math.sqrt(count)));
 
-    const columnWidths = new Array<number>(cols).fill(0);
-    const rowHeights: number[] = [];
+    const grid = arrangeGrid(children, CHILD_X, header, gapX, gapY);
     children.forEach((child, index) => {
-      const column = index % cols;
-      const row = Math.floor(index / cols);
-      const width =
-        (child.style as { width?: number } | undefined)?.width ?? CHILD_WIDTH;
-      columnWidths[column] = Math.max(columnWidths[column], width);
-      rowHeights[row] = Math.max(rowHeights[row] ?? 0, nodeHeight(child));
-    });
-
-    const columnX: number[] = [];
-    let cursorX = CHILD_X;
-    for (let column = 0; column < cols; column++) {
-      columnX[column] = cursorX;
-      cursorX += columnWidths[column] + gapX;
-    }
-
-    const rowY: number[] = [];
-    let cursorY = header;
-    for (let row = 0; row < rowHeights.length; row++) {
-      rowY[row] = cursorY;
-      cursorY += rowHeights[row] + gapY;
-    }
-
-    children.forEach((child, index) => {
-      const desired = {
-        x: columnX[index % cols],
-        y: rowY[Math.floor(index / cols)],
-      };
+      const desired = grid.positions[index];
       if (child.position.x !== desired.x || child.position.y !== desired.y) {
         child.position = desired;
         changed = true;
       }
     });
 
-    const contentWidth = cursorX - gapX + CHILD_X;
-    const height = cursorY - gapY + CLASS_PAD;
-    const width = Math.max(CLASS_WIDTH, contentWidth);
+    const width = Math.max(CLASS_WIDTH, grid.right + CHILD_X);
+    const height = grid.bottom + CLASS_PAD;
     const style = (parent.style ?? {}) as { width?: number; height?: number };
     if (style.height !== height || style.width !== width) {
       parent.style = { ...style, width, height };
@@ -209,15 +269,29 @@ function reflowLayout(current: Node[]): Node[] {
       (a, b) => a.position.y - b.position.y || a.position.x - b.position.x
     );
 
-  let cursor = 0;
-  for (const node of topLevel) {
-    const pinned = (node.data as CodeNodeData).pinned === true;
-    const desiredY = pinned ? node.position.y : cursor;
-    if (!pinned && (node.position.x !== 0 || node.position.y !== desiredY)) {
-      node.position = { x: 0, y: desiredY };
-      changed = true;
+  const anyPinned = topLevel.some(
+    (node) => (node.data as CodeNodeData).pinned === true
+  );
+  if (anyPinned) {
+    let cursor = 0;
+    for (const node of topLevel) {
+      const pinned = (node.data as CodeNodeData).pinned === true;
+      const desiredY = pinned ? node.position.y : cursor;
+      if (!pinned && (node.position.x !== 0 || node.position.y !== desiredY)) {
+        node.position = { x: 0, y: desiredY };
+        changed = true;
+      }
+      cursor = Math.max(cursor, desiredY) + nodeHeight(node) + TOP_GAP;
     }
-    cursor = Math.max(cursor, desiredY) + nodeHeight(node) + TOP_GAP;
+  } else {
+    const grid = arrangeGrid(topLevel, 0, 0, TOP_GAP, TOP_GAP);
+    topLevel.forEach((node, index) => {
+      const desired = grid.positions[index];
+      if (node.position.x !== desired.x || node.position.y !== desired.y) {
+        node.position = desired;
+        changed = true;
+      }
+    });
   }
 
   return changed ? next : current;
@@ -246,21 +320,10 @@ function toFlowNode(node: FlowNode, selectedId: string | null, edges: GraphEdge[
     draggable: node.data.node.kind !== "class",
     data: {
       node: node.data.node,
+      color: colorForNode(node.id),
       pinned: node.data.node.position != null,
       ...visibilityOf(node.id, edges, selectedId),
     } satisfies CodeNodeData,
-  };
-}
-
-function toFlowEdge(edge: FlowEdge, selectedId: string | null): Edge {
-  const active =
-    selectedId !== null && (edge.source === selectedId || edge.target === selectedId);
-  return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    type: edge.type,
-    style: { stroke: active ? "#3DF0A8" : "#00F0FF", strokeWidth: 2 },
   };
 }
 
@@ -290,7 +353,6 @@ function GraphViewInner({
   onResetLayout,
 }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const { fitView } = useReactFlow();
@@ -313,18 +375,19 @@ function GraphViewInner({
               position: { x: 0, y: 0 },
               style: { width: CLASS_WIDTH },
               draggable: false,
-              data: {
-                node: {
-                  id: CONSTANTS_NODE_ID,
-                  kind: "class",
-                  name: `CONSTANTS (${variables.length})`,
-                  params: [],
-                  returns: [],
-                  uses: [],
-                },
-                highlighted: false,
-                dimmed: false,
-              } satisfies CodeNodeData,
+                data: {
+                  node: {
+                    id: CONSTANTS_NODE_ID,
+                    kind: "class",
+                    name: `CONSTANTS (${variables.length})`,
+                    params: [],
+                    returns: [],
+                    uses: [],
+                  },
+                  color: colorForNode(CONSTANTS_NODE_ID),
+                  highlighted: false,
+                  dimmed: false,
+                } satisfies CodeNodeData,
             },
           ]
         : [];
@@ -341,8 +404,7 @@ function GraphViewInner({
       ...constantChildren,
       ...others.map((node) => toFlowNode(node, null, result.edges)),
     ]);
-    setEdges(flow.edges.map((edge) => toFlowEdge(edge, null)));
-  }, [result, imports, setNodes, setEdges]);
+  }, [result, imports, setNodes]);
 
   // Re-decorate for trace highlighting without touching positions the user dragged.
   useEffect(() => {
@@ -352,20 +414,45 @@ function GraphViewInner({
         data: { ...node.data, ...visibilityOf(node.id, result.edges, selectedId) },
       }))
     );
-    setEdges((current) =>
-      current.map((edge) => ({
-        ...edge,
-        style: {
-          stroke:
-            selectedId !== null &&
-            (edge.source === selectedId || edge.target === selectedId)
-              ? "#3DF0A8"
-              : "#00F0FF",
-          strokeWidth: 2,
+  }, [selectedId, result.edges, setNodes]);
+
+  // Edges are derived from the current node positions so their handles can face
+  // the other block (side handles when side by side, top/bottom when stacked).
+  const edges: Edge[] = useMemo(() => {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    return result.edges.map((edge) => {
+      const source = byId.get(edge.source);
+      const target = byId.get(edge.target);
+      const handles =
+        source && target ? pickHandles(source, target, byId) : {};
+      const active =
+        selectedId !== null &&
+        (edge.source === selectedId || edge.target === selectedId);
+      const unrelated = selectedId !== null && !active;
+      const sourceColor =
+        (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
+      const stroke = sourceColor;
+      return {
+        id: `${edge.source}->${edge.target}`,
+        source: edge.source,
+        target: edge.target,
+        type: "step",
+        ...handles,
+        zIndex: active ? 1 : 0,
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          color: stroke,
+          width: active ? 20 : 16,
+          height: active ? 20 : 16,
         },
-      }))
-    );
-  }, [selectedId, result.edges, setNodes, setEdges]);
+        style: {
+          stroke,
+          strokeWidth: active ? 5 : 2,
+          opacity: unrelated ? 0.12 : 1,
+        },
+      };
+    });
+  }, [nodes, result.edges, selectedId]);
 
   // Re-stack once React Flow has measured real node heights, and again after any
   // resize. Keyed on a height signature so dragging positions never triggers a
@@ -517,7 +604,6 @@ function GraphViewInner({
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         onNodeClick={handleNodeClick}
         onNodeMouseEnter={handleNodeMouseEnter}
