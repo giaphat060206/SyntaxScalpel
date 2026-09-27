@@ -6,7 +6,28 @@ import { useLayoutAutosave } from "../graph/useLayoutAutosave";
 import type { LayoutMap } from "../../shared/types";
 
 const iconButton =
-  "rounded px-1.5 py-0.5 text-xs leading-none text-accent hover:bg-accent/10";
+  "flex h-6 w-6 items-center justify-center rounded-full border border-accent/40 bg-panel text-accent hover:bg-accent/10";
+
+function Chevron({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {direction === "left" ? (
+        <polyline points="15 18 9 12 15 6" />
+      ) : (
+        <polyline points="9 18 15 12 9 6" />
+      )}
+    </svg>
+  );
+}
 
 export default function App() {
   const [root, setRoot] = useState<string | null>(null);
@@ -60,7 +81,7 @@ export default function App() {
                 onClick={() => setExplorerCollapsed(false)}
                 className={iconButton}
               >
-                »
+                <Chevron direction="right" />
               </button>
             </div>
           </Panel>
@@ -83,7 +104,7 @@ export default function App() {
                     onClick={() => setExplorerCollapsed(true)}
                     className={iconButton}
                   >
-                    «
+                    <Chevron direction="left" />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
@@ -128,7 +149,7 @@ export default function App() {
                     onClick={() => setDocsCollapsed(true)}
                     className={iconButton}
                   >
-                    »
+                    <Chevron direction="right" />
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
