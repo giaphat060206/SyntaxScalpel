@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::parser::imports::{extract_imports, resolve_specifier, stem_index};
+use crate::parser::imports::{extract_imports, resolve_import_targets, stem_index};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
@@ -223,22 +223,30 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         let mut imports = Vec::new();
         let mut edges = Vec::new();
         for entry in extract_imports(&source, &id) {
-            let resolved = resolve_specifier(&entry.specifier, &id, root_path, &index)
-                .map(|target| id_of(root_path, &target, &graph.root));
-            let target_id = resolved.clone().unwrap_or_default();
-            if let Some(target) = resolved {
-                if ids.contains(&target) && target != id {
+            let targets =
+                resolve_import_targets(&entry.specifier, &entry.names, &id, root_path, &index);
+            if targets.is_empty() {
+                imports.push(FileImport {
+                    target_id: String::new(),
+                    specifier: entry.specifier,
+                    names: entry.names,
+                });
+                continue;
+            }
+            for (target_path, specifier, names) in targets {
+                let target_id = id_of(root_path, &target_path, &graph.root);
+                if ids.contains(&target_id) && target_id != id {
                     edges.push(ProjectEdge {
                         source: id.clone(),
-                        target,
+                        target: target_id.clone(),
                     });
                 }
+                imports.push(FileImport {
+                    target_id,
+                    specifier,
+                    names,
+                });
             }
-            imports.push(FileImport {
-                target_id,
-                specifier: entry.specifier,
-                names: entry.names,
-            });
         }
         graph.edges.append(&mut edges);
         if let Some(file) = graph.files.iter_mut().find(|file| file.id == id) {
@@ -356,6 +364,41 @@ mod tests {
         assert!(graph.edges.is_empty());
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+    }
+
+    #[test]
+    fn resolves_package_relative_submodule_imports() {
+        let root = temp_project("pkg-relative");
+        std::fs::create_dir_all(root.join("utils")).unwrap();
+        std::fs::write(
+            root.join("utils/__init__.py"),
+            "from . import constants\nfrom . import helpers\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("utils/constants.py"), "VALUE = 1\n").unwrap();
+        std::fs::write(root.join("utils/helpers.py"), "def h():\n    return 1\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let init = graph
+            .files
+            .iter()
+            .find(|file| file.id == "utils/__init__.py")
+            .unwrap();
+        let targets: Vec<&str> = init
+            .imports
+            .iter()
+            .map(|imp| imp.target_id.as_str())
+            .collect();
+        assert!(targets.contains(&"utils/constants.py"));
+        assert!(targets.contains(&"utils/helpers.py"));
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "utils/__init__.py" && edge.target == "utils/constants.py"));
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "utils/__init__.py" && edge.target == "utils/helpers.py"));
     }
 
     #[test]

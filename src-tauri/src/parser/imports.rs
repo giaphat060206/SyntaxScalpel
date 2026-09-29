@@ -118,7 +118,9 @@ fn extract_python(root: Node, source: &str) -> Vec<ImportEntry> {
                             continue;
                         }
                         match item.kind() {
-                            "dotted_name" => push_unique(&mut names, node_text(item, source)),
+                            "dotted_name" | "identifier" => {
+                                push_unique(&mut names, node_text(item, source))
+                            }
                             "aliased_import" => {
                                 if let Some(name) = item.child_by_field_name("name") {
                                     push_unique(&mut names, node_text(name, source));
@@ -256,6 +258,45 @@ pub fn resolve_specifier(
     stem_index.get(last).cloned()
 }
 
+/// Resolve one import entry to target files, excluding the importing file.
+///
+/// Package-relative imports like `from . import constants` carry the specifier
+/// `"."` plus imported names, so resolving the specifier alone would point at the
+/// package's own `__init__.py`. When the plain specifier resolves to the importer
+/// itself, each imported name is tried as a submodule (`".constants"`), which
+/// yields the real target files.
+pub fn resolve_import_targets(
+    specifier: &str,
+    names: &[String],
+    importer_rel: &str,
+    root: &Path,
+    index: &HashMap<String, PathBuf>,
+) -> Vec<(PathBuf, String, Vec<String>)> {
+    let importer = root.join(importer_rel);
+    if let Some(primary) = resolve_specifier(specifier, importer_rel, root, index) {
+        if primary != importer {
+            return vec![(primary, specifier.to_string(), names.to_vec())];
+        }
+    }
+    let separator = if specifier.contains('/') {
+        "/"
+    } else if specifier.ends_with('.') {
+        "" // `from . import x` -> ".x", not "..x"
+    } else {
+        "."
+    };
+    let mut out = Vec::new();
+    for name in names {
+        let candidate = format!("{specifier}{separator}{name}");
+        if let Some(path) = resolve_specifier(&candidate, importer_rel, root, index) {
+            if path != importer {
+                out.push((path, candidate, vec![name.clone()]));
+            }
+        }
+    }
+    out
+}
+
 fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
     let base = root.join(relative_base);
     const EXTS: [&str; 17] = [
@@ -318,11 +359,9 @@ pub fn analyze(path: &str, root: &str) -> Result<ImportAnalysis, String> {
         let mut names: Vec<String> = Vec::new();
         let mut matched = false;
         for entry in extract_imports(&other_source, &other_rel) {
-            let Some(target) = resolve_specifier(&entry.specifier, &other_rel, root_path, &index)
-            else {
-                continue;
-            };
-            if same_file(&target, &full) {
+            let targets =
+                resolve_import_targets(&entry.specifier, &entry.names, &other_rel, root_path, &index);
+            if targets.iter().any(|(target, _, _)| same_file(target, &full)) {
                 matched = true;
                 for name in entry.names {
                     push_unique(&mut names, name);
@@ -357,6 +396,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
+
 
     #[test]
     fn extracts_python_imports() {
