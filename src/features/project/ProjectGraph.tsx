@@ -42,21 +42,8 @@ function toNodes(
 ): Node[] {
   const hidden = hiddenIds(data, collapsed);
 
-  // Folders that contain at least one endpoint of some edge stay transparent so
-  // their lines remain visible; folders merely passed by stay opaque.
-  const transparentFolders = new Set<string>();
-  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
-  for (const edge of data.edges) {
-    for (const id of [edge.source, edge.target]) {
-      const file = data.files.find((entry) => entry.id === id);
-      let folder = file?.folderId;
-      while (folder) {
-        transparentFolders.add(folder);
-        folder = folderById.get(folder)?.parentId;
-      }
-    }
-  }
-
+  // Containers start opaque. The decorate effect makes only the folders on the
+  // focused block's chain transparent while a block is selected.
   const folderNodes: Node[] = data.folders.map((folder) => ({
     id: folder.id,
     type: "scalpel",
@@ -72,7 +59,7 @@ function toNodes(
         kind: "folder",
         name: folder.name,
         collapsed: collapsed.has(folder.id),
-        transparent: transparentFolders.has(folder.id),
+        transparent: false,
       },
       color: colorForNode(folder.id),
       onToggleCollapse,
@@ -219,23 +206,9 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     if (!data) {
       return;
     }
-  const hidden = hiddenIds(data, collapsed);
-
-  // Folders that contain at least one endpoint of some edge stay transparent so
-  // their lines remain visible; other folders stay opaque.
-  const transparentFolders = new Set<string>();
-  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
-  for (const edge of data.edges) {
-    for (const id of [edge.source, edge.target]) {
-      const file = data.files.find((entry) => entry.id === id);
-      let folder = file?.folderId;
-      while (folder) {
-        transparentFolders.add(folder);
-        folder = folderById.get(folder)?.parentId;
-      }
-    }
-  }
-    const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
+    const hidden = hiddenIds(data, collapsed);
+    const selection = selectionInfo(data, selectedId);
+    const highlight = selection?.highlight ?? null;
     setNodes((current) =>
       current.map((node) => {
         const shouldHide = hidden.has(node.id);
@@ -244,11 +217,15 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const currentFlag = (node.data as CodeNodeData).project?.collapsed;
         const dimmed = highlight ? !highlight.has(node.id) : false;
         const highlighted = highlight ? node.id === selectedId : false;
+        // Only the containers along the focused chain open a window for their
+        // lines; everything else stays opaque and hides lines beneath it.
+        const transparent = isFolder && highlight ? highlight.has(node.id) : false;
         const data_ = node.data as CodeNodeData;
         if (
           node.hidden === shouldHide &&
           data_.dimmed === dimmed &&
           data_.highlighted === highlighted &&
+          data_.project?.transparent === transparent &&
           (!isFolder || currentFlag === collapsedFlag)
         ) {
           return node;
@@ -260,10 +237,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
             ...node.data,
             dimmed,
             highlighted,
+            transparent,
             project: isFolder
               ? {
                   ...(node.data as CodeNodeData).project,
                   collapsed: collapsedFlag,
+                  transparent,
                 }
               : (node.data as CodeNodeData).project,
           },
