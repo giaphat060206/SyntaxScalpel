@@ -42,6 +42,10 @@ pub struct ProjectFile {
     /// `"code"` for parsed languages, `"doc"` for markdown/config/text files.
     pub kind: String,
     pub imports: Vec<FileImport>,
+    /// True for a file outside the scope that some in-scope file imports; shown
+    /// so the import can still be drawn as an edge.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -177,10 +181,17 @@ fn collect(
                 folder_id: folder_id.to_string(),
                 kind: kind.to_string(),
                 imports: Vec::new(),
+                external: false,
             });
             collected.push((path, folder_id.to_string()));
         }
     }
+}
+
+fn code_extension(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| CODE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 fn id_of(root: &Path, path: &Path, scope_id: &str) -> String {
@@ -211,6 +222,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     let index = stem_index(&code_paths);
     let ids: std::collections::HashSet<String> =
         graph.files.iter().map(|file| file.id.clone()).collect();
+    let mut external_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (path, _) in &collected {
         let id = id_of(root_path, path, &graph.root);
@@ -241,7 +253,29 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
             }
             for (target_path, specifier, names) in targets {
                 let target_id = id_of(root_path, &target_path, &graph.root);
-                if ids.contains(&target_id) && target_id != id {
+                if target_id != id {
+                    if !ids.contains(&target_id) {
+                        // A file outside the scope: surface it as an external node
+                        // so the import still draws as an edge.
+                        if external_files.insert(target_id.clone()) {
+                            let external_kind = if code_extension(&target_path) {
+                                "code"
+                            } else {
+                                "doc"
+                            };
+                            graph.files.push(ProjectFile {
+                                id: target_id.clone(),
+                                name: target_path
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| target_id.clone()),
+                                folder_id: graph.root.clone(),
+                                kind: external_kind.to_string(),
+                                imports: Vec::new(),
+                                external: true,
+                            });
+                        }
+                    }
                     edges.push(ProjectEdge {
                         source: id.clone(),
                         target: target_id.clone(),
@@ -266,6 +300,9 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
             .then(a.target.cmp(&b.target))
     });
     graph.edges.dedup_by(|a, b| a.source == b.source && a.target == b.target);
+
+    // External files were appended while scanning imports; restore id order.
+    graph.files.sort_by(|a, b| a.id.cmp(&b.id));
 
     let entries = detect_entries(root_path, scope_rel, &graph);
     graph.entry = entries.first().cloned();
@@ -327,7 +364,11 @@ fn html_entry_points(root: &Path, scope_rel: &str, code: &[&ProjectFile]) -> Vec
 /// Entry-point candidates: conventions first (every match), then graph roots.
 /// The first candidate is treated as the primary entry point.
 fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
-    let code: Vec<&ProjectFile> = graph.files.iter().filter(|f| f.kind == "code").collect();
+    let code: Vec<&ProjectFile> = graph
+        .files
+        .iter()
+        .filter(|f| f.kind == "code" && !f.external)
+        .collect();
     let finish = |mut found: Vec<String>| -> Vec<String> {
         found.sort();
         found.dedup();
@@ -524,17 +565,33 @@ mod tests {
     }
 
     #[test]
-    fn drops_edges_whose_target_is_outside_the_scope() {
+    fn keeps_edges_to_outside_scope_targets_as_external_nodes() {
         let root = temp_project("outside-edge");
         std::fs::create_dir_all(root.join("pkg")).unwrap();
         std::fs::write(root.join("shared.py"), "VALUE = 1\n").unwrap();
         std::fs::write(root.join("pkg/use.py"), "from shared import VALUE\n").unwrap();
 
         let graph = project_graph(&root.to_string_lossy(), "pkg").unwrap();
-        assert!(graph.files.iter().all(|f| f.id == "pkg/use.py"));
-        assert!(graph.edges.is_empty());
-        let use_file = &graph.files[0];
+        let external = graph
+            .files
+            .iter()
+            .find(|file| file.id == "shared.py")
+            .expect("outside-scope target is surfaced");
+        assert!(external.external);
+        let use_file = graph
+            .files
+            .iter()
+            .find(|file| file.id == "pkg/use.py")
+            .unwrap();
+        assert!(!use_file.external);
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+        assert_eq!(
+            graph.edges,
+            vec![ProjectEdge {
+                source: "pkg/use.py".into(),
+                target: "shared.py".into(),
+            }]
+        );
     }
 
     #[test]
