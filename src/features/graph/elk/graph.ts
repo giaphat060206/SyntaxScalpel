@@ -37,20 +37,32 @@ export const ELK_OPTIONS: Record<string, string> = {
 const DEFAULT_WIDTH = 180;
 const DEFAULT_HEIGHT = 60;
 
+function numeric(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+}
+
 function leafSize(node: Node): { width: number; height: number } {
-  const styleWidth = (node.style as { width?: number } | undefined)?.width;
-  const styleHeight = (node.style as { height?: number } | undefined)?.height;
+  const style = node.style as Record<string, unknown> | undefined;
   return {
-    width: node.measured?.width ?? styleWidth ?? DEFAULT_WIDTH,
-    height: node.measured?.height ?? styleHeight ?? DEFAULT_HEIGHT,
+    width: node.measured?.width ?? numeric(style?.width) ?? DEFAULT_WIDTH,
+    height: node.measured?.height ?? numeric(style?.height) ?? DEFAULT_HEIGHT,
   };
 }
 
 export function buildElkGraph(nodes: Node[], edges: Edge[]): ElkGraph {
   const visible = nodes.filter((node) => !node.hidden);
+  const visibleIds = new Set(visible.map((node) => node.id));
   const byParent = new Map<string | null, Node[]>();
   for (const node of visible) {
-    const key = node.parentId ?? null;
+    const key =
+      node.parentId && visibleIds.has(node.parentId) ? node.parentId : null;
     const list = byParent.get(key) ?? [];
     list.push(node);
     byParent.set(key, list);
@@ -72,10 +84,9 @@ export function buildElkGraph(nodes: Node[], edges: Edge[]): ElkGraph {
       return { id: node.id, width: size.width, height: size.height };
     });
 
-  const visibleIds = new Set(visible.map((node) => node.id));
   return {
     id: "root",
-    layoutOptions: ELK_OPTIONS,
+    layoutOptions: { ...ELK_OPTIONS },
     children: build(null),
     edges: edges
       .filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target))

@@ -68,4 +68,18 @@ describe("buildElkGraph", () => {
     expect(graph.layoutOptions["elk.edgeRouting"]).toBe("ORTHOGONAL");
     expect(graph.layoutOptions["elk.hierarchyHandling"]).toBe("INCLUDE_CHILDREN");
   });
+
+  it("promotes a visible child whose parent is hidden", () => {
+    const nodes = [
+      node("folder", { hidden: true }),
+      node("folder/a.ts", { parentId: "folder", measured: { width: 180, height: 60 } }),
+    ];
+    const graph = buildElkGraph(nodes, []);
+    expect(graph.children.map((c) => c.id)).toEqual(["folder/a.ts"]);
+  });
+
+  it("parses string style sizes", () => {
+    const graph = buildElkGraph([node("a", { style: { width: "220px" } })], []);
+    expect(graph.children[0].width).toBe(220);
+  });
 });
