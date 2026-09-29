@@ -7,16 +7,25 @@ import {
   useReactFlow,
   type NodeProps,
 } from "@xyflow/react";
-import type { GraphNode } from "../../shared/types";
+import type { FileImport, GraphNode } from "../../shared/types";
 
 export interface SpecialBlock {
   title: string;
   lines: string[];
 }
 
+export interface ProjectBlock {
+  kind: "folder" | "file";
+  name: string;
+  collapsed?: boolean;
+  imports?: FileImport[];
+}
+
 export interface CodeNodeData extends Record<string, unknown> {
   node?: GraphNode;
   special?: SpecialBlock;
+  project?: ProjectBlock;
+  onToggleCollapse?: (id: string) => void;
   color?: string;
   highlighted: boolean;
   dimmed: boolean;
@@ -27,7 +36,8 @@ const handleClass =
   "!h-1 !w-1 !min-h-0 !min-w-0 !border-0 !bg-transparent !opacity-0";
 
 export function CodeNode({ data, selected }: NodeProps) {
-  const { node, special, highlighted, dimmed } = data as CodeNodeData;
+  const { node, special, project, highlighted, dimmed, onToggleCollapse } =
+    data as CodeNodeData;
   const color = (data as CodeNodeData).color ?? "#00F0FF";
   const opacity = dimmed ? "opacity-30" : "opacity-100";
   const id = useNodeId();
@@ -82,6 +92,42 @@ export function CodeNode({ data, selected }: NodeProps) {
             ))
           )}
         </div>
+      </div>
+    );
+  }
+
+  if (project) {
+    const isFolder = project.kind === "folder";
+    return (
+      <div
+        className={`h-full w-full min-w-[140px] overflow-hidden rounded border-2 bg-panel px-3 py-2 transition-opacity ${opacity}`}
+        style={{ borderColor, boxShadow }}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className="truncate font-mono text-sm"
+            style={{ color }}
+            title={project.name}
+          >
+            {isFolder ? "📁 " : ""}
+            {project.name}
+          </span>
+          {isFolder && (
+            <button
+              type="button"
+              className="rounded px-1 text-xs text-dimmed hover:bg-white/10"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (id) onToggleCollapse?.(id);
+              }}
+            >
+              {project.collapsed ? "▸" : "▾"}
+            </button>
+          )}
+        </div>
+        {isFolder && project.collapsed && (
+          <div className="mt-1 text-[10px] text-dimmed">collapsed</div>
+        )}
       </div>
     );
   }
