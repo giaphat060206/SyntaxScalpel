@@ -5,11 +5,11 @@ import type { CodeNodeData } from "./CodeNode";
 // measured heights, so wrapped params/returns can never overlap the next method.
 export const CHILD_X = 20;
 export const CHILD_WIDTH = 200;
-export const CHILD_GAP = 12;
+export const CHILD_GAP = 28;
 export const CLASS_HEADER = 76;
 export const CLASS_PAD = 12;
 export const CLASS_WIDTH = 240;
-export const TOP_GAP = 40;
+export const TOP_GAP = 90;
 export const TOP_WIDTH = 240;
 
 export const IMPORTS_NODE_ID = "__imports";
@@ -135,8 +135,8 @@ export function reflowLayout(current: Node[]): Node[] {
 
     const compact = parent.id === CONSTANTS_NODE_ID;
     const header = compact ? 80 : CLASS_HEADER;
-    const gapX = compact ? 10 : CHILD_GAP;
-    const gapY = compact ? 10 : CHILD_GAP;
+    const gapX = compact ? 22 : CHILD_GAP;
+    const gapY = compact ? 22 : CHILD_GAP;
 
     const grid = arrangeGrid(children, CHILD_X, header, gapX, gapY);
     children.forEach((child, index) => {
