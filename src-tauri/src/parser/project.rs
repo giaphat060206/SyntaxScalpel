@@ -288,6 +288,42 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     Ok(graph)
 }
 
+/// Modules referenced by a web entry HTML (`index.html`'s module scripts).
+fn html_entry_points(root: &Path, scope_rel: &str, code: &[&ProjectFile]) -> Vec<String> {
+    let Ok(html) = std::fs::read_to_string(root.join(scope_rel).join("index.html")) else {
+        return Vec::new();
+    };
+    let prefix = if scope_rel.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", scope_rel.replace('\\', "/"))
+    };
+    let mut found = Vec::new();
+    for chunk in html.split("src=") {
+        let rest = chunk.trim_start();
+        let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+            continue;
+        };
+        let Some(end) = rest[1..].find(quote) else {
+            continue;
+        };
+        let raw = &rest[1..1 + end];
+        if !(raw.ends_with(".js")
+            || raw.ends_with(".jsx")
+            || raw.ends_with(".ts")
+            || raw.ends_with(".tsx"))
+        {
+            continue;
+        }
+        let cleaned = raw.trim_start_matches("./").trim_start_matches('/');
+        let id = format!("{prefix}{cleaned}");
+        if code.iter().any(|file| file.id == id) {
+            found.push(id);
+        }
+    }
+    found
+}
+
 /// Entry-point candidates: conventions first (every match), then graph roots.
 /// The first candidate is treated as the primary entry point.
 fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
@@ -298,7 +334,14 @@ fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<Str
         found
     };
 
-    // 1. Python `if __name__ == "__main__":` guard (may be several scripts).
+    // 1. A web entry HTML (`index.html`) points at its real module, which beats
+    //    any file-name convention (`index.js` is often just a barrel file).
+    let html_entries = html_entry_points(root, scope_rel, &code);
+    if !html_entries.is_empty() {
+        return finish(html_entries);
+    }
+
+    // 2. Python `if __name__ == "__main__":` guard (may be several scripts).
     let mut guarded = Vec::new();
     for file in &code {
         if let Ok(source) = std::fs::read_to_string(root.join(&file.id)) {
@@ -311,25 +354,24 @@ fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<Str
         return finish(guarded);
     }
 
-    // 2. Conventional file names.
-    const NAMES: [&str; 12] = [
-        "__main__.py", "main.py", "app.py", "manage.py", "run.py", "cli.py", "index.ts", "index.tsx",
-        "index.js", "index.jsx", "server.ts", "server.js",
+    // 3. Conventional file names, highest priority group first.
+    const NAMES: [&str; 16] = [
+        "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "__main__.py", "app.py",
+        "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
+        "server.ts", "server.js",
     ];
-    let mut named = Vec::new();
     for name in NAMES {
-        if let Some(file) = code
+        let matches: Vec<String> = code
             .iter()
-            .find(|file| file.id.rsplit('/').next() == Some(name))
-        {
-            named.push(file.id.clone());
+            .filter(|file| file.id.rsplit('/').next() == Some(name))
+            .map(|file| file.id.clone())
+            .collect();
+        if !matches.is_empty() {
+            return finish(matches);
         }
     }
-    if !named.is_empty() {
-        return finish(named);
-    }
 
-    // 3. package.json main / module / scripts.start.
+    // 4. package.json main / module / scripts.start.
     let scope_dir = root.join(scope_rel);
     if let Ok(text) = std::fs::read_to_string(scope_dir.join("package.json")) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -493,6 +535,38 @@ mod tests {
         assert!(graph.edges.is_empty());
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+    }
+
+    #[test]
+    fn prefers_the_html_referenced_module_over_a_barrel_file() {
+        let root = temp_project("entry-html");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("index.html"),
+            "<div id=\"root\"></div>\n<script type=\"module\" src=\"./src/main.jsx\"></script>\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/main.jsx"), "import App from './App.jsx'\n").unwrap();
+        std::fs::write(root.join("src/App.jsx"), "export default function App() {}\n").unwrap();
+        std::fs::write(
+            root.join("src/index.js"),
+            "export { default as LoadingScreen } from './LoadingScreen';\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entries, vec!["src/main.jsx".to_string()]);
+        assert_eq!(graph.entry.as_deref(), Some("src/main.jsx"));
+    }
+
+    #[test]
+    fn prefers_main_over_index_for_js_projects() {
+        let root = temp_project("entry-main-js");
+        std::fs::write(root.join("main.jsx"), "console.log('boot')\n").unwrap();
+        std::fs::write(root.join("index.js"), "export default 1\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entry.as_deref(), Some("main.jsx"));
     }
 
     #[test]
