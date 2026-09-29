@@ -1,7 +1,7 @@
 # SyntaxScalpel — ELK Layout & Orthogonal Routing — Design Spec
 
 Date: 2026-09-29
-Status: Approved design, pending implementation plan
+Status: Implemented (see plan `docs/superpowers/plans/2026-09-29-elk-layout.md`)
 Branch: `feature/elk-layout`
 
 ## 1. Overview

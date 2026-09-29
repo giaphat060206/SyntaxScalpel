@@ -9,7 +9,7 @@ Local-first desktop app that dissects source files into interactive node graphs 
 - 1-hop call tracing: click a node to highlight its callers and callees
 - Markdown rendering (GFM, syntax highlighting, checkboxes)
 - Resizable split view: design spec on the left, implementation graph on the right
-- Node layout persists per file in `.scalpel/metadata.json`
+- Node layout is computed by Eclipse Layout Kernel (ELK), which also routes the edges orthogonally; positions are not persisted (dragging a block is temporary)
 
 ## Requirements
 
