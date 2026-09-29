@@ -229,43 +229,36 @@ function GraphViewInner({
       extent: "parent" as const,
     }));
 
+    // Class ids that own an edge endpoint stay transparent so their method
+    // lines remain visible through the class container.
+    const endpointParents = new Set<string>();
+    for (const edge of result.edges) {
+      for (const id of [edge.source, edge.target]) {
+        const dot = id.lastIndexOf(".");
+        if (dot > 0) {
+          endpointParents.add(id.slice(0, dot));
+        }
+      }
+    }
+
     setNodes([
       ...specialFlowNodes(imports),
       ...constantsContainer,
       ...constantChildren,
-      ...others.map((node) => toFlowNode(node, null, result.edges, new Set())),
+      ...others.map((node) => toFlowNode(node, null, result.edges, endpointParents)),
     ]);
   }, [result, imports, setNodes]);
 
   // Re-decorate for trace highlighting without touching positions the user
-  // dragged, and open a line-window only in the containers along the focused
-  // chain (the selected node's class and its traced neighbours' classes).
+  // dragged. Class transparency comes from the rebuild (endpoint-based), so it
+  // is preserved here.
   useEffect(() => {
-    setNodes((current) => {
-      const traced = selectedId
-        ? traceNeighbors(result.edges, selectedId)
-        : null;
-      const parentOf = new Map(
-        current.map((node) => [node.id, node.parentId ?? null])
-      );
-      const transparentIds = new Set<string>();
-      if (traced) {
-        for (const id of traced) {
-          const parent = parentOf.get(id);
-          if (parent) {
-            transparentIds.add(parent);
-          }
-        }
-      }
-      return current.map((node) => ({
+    setNodes((current) =>
+      current.map((node) => ({
         ...node,
-        data: {
-          ...node.data,
-          ...visibilityOf(node.id, result.edges, selectedId),
-          transparent: transparentIds.has(node.id),
-        },
-      }));
-    });
+        data: { ...node.data, ...visibilityOf(node.id, result.edges, selectedId) },
+      }))
+    );
   }, [selectedId, result.edges, setNodes]);
 
   // Edges are derived from the current node positions so their handles can face

@@ -42,31 +42,49 @@ function toNodes(
 ): Node[] {
   const hidden = hiddenIds(data, collapsed);
 
-  // Containers start opaque. The decorate effect makes only the folders on the
-  // focused block's chain transparent while a block is selected.
-  const folderNodes: Node[] = data.folders.map((folder) => ({
-    id: folder.id,
-    type: "scalpel",
-    position: { x: 0, y: 0 },
-    parentId: folder.parentId,
-    extent: folder.parentId ? ("parent" as const) : undefined,
-    draggable: false,
-    zIndex: 1,
-    hidden: hidden.has(folder.id),
-    style: { width: folder.parentId ? undefined : CLASS_WIDTH },
-    data: {
-      project: {
-        kind: "folder",
-        name: folder.name,
-        collapsed: collapsed.has(folder.id),
-        transparent: false,
-      },
-      color: colorForNode(folder.id),
-      onToggleCollapse,
-      highlighted: false,
-      dimmed: false,
-    } satisfies CodeNodeData,
-  }));
+  // Folders that contain at least one edge endpoint stay transparent so their
+  // lines remain visible; folders merely passed by stay opaque. The scope root
+  // itself is NOT rendered as a container: it encloses the whole canvas, so it
+  // would either hide every line or show every line through it. Its children
+  // become top-level nodes and the breadcrumb shows the location instead.
+  const transparentFolders = new Set<string>();
+  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
+  for (const edge of data.edges) {
+    for (const id of [edge.source, edge.target]) {
+      const file = data.files.find((entry) => entry.id === id);
+      let folder = file?.folderId;
+      while (folder) {
+        transparentFolders.add(folder);
+        folder = folderById.get(folder)?.parentId;
+      }
+    }
+  }
+
+  const folderNodes: Node[] = data.folders
+    .filter((folder) => folder.id !== data.root)
+    .map((folder) => ({
+      id: folder.id,
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      parentId: folder.parentId === data.root ? undefined : folder.parentId,
+      extent: folder.parentId && folder.parentId !== data.root ? ("parent" as const) : undefined,
+      draggable: false,
+      zIndex: 1,
+      hidden: hidden.has(folder.id),
+      style: { width: folder.parentId ? undefined : CLASS_WIDTH },
+      data: {
+        project: {
+          kind: "folder",
+          name: folder.name,
+          collapsed: collapsed.has(folder.id),
+          transparent: transparentFolders.has(folder.id),
+        },
+        color: colorForNode(folder.id),
+        onToggleCollapse,
+        highlighted: false,
+        dimmed: false,
+      } satisfies CodeNodeData,
+    }));
 
   const entryList = data?.entries?.length
     ? data.entries
@@ -74,34 +92,37 @@ function toNodes(
       ? [data.entry]
       : [];
 
-  const fileNodes: Node[] = data.files.map((file) => ({
-    id: file.id,
-    type: "scalpel",
-    position: { x: 0, y: 0 },
-    parentId: file.folderId,
-    extent: "parent" as const,
-    draggable: false,
-    zIndex: 4,
-    hidden: hidden.has(file.id),
-    style: { width: 180 },
-    data: {
-      project: {
-        kind: "file",
-        name: file.name,
-        imports: file.imports,
-        fileKind: file.kind,
-        entry: entryList.includes(file.id),
-      },
-      // Docs/config get a muted colour; entry files get the mint accent.
-      color: entryList.includes(file.id)
-        ? "#3DF0A8"
-        : file.kind === "doc"
-          ? "#8A93A0"
-          : colorForNode(file.id),
-      highlighted: false,
-      dimmed: false,
-    } satisfies CodeNodeData,
-  }));
+  const fileNodes: Node[] = data.files.map((file) => {
+    const isTopLevel = file.folderId === data.root;
+    return {
+      id: file.id,
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      parentId: isTopLevel ? undefined : file.folderId,
+      extent: isTopLevel ? undefined : ("parent" as const),
+      draggable: false,
+      zIndex: 4,
+      hidden: hidden.has(file.id),
+      style: { width: 180 },
+      data: {
+        project: {
+          kind: "file",
+          name: file.name,
+          imports: file.imports,
+          fileKind: file.kind,
+          entry: entryList.includes(file.id),
+        },
+        // Docs/config get a muted colour; entry files get the mint accent.
+        color: entryList.includes(file.id)
+          ? "#3DF0A8"
+          : file.kind === "doc"
+            ? "#8A93A0"
+            : colorForNode(file.id),
+        highlighted: false,
+        dimmed: false,
+      } satisfies CodeNodeData,
+    };
+  });
 
   return [...folderNodes, ...fileNodes];
 }
@@ -207,8 +228,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return;
     }
     const hidden = hiddenIds(data, collapsed);
-    const selection = selectionInfo(data, selectedId);
-    const highlight = selection?.highlight ?? null;
+    const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
     setNodes((current) =>
       current.map((node) => {
         const shouldHide = hidden.has(node.id);
@@ -217,15 +237,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const currentFlag = (node.data as CodeNodeData).project?.collapsed;
         const dimmed = highlight ? !highlight.has(node.id) : false;
         const highlighted = highlight ? node.id === selectedId : false;
-        // Only the containers along the focused chain open a window for their
-        // lines; everything else stays opaque and hides lines beneath it.
-        const transparent = isFolder && highlight ? highlight.has(node.id) : false;
         const data_ = node.data as CodeNodeData;
         if (
           node.hidden === shouldHide &&
           data_.dimmed === dimmed &&
           data_.highlighted === highlighted &&
-          data_.project?.transparent === transparent &&
           (!isFolder || currentFlag === collapsedFlag)
         ) {
           return node;
@@ -237,12 +253,10 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
             ...node.data,
             dimmed,
             highlighted,
-            transparent,
             project: isFolder
               ? {
                   ...(node.data as CodeNodeData).project,
                   collapsed: collapsedFlag,
-                  transparent,
                 }
               : (node.data as CodeNodeData).project,
           },
