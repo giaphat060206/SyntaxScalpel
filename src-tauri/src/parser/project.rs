@@ -1,7 +1,8 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+
+use crate::parser::imports::{extract_imports, resolve_specifier, stem_index};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
@@ -175,6 +176,54 @@ fn id_of(root: &Path, path: &Path, scope_id: &str) -> String {
     }
 }
 
+/// Project graph for `scope_rel` inside `root`, including resolved fileâ†’file edges.
+pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String> {
+    let root_path = Path::new(root);
+    let (mut graph, collected) = build_tree(root_path, scope_rel)?;
+
+    let paths: Vec<PathBuf> = collected.iter().map(|(path, _)| path.clone()).collect();
+    let index = stem_index(&paths);
+    let ids: std::collections::HashSet<String> =
+        graph.files.iter().map(|file| file.id.clone()).collect();
+
+    for (path, _) in &collected {
+        let id = id_of(root_path, path, &graph.root);
+        let source = std::fs::read_to_string(path).unwrap_or_default();
+        let mut imports = Vec::new();
+        let mut edges = Vec::new();
+        for entry in extract_imports(&source, &id) {
+            let resolved = resolve_specifier(&entry.specifier, &id, root_path, &index)
+                .map(|target| id_of(root_path, &target, &graph.root));
+            let target_id = resolved.clone().unwrap_or_default();
+            if let Some(target) = resolved {
+                if ids.contains(&target) && target != id {
+                    edges.push(ProjectEdge {
+                        source: id.clone(),
+                        target,
+                    });
+                }
+            }
+            imports.push(FileImport {
+                target_id,
+                specifier: entry.specifier,
+                names: entry.names,
+            });
+        }
+        graph.edges.append(&mut edges);
+        if let Some(file) = graph.files.iter_mut().find(|file| file.id == id) {
+            file.imports = imports;
+        }
+    }
+
+    graph.edges.sort_by(|a, b| {
+        a.source
+            .cmp(&b.source)
+            .then(a.target.cmp(&b.target))
+    });
+    graph.edges.dedup_by(|a, b| a.source == b.source && a.target == b.target);
+    Ok(graph)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +277,47 @@ mod tests {
         assert_eq!(graph.folders[0].id, "pkg");
         assert_eq!(graph.files.len(), 1);
         assert_eq!(graph.files[0].id, "pkg/a.py");
+    }
+
+    #[test]
+    fn records_file_imports_and_edges() {
+        let root = temp_project("edges");
+        std::fs::write(root.join("utils.py"), "def helper():\n    return 1\n").unwrap();
+        std::fs::write(
+            root.join("main.py"),
+            "from utils import helper\nimport os\n\ndef run():\n    return helper()\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let main = graph.files.iter().find(|f| f.id == "main.py").unwrap();
+        assert!(main
+            .imports
+            .iter()
+            .any(|i| i.specifier == "utils" && i.names == vec!["helper".to_string()]));
+        let os = main.imports.iter().find(|i| i.specifier == "os").unwrap();
+        assert!(os.target_id.is_empty());
+
+        assert_eq!(
+            graph.edges,
+            vec![ProjectEdge {
+                source: "main.py".into(),
+                target: "utils.py".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn drops_edges_whose_target_is_outside_the_scope() {
+        let root = temp_project("outside-edge");
+        std::fs::create_dir_all(root.join("pkg")).unwrap();
+        std::fs::write(root.join("shared.py"), "VALUE = 1\n").unwrap();
+        std::fs::write(root.join("pkg/use.py"), "from shared import VALUE\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "pkg").unwrap();
+        assert!(graph.files.iter().all(|f| f.id == "pkg/use.py"));
+        assert!(graph.edges.is_empty());
+        let use_file = &graph.files[0];
+        assert_eq!(use_file.imports[0].target_id, "shared.py");
     }
 }

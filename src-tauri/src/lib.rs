@@ -20,6 +20,7 @@ pub fn run() {
             commands::parse::parse_python,
             commands::parse::parse_js_ts,
             commands::parse::analyze_imports,
+            commands::parse::project_graph,
             commands::layout::load_layout,
             commands::layout::save_layout,
         ])

@@ -6,6 +6,7 @@ use crate::commands::layout::load_layout;
 use crate::models::{ParseResult, Position};
 use crate::parser;
 use crate::parser::imports::ImportAnalysis;
+use crate::parser::project::ProjectGraph;
 
 fn parse_with<F>(path: String, root: String, parse: F) -> Result<ParseResult, String>
 where
@@ -32,6 +33,11 @@ pub fn parse_js_ts(path: String, root: String) -> Result<ParseResult, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn analyze_imports(path: String, root: String) -> Result<ImportAnalysis, String> {
     parser::imports::analyze(&path, &root)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn project_graph(root: String, scope: String) -> Result<ProjectGraph, String> {
+    crate::parser::project::project_graph(&root, &scope)
 }
 
 #[cfg(test)]

@@ -280,7 +280,7 @@ fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
     None
 }
 
-fn stem_index(files: &[PathBuf]) -> HashMap<String, PathBuf> {
+pub fn stem_index(files: &[PathBuf]) -> HashMap<String, PathBuf> {
     let mut index = HashMap::new();
     for file in files {
         if let Some(stem) = file.file_stem().and_then(|s| s.to_str()) {
