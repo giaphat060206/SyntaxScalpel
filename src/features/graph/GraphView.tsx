@@ -248,7 +248,7 @@ function GraphViewInner({
     const byId = new Map(nodes.map((node) => [node.id, node]));
     const outCount = new Map<string, number>();
     const inCount = new Map<string, number>();
-    return result.edges.map((edge) => {
+    return result.edges.map((edge, edgeIndex) => {
       const source = byId.get(edge.source);
       const target = byId.get(edge.target);
       const sourceIndex = outCount.get(edge.source) ?? 0;
@@ -271,7 +271,7 @@ function GraphViewInner({
         source: edge.source,
         target: edge.target,
         type: "smoothstep",
-        pathOptions: { borderRadius: 14 },
+        pathOptions: { borderRadius: 14, offset: 24 + (edgeIndex % 4) * 16 },
         ...handles,
         zIndex: 0,
         markerEnd: {

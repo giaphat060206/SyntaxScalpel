@@ -354,7 +354,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const target = byId.get(edge.target);
         return source && target && !source.hidden && !target.hidden;
       })
-      .map((edge) => {
+      .map((edge, edgeIndex) => {
         const source = byId.get(edge.source)!;
         const target = byId.get(edge.target)!;
         const sourceIndex = outCount.get(edge.source) ?? 0;
@@ -375,7 +375,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           source: edge.source,
           target: edge.target,
           type: "smoothstep",
-          pathOptions: { borderRadius: 14 },
+          pathOptions: { borderRadius: 14, offset: 24 + (edgeIndex % 4) * 16 },
           ...spreadHandles(source, target, byId, sourceIndex, targetIndex),
           zIndex: 0,
           markerEnd: {
