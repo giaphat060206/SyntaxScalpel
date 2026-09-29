@@ -10,7 +10,7 @@ export function breadcrumbs(path: string, kind: "folder" | "code"): Crumb[] {
   return segments.map((segment, index) => ({
     label: segment,
     path: segments.slice(0, index + 1).join("/"),
-    navigable: index < folderCount - 1,
+    navigable: index < folderCount,
   }));
 }
 
@@ -30,10 +30,10 @@ export function Breadcrumb({ path, kind, onNavigate }: Props) {
       >
         root
       </button>
-      {breadcrumbs(path, kind).map((crumb) => (
+      {breadcrumbs(path, kind).map((crumb, index, crumbs) => (
         <span key={crumb.path} className="flex items-center gap-1">
           <span className="text-dimmed">/</span>
-          {crumb.navigable ? (
+          {crumb.navigable && index < crumbs.length - 1 ? (
             <button
               type="button"
               onClick={() => onNavigate({ kind: "folder", path: crumb.path })}
