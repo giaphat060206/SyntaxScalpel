@@ -174,8 +174,23 @@ export function reflowLayout(current: Node[]): Node[] {
   let changed = false;
 
   for (const parent of next) {
+    const data = parent.data as CodeNodeData;
+    const isContainer = data.node?.kind === "class" || data.project?.kind === "folder";
     const children = childrenByParent.get(parent.id);
-    if (!children || children.length === 0) continue;
+    if (!children || children.length === 0) {
+      // A container with nothing visible inside (e.g. a collapsed folder)
+      // shrinks to just its header instead of keeping its old size.
+      if (isContainer) {
+        const header = parent.id === CONSTANTS_NODE_ID ? 80 : CLASS_HEADER;
+        const height = header + CLASS_PAD;
+        const style = (parent.style ?? {}) as { width?: number; height?: number };
+        if (style.height !== height) {
+          parent.style = { ...style, height };
+          changed = true;
+        }
+      }
+      continue;
+    }
     children.sort(
       (a, b) => a.position.y - b.position.y || a.position.x - b.position.x
     );
