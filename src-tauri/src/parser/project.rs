@@ -652,6 +652,29 @@ mod tests {
     }
 
     #[test]
+    fn resolves_parent_directory_imports_with_dotted_file_names() {
+        let root = temp_project("parent-dir");
+        std::fs::create_dir_all(root.join("pkg/repositories")).unwrap();
+        std::fs::create_dir_all(root.join("pkg/interfaces")).unwrap();
+        std::fs::write(
+            root.join("pkg/repositories/subscription.repository.js"),
+            "export const SubscriptionRepository = {};\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pkg/interfaces/subscription.interface.js"),
+            "import { SubscriptionRepository } from '../repositories/subscription.repository.js';\nexport const SubscriptionInterface = SubscriptionRepository;\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == "pkg/interfaces/subscription.interface.js"
+                && edge.target == "pkg/repositories/subscription.repository.js"
+        }));
+    }
+
+    #[test]
     fn resolves_any_dotted_file_name_not_just_one_example() {
         let root = temp_project("dotted-generic");
         std::fs::write(root.join("theme.dark.css"), "body {}\n").unwrap();

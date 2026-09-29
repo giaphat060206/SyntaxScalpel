@@ -235,13 +235,22 @@ pub fn resolve_specifier(
         return None;
     }
 
-    if let Some(rest) = specifier.strip_prefix('.') {
-        // Relative import: join against the importing file's directory.
-        let base_dir = Path::new(importer_rel)
+    if specifier.starts_with('.') {
+        // Relative import. Each leading dot is a directory level: `.` is the
+        // importing file's own directory, `..` its parent, `...` the grandparent.
+        let dots = specifier.chars().take_while(|c| *c == '.').count();
+        let rest = specifier[dots..].trim_start_matches('/');
+        let mut base_dir = Path::new(importer_rel)
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_default();
-        let joined = base_dir.join(rest.trim_start_matches('/'));
+        for _ in 1..dots {
+            base_dir = base_dir
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+        }
+        let joined = base_dir.join(rest);
         return try_candidates(root, &joined);
     }
 
