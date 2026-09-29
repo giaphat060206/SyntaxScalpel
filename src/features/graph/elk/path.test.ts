@@ -32,4 +32,8 @@ describe("sectionToPath", () => {
     ]);
     expect(path).toBe("M 0 0 L 0 10 L 10 10 L 10 20");
   });
+
+  it("returns an empty path for non-finite points", () => {
+    expect(sectionToPath([{ x: Number.NaN, y: 0 }, { x: 10, y: 10 }])).toBe("");
+  });
 });
