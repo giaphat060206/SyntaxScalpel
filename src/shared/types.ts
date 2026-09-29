@@ -44,3 +44,36 @@ export interface ImportAnalysis {
   imports: ImportEntry[];
   importedBy: ImporterEntry[];
 }
+
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  parentId?: string;
+  depth: number;
+}
+
+export interface FileImport {
+  targetId: string;
+  specifier: string;
+  names: string[];
+}
+
+export interface ProjectFile {
+  id: string;
+  name: string;
+  folderId: string;
+  imports: FileImport[];
+}
+
+export interface ProjectEdge {
+  source: string;
+  target: string;
+}
+
+export interface ProjectGraph {
+  root: string;
+  folders: ProjectFolder[];
+  files: ProjectFile[];
+  edges: ProjectEdge[];
+  truncated: boolean;
+}
