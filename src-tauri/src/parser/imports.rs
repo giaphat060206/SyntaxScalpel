@@ -303,10 +303,25 @@ fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
         "py", "ts", "tsx", "js", "jsx", "md", "json", "css", "scss", "html", "yaml", "yml",
         "toml", "ini", "txt", "sql", "sh",
     ];
+    // A base whose file name already contains a dot (`ai.easy`, `app.config`)
+    // is a name, not an extension, so appending `.{ext}` must be tried first.
+    let dotted = base
+        .file_name()
+        .map(|name| name.to_string_lossy().contains('.'))
+        .unwrap_or(false);
     for ext in EXTS {
-        let candidate = base.with_extension(ext);
-        if candidate.is_file() {
-            return Some(candidate);
+        let replaced = base.with_extension(ext);
+        let appended = PathBuf::from(format!("{}.{}", base.display(), ext));
+        let (first, second) = if dotted {
+            (appended, replaced)
+        } else {
+            (replaced, appended)
+        };
+        if first.is_file() {
+            return Some(first);
+        }
+        if second.is_file() {
+            return Some(second);
         }
     }
     if base.is_dir() {

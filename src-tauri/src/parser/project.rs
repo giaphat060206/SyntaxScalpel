@@ -595,6 +595,25 @@ mod tests {
     }
 
     #[test]
+    fn resolves_relative_imports_to_dotted_file_names() {
+        let root = temp_project("dotted-names");
+        std::fs::write(root.join("ai.js"), "").unwrap();
+        std::fs::write(root.join("ai.easy.js"), "export const getEasyMove = () => 1;\n")
+            .unwrap();
+        std::fs::write(
+            root.join("strategies.js"),
+            "import { getEasyMove } from './ai.easy';\nexport const s = getEasyMove;\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "strategies.js" && edge.target == "ai.easy.js"));
+    }
+
+    #[test]
     fn detects_entry_by_guard_and_sorts_it_first() {
         let root = temp_project("entry-guard");
         std::fs::write(root.join("helpers.py"), "def h():\n    return 1\n").unwrap();
