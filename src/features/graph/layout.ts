@@ -114,15 +114,14 @@ export function arrangeGrid(
  * Converges: returns the same array reference when nothing needs to change.
  */
 export function reflowLayout(current: Node[]): Node[] {
+  const next = current.map((node) => ({ ...node }));
   const childrenByParent = new Map<string, Node[]>();
-  for (const node of current) {
+  for (const node of next) {
     if (!node.parentId) continue;
     const list = childrenByParent.get(node.parentId) ?? [];
     list.push(node);
     childrenByParent.set(node.parentId, list);
   }
-
-  const next = current.map((node) => ({ ...node }));
   let changed = false;
 
   for (const parent of next) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "@xyflow/react";
-import { arrangeGrid, pickHandles } from "./layout";
+import { arrangeGrid, pickHandles, reflowLayout } from "./layout";
 
 function node(id: string, x: number, y: number, width = 200, height = 80): Node {
   return {
@@ -32,6 +32,35 @@ describe("arrangeGrid", () => {
     const { positions } = arrangeGrid(items, 0, 0, 10, 10);
     // Two columns: column 0 widest is 400, so column 1 starts at 410.
     expect(positions[1]).toEqual({ x: 410, y: 0 });
+  });
+});
+
+describe("reflowLayout", () => {
+  it("positions class children and sizes the parent", () => {
+    const parent: Node = {
+      id: "C",
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      data: {},
+      style: { width: 240 },
+      measured: { width: 240, height: 100 },
+    };
+    const first: Node = {
+      id: "C.a",
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      parentId: "C",
+      extent: "parent",
+      data: {},
+      style: { width: 200 },
+      measured: { width: 200, height: 60 },
+    };
+    const second: Node = { ...first, id: "C.b" };
+
+    const out = reflowLayout([parent, first, second]);
+    const child = out.find((node) => node.id === "C.a")!;
+    expect(child.position.y).toBeGreaterThan(0);
+    expect((out[0].style as { height?: number }).height).toBeGreaterThan(100);
   });
 });
 

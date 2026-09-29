@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -6,6 +6,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useNodesState,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeMouseHandler,
@@ -43,7 +44,7 @@ function toNodes(
     }
   }
   for (const file of data.files) {
-    if (collapsed.has(file.folderId)) {
+    if (collapsed.has(file.folderId) || hidden.has(file.folderId)) {
       hidden.add(file.id);
     }
   }
@@ -104,12 +105,15 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const { fitView } = useReactFlow();
+  const lastFit = useRef<string>("");
 
   useEffect(() => {
     let cancelled = false;
     setData(null);
     setError(null);
     setCollapsed(new Set());
+    setSelectedId(null);
     projectGraph(root, scope)
       .then((next) => {
         if (!cancelled) setData(next);
@@ -147,6 +151,18 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   useEffect(() => {
     setNodes((current) => reflowLayout(current));
   }, [sizeSignature, setNodes]);
+
+  const fitToken = `${root}|${scope}`;
+  useEffect(() => {
+    if (!data || lastFit.current === fitToken) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      lastFit.current = fitToken;
+      fitView({ padding: 0.2 });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [fitToken, sizeSignature, data, fitView]);
 
   const edges: Edge[] = useMemo(() => {
     if (!data) {
@@ -189,13 +205,18 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       });
   }, [data, nodes, selectedId]);
 
-  const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
-    setSelectedId(node.id);
-  }, []);
+  const handleNodeClick: NodeMouseHandler = useCallback(
+    (_event, node) => {
+      setSelectedId(
+        data?.folders.some((folder) => folder.id === node.id) ? null : node.id
+      );
+    },
+    [data]
+  );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
     (_event, node) => {
-      if (node.id === scope) {
+      if (!data || node.id === data.root) {
         return;
       }
       const kind = data?.folders.some((folder) => folder.id === node.id)
@@ -254,8 +275,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           {selectedFile.imports.length === 0 ? (
             <div className="font-mono text-white/80">none</div>
           ) : (
-            selectedFile.imports.map((entry, index) => (
-              <div key={index} className="break-words font-mono text-white/85">
+            selectedFile.imports.map((entry) => (
+              <div
+                key={entry.targetId || entry.specifier}
+                className="break-words font-mono text-white/85"
+              >
                 {entry.targetId || entry.specifier}
                 {entry.names.length > 0 ? `: ${entry.names.join(", ")}` : ""}
               </div>
