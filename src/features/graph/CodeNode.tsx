@@ -21,6 +21,7 @@ export interface ProjectBlock {
   imports?: FileImport[];
   fileKind?: "code" | "doc";
   entry?: boolean;
+  transparent?: boolean;
 }
 
 export interface CodeNodeData extends Record<string, unknown> {
@@ -29,6 +30,8 @@ export interface CodeNodeData extends Record<string, unknown> {
   project?: ProjectBlock;
   onToggleCollapse?: (id: string) => void;
   color?: string;
+  /** Container whose edges must stay visible through it. */
+  transparent?: boolean;
   highlighted: boolean;
   dimmed: boolean;
   pinned?: boolean;
@@ -169,9 +172,10 @@ export function CodeNode({ data, selected }: NodeProps) {
 
   if (project) {
     const isFolder = project.kind === "folder";
-    // Parent (folder) blocks are transparent so edges routed underneath them
-    // stay visible; leaf (file) blocks are opaque and hide lines beneath them.
-    const background = isFolder ? "bg-transparent" : "bg-panel";
+    // A folder that holds an edge's endpoint stays transparent so its lines
+    // show; folders merely passed by stay opaque and hide lines underneath.
+    const background =
+      isFolder && project.transparent ? "bg-transparent" : "bg-panel";
     return (
       <div
         className={`h-full w-full min-w-[140px] overflow-hidden rounded border-2 px-3 py-2 transition-opacity ${background} ${opacity}`}
@@ -228,7 +232,9 @@ export function CodeNode({ data, selected }: NodeProps) {
       />
       <div
         className={`h-full w-full min-w-[160px] overflow-hidden rounded border-2 px-3 py-2 transition-opacity ${
-          container ? "bg-transparent" : "bg-panel"
+          container && (data as CodeNodeData).transparent
+            ? "bg-transparent"
+            : "bg-panel"
         } ${opacity}`}
         style={{ borderColor, boxShadow }}
       >

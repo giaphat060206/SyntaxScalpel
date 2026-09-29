@@ -128,7 +128,12 @@ function visibilityOf(id: string, edges: GraphEdge[], selectedId: string | null)
   };
 }
 
-function toFlowNode(node: FlowNode, selectedId: string | null, edges: GraphEdge[]): Node {
+function toFlowNode(
+  node: FlowNode,
+  selectedId: string | null,
+  edges: GraphEdge[],
+  endpointParents: Set<string> = new Set()
+): Node {
   return {
     id: node.id,
     type: node.type,
@@ -145,6 +150,7 @@ function toFlowNode(node: FlowNode, selectedId: string | null, edges: GraphEdge[
     data: {
       node: node.data.node,
       color: colorForNode(node.id),
+      transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
       pinned: node.data.node.position != null,
       ...visibilityOf(node.id, edges, selectedId),
     } satisfies CodeNodeData,
@@ -223,11 +229,22 @@ function GraphViewInner({
       extent: "parent" as const,
     }));
 
+    // Class ids that own an edge endpoint — those containers stay transparent.
+    const endpointParents = new Set<string>();
+    for (const edge of result.edges) {
+      for (const id of [edge.source, edge.target]) {
+        const dot = id.lastIndexOf(".");
+        if (dot > 0) {
+          endpointParents.add(id.slice(0, dot));
+        }
+      }
+    }
+
     setNodes([
       ...specialFlowNodes(imports),
       ...constantsContainer,
       ...constantChildren,
-      ...others.map((node) => toFlowNode(node, null, result.edges)),
+      ...others.map((node) => toFlowNode(node, null, result.edges, endpointParents)),
     ]);
   }, [result, imports, setNodes]);
 

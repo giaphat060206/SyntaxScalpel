@@ -42,6 +42,21 @@ function toNodes(
 ): Node[] {
   const hidden = hiddenIds(data, collapsed);
 
+  // Folders that contain at least one endpoint of some edge stay transparent so
+  // their lines remain visible; folders merely passed by stay opaque.
+  const transparentFolders = new Set<string>();
+  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
+  for (const edge of data.edges) {
+    for (const id of [edge.source, edge.target]) {
+      const file = data.files.find((entry) => entry.id === id);
+      let folder = file?.folderId;
+      while (folder) {
+        transparentFolders.add(folder);
+        folder = folderById.get(folder)?.parentId;
+      }
+    }
+  }
+
   const folderNodes: Node[] = data.folders.map((folder) => ({
     id: folder.id,
     type: "scalpel",
@@ -57,6 +72,7 @@ function toNodes(
         kind: "folder",
         name: folder.name,
         collapsed: collapsed.has(folder.id),
+        transparent: transparentFolders.has(folder.id),
       },
       color: colorForNode(folder.id),
       onToggleCollapse,
@@ -203,7 +219,22 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     if (!data) {
       return;
     }
-    const hidden = hiddenIds(data, collapsed);
+  const hidden = hiddenIds(data, collapsed);
+
+  // Folders that contain at least one endpoint of some edge stay transparent so
+  // their lines remain visible; other folders stay opaque.
+  const transparentFolders = new Set<string>();
+  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
+  for (const edge of data.edges) {
+    for (const id of [edge.source, edge.target]) {
+      const file = data.files.find((entry) => entry.id === id);
+      let folder = file?.folderId;
+      while (folder) {
+        transparentFolders.add(folder);
+        folder = folderById.get(folder)?.parentId;
+      }
+    }
+  }
     const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
     setNodes((current) =>
       current.map((node) => {
