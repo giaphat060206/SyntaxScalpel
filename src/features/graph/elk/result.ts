@@ -29,6 +29,7 @@ interface ElkSectionLike {
 interface ElkEdgeLike {
   id: string;
   sources?: string[];
+  targets?: string[];
   sections?: ElkSectionLike[];
 }
 
@@ -40,8 +41,8 @@ export interface ElkResultLike {
 /**
  * ELK reports a node's x/y relative to its parent, which is exactly what React
  * Flow expects for child nodes, so positions are copied straight through.
- * Edge sections, however, come in the coordinate space of the edge's container,
- * so they are shifted by the source node's absolute offset to be drawable.
+ * Edge sections come in the coordinate space of the edge's lowest common
+ * ancestor container, so they are shifted by that container's absolute offset.
  */
 export function applyElkResult(nodes: Node[], elk: ElkResultLike): ElkLayoutResult {
   const positions: Record<string, ElkPoint> = {};
@@ -56,7 +57,11 @@ export function applyElkResult(nodes: Node[], elk: ElkResultLike): ElkLayoutResu
       };
       absolute[child.id] = here;
       positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
-      if (child.width !== undefined && child.height !== undefined) {
+      if (
+        child.children?.length &&
+        child.width !== undefined &&
+        child.height !== undefined
+      ) {
         sizes[child.id] = { width: child.width, height: child.height };
       }
       if (child.children?.length) {
@@ -65,17 +70,39 @@ export function applyElkResult(nodes: Node[], elk: ElkResultLike): ElkLayoutResu
     }
   };
   walk(elk.children ?? [], { x: 0, y: 0 });
-
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  const ancestorsOf = (id: string): string[] => {
+    const chain: string[] = [];
+    let current = nodeById.get(id)?.parentId;
+    while (current) {
+      chain.push(current);
+      current = nodeById.get(current)?.parentId;
+    }
+    return chain;
+  };
+
+  const lowestCommonAncestor = (a?: string, b?: string): string | null => {
+    if (!a || !b) {
+      return null;
+    }
+    const chainA = new Set(ancestorsOf(a));
+    for (const id of ancestorsOf(b)) {
+      if (chainA.has(id)) {
+        return id;
+      }
+    }
+    return null;
+  };
+
   const sections: Record<string, ElkPoint[]> = {};
   for (const edge of elk.edges ?? []) {
     const section = edge.sections?.[0];
     if (!section) {
       continue;
     }
-    const sourceId = edge.sources?.[0];
-    const container = sourceId ? nodeById.get(sourceId)?.parentId : undefined;
-    const offset = container ? absolute[container] ?? { x: 0, y: 0 } : { x: 0, y: 0 };
+    const lca = lowestCommonAncestor(edge.sources?.[0], edge.targets?.[0]);
+    const offset = lca ? absolute[lca] ?? { x: 0, y: 0 } : { x: 0, y: 0 };
     sections[edge.id] = [
       section.startPoint,
       ...(section.bendPoints ?? []),

@@ -31,6 +31,7 @@ const elkResult = {
     {
       id: "folder/a.ts->folder/b.ts",
       sources: ["folder/a.ts"],
+      targets: ["folder/b.ts"],
       sections: [
         {
           startPoint: { x: 110, y: 100 },
@@ -52,10 +53,14 @@ describe("applyElkResult", () => {
   it("records container sizes only", () => {
     const result = applyElkResult([node("folder"), node("folder/a.ts", "folder")], elkResult);
     expect(result.sizes["folder"]).toEqual({ width: 300, height: 200 });
+    expect(result.sizes["folder/a.ts"]).toBeUndefined();
   });
 
   it("converts sections to absolute coordinates through the source container", () => {
-    const result = applyElkResult([node("folder"), node("folder/a.ts", "folder")], elkResult);
+    const result = applyElkResult(
+      [node("folder"), node("folder/a.ts", "folder"), node("folder/b.ts", "folder")],
+      elkResult
+    );
     // folder is at (100,50); the section is relative to the folder's graph.
     expect(result.sections["folder/a.ts->folder/b.ts"]).toEqual([
       { x: 210, y: 150 },
@@ -70,5 +75,55 @@ describe("applyElkResult", () => {
       { children: [], edges: [{ id: "a->b", sources: ["a"], sections: [] }] }
     );
     expect(result.sections["a->b"]).toBeUndefined();
+  });
+
+  it("leaves cross-container sections unshifted at the root LCA", () => {
+    const result = applyElkResult(
+      [
+        node("folderA"),
+        node("folderA/a1", "folderA"),
+        node("folderB"),
+        node("folderB/b1", "folderB"),
+      ],
+      {
+        children: [
+          {
+            id: "folderA",
+            x: 30,
+            y: 40,
+            width: 200,
+            height: 100,
+            children: [{ id: "folderA/a1", x: 10, y: 10, width: 180, height: 60 }],
+          },
+          {
+            id: "folderB",
+            x: 500,
+            y: 40,
+            width: 200,
+            height: 100,
+            children: [{ id: "folderB/b1", x: 10, y: 10, width: 180, height: 60 }],
+          },
+        ],
+        edges: [
+          {
+            id: "folderA/a1->folderB/b1",
+            sources: ["folderA/a1"],
+            targets: ["folderB/b1"],
+            sections: [
+              {
+                startPoint: { x: 10, y: 20 },
+                endPoint: { x: 300, y: 40 },
+              },
+            ],
+          },
+        ],
+      }
+    );
+    // The LCA of the two endpoints is the (unrendered) root, so ELK's
+    // root-absolute section points are copied through unchanged.
+    expect(result.sections["folderA/a1->folderB/b1"]).toEqual([
+      { x: 10, y: 20 },
+      { x: 300, y: 40 },
+    ]);
   });
 });
