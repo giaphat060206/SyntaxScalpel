@@ -2,6 +2,8 @@ import { useCallback, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
+import { Breadcrumb } from "./Breadcrumb";
+import { ProjectGraph } from "../project/ProjectGraph";
 import { useLayoutAutosave } from "../graph/useLayoutAutosave";
 import type { LayoutMap } from "../../shared/types";
 
@@ -31,17 +33,21 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 
 export default function App() {
   const [root, setRoot] = useState<string | null>(null);
-  const [codeFile, setCodeFile] = useState<string | null>(null);
+  const [location, setLocationState] = useState<
+    { kind: "empty" } | { kind: "folder"; path: string } | { kind: "code"; path: string }
+  >({ kind: "empty" });
   const [docFile, setDocFile] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [docsCollapsed, setDocsCollapsed] = useState(false);
 
+  const codeFile = location.kind === "code" ? location.path : null;
+
   const savePositions = useLayoutAutosave(root, codeFile);
 
   const handleOpenFolder = useCallback((nextRoot: string) => {
     setRoot(nextRoot);
-    setCodeFile(null);
+    setLocationState({ kind: "empty" });
     setDocFile(null);
     setSelectedFile(null);
   }, []);
@@ -52,8 +58,13 @@ export default function App() {
       setDocFile(relPath);
       setDocsCollapsed(false);
     } else {
-      setCodeFile(relPath);
+      setLocationState({ kind: "code", path: relPath });
     }
+  }, []);
+
+  const handleSelectFolder = useCallback((relPath: string) => {
+    setSelectedFile(relPath);
+    setLocationState({ kind: "folder", path: relPath });
   }, []);
 
   const handleDragStop = useCallback(
@@ -112,6 +123,7 @@ export default function App() {
                     root={root}
                     onOpenFolder={handleOpenFolder}
                     onSelectFile={handleSelectFile}
+                    onSelectFolder={handleSelectFolder}
                     selectedFile={selectedFile}
                   />
                 </div>
@@ -122,7 +134,24 @@ export default function App() {
         )}
 
         <Panel minSize="20%" className="relative">
-          <ContentPane root={root} filePath={mainFile} onDragStop={handleDragStop} />
+          {location.kind !== "empty" && (
+            <Breadcrumb
+              path={location.path}
+              kind={location.kind}
+              onNavigate={setLocationState}
+            />
+          )}
+          <div className="h-[calc(100%-28px)]">
+            {location.kind === "folder" ? (
+              <ProjectGraph
+                root={root ?? ""}
+                scope={location.path}
+                onNavigate={setLocationState}
+              />
+            ) : (
+              <ContentPane root={root} filePath={mainFile} onDragStop={handleDragStop} />
+            )}
+          </div>
           {codeFile && docFile && docsCollapsed && (
             <button
               type="button"

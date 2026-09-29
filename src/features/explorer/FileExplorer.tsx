@@ -6,10 +6,17 @@ interface Props {
   root: string | null;
   onOpenFolder: (root: string) => void;
   onSelectFile: (relPath: string) => void;
+  onSelectFolder: (relPath: string) => void;
   selectedFile: string | null;
 }
 
-export function FileExplorer({ root, onOpenFolder, onSelectFile, selectedFile }: Props) {
+export function FileExplorer({
+  root,
+  onOpenFolder,
+  onSelectFile,
+  onSelectFolder,
+  selectedFile,
+}: Props) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,15 +55,16 @@ export function FileExplorer({ root, onOpenFolder, onSelectFile, selectedFile }:
         <li key={entry.path}>
           <button
             type="button"
-            onClick={() => (entry.isDir ? undefined : onSelectFile(entry.path))}
-            disabled={entry.isDir}
+            onClick={() =>
+              entry.isDir ? onSelectFolder(entry.path) : onSelectFile(entry.path)
+            }
             style={{ paddingLeft: `${8 + depth * 12}px` }}
             className={
               "block w-full text-left px-2 py-1 text-sm rounded " +
-              (entry.isDir
-                ? "text-dimmed cursor-default"
-                : selectedFile === entry.path
-                  ? "bg-accent/20 text-accent"
+              (selectedFile === entry.path
+                ? "bg-accent/20 text-accent"
+                : entry.isDir
+                  ? "text-dimmed hover:bg-white/5"
                   : "text-white/90 hover:bg-white/5")
             }
           >
