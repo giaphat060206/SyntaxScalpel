@@ -185,6 +185,7 @@ function GraphViewInner({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [showLines, setShowLines] = useState(true);
   const { fitView } = useReactFlow();
   const lastFit = useRef<string>("");
 
@@ -303,7 +304,7 @@ function GraphViewInner({
         style: {
           stroke,
           strokeWidth: 2,
-          opacity: unrelated ? 0.12 : active ? 1 : 0.7,
+          opacity: unrelated ? 0.12 : active ? 1 : showLines ? 0.7 : 0,
         },
       };
     });
@@ -482,6 +483,13 @@ function GraphViewInner({
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />
+        <button
+          type="button"
+          onClick={() => setShowLines((value) => !value)}
+          className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        >
+          {showLines ? "Hide lines" : "Show lines"}
+        </button>
         <Controls />
       </ReactFlow>
 

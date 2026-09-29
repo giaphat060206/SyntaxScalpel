@@ -140,6 +140,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showLines, setShowLines] = useState(true);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { fitView, getInternalNode, setCenter } = useReactFlow();
@@ -376,7 +377,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           style: {
             stroke,
             strokeWidth: 2,
-            opacity: unrelated ? 0.12 : focused ? 1 : 0.7,
+            opacity: unrelated ? 0.12 : focused ? 1 : showLines ? 0.7 : 0,
           },
         };
       });
@@ -485,6 +486,13 @@ className="relative h-full bg-bg"
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />
+        <button
+          type="button"
+          onClick={() => setShowLines((value) => !value)}
+          className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        >
+          {showLines ? "Hide lines" : "Show lines"}
+        </button>
         <Controls />
       </ReactFlow>
 
