@@ -1,6 +1,6 @@
 import type { Edge, Node } from "@xyflow/react";
 import ELK from "elkjs/lib/elk-api";
-import MainThreadELK from "elkjs/lib/main";
+import MainThreadELK from "elkjs/lib/elk.bundled.js";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
 import { buildElkGraph, type ElkGraph } from "./graph";
 import { applyElkResult, type ElkLayoutResult, type ElkResultLike } from "./result";
