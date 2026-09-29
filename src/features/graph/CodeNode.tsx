@@ -20,6 +20,7 @@ export interface ProjectBlock {
   collapsed?: boolean;
   imports?: FileImport[];
   fileKind?: "code" | "doc";
+  entry?: boolean;
 }
 
 export interface CodeNodeData extends Record<string, unknown> {
@@ -183,6 +184,11 @@ export function CodeNode({ data, selected }: NodeProps) {
             {isFolder ? "📁 " : project.fileKind === "doc" ? "📄 " : ""}
             {project.name}
           </span>
+          {project.entry && (
+            <span className="rounded bg-mint/20 px-1 text-[9px] uppercase tracking-wider text-mint">
+              start
+            </span>
+          )}
           {isFolder && (
             <button
               type="button"

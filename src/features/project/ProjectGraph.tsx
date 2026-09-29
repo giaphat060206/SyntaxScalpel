@@ -81,9 +81,15 @@ function toNodes(
         name: file.name,
         imports: file.imports,
         fileKind: file.kind,
+        entry: file.id === data.entry,
       },
-      // Docs/config get a muted colour so they do not read as source files.
-      color: file.kind === "doc" ? "#8A93A0" : colorForNode(file.id),
+      // Docs/config get a muted colour; the entry file gets the mint accent.
+      color:
+        file.id === data.entry
+          ? "#3DF0A8"
+          : file.kind === "doc"
+            ? "#8A93A0"
+            : colorForNode(file.id),
       highlighted: false,
       dimmed: false,
     } satisfies CodeNodeData,
@@ -349,6 +355,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 
   return (
     <div className="relative h-full bg-bg" onContextMenu={(event) => event.preventDefault()}>
+      {data.entry && (
+        <div className="absolute left-3 top-3 z-10 rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
+          Start: {data.entry}
+        </div>
+      )}
       {data.truncated && (
         <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded border border-yellow-500/40 bg-panel px-3 py-1 text-xs text-yellow-300">
           Large project: only the first 2000 files are shown

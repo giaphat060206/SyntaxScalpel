@@ -77,4 +77,5 @@ export interface ProjectGraph {
   files: ProjectFile[];
   edges: ProjectEdge[];
   truncated: boolean;
+  entry?: string;
 }

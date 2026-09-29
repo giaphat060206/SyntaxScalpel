@@ -59,6 +59,8 @@ pub struct ProjectGraph {
     pub files: Vec<ProjectFile>,
     pub edges: Vec<ProjectEdge>,
     pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
 }
 
 pub fn build_tree(
@@ -98,6 +100,7 @@ pub fn build_tree(
         files: Vec::new(),
         edges: Vec::new(),
         truncated: false,
+        entry: None,
     };
     let mut collected: Vec<(PathBuf, String)> = Vec::new();
     collect(
@@ -260,7 +263,111 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
             .then(a.target.cmp(&b.target))
     });
     graph.edges.dedup_by(|a, b| a.source == b.source && a.target == b.target);
+
+    graph.entry = detect_entry(root_path, scope_rel, &graph);
+
+    // Show the entry file first inside its own folder so it is easy to spot.
+    if let Some(entry) = graph.entry.clone() {
+        graph.files.sort_by(|a, b| a.id.cmp(&b.id));
+        if let Some(index) = graph.files.iter().position(|file| file.id == entry) {
+            let file = graph.files.remove(index);
+            let folder = file.folder_id.clone();
+            let insert_at = graph
+                .files
+                .iter()
+                .position(|other| other.folder_id == folder)
+                .unwrap_or(graph.files.len());
+            graph.files.insert(insert_at, file);
+        }
+    }
     Ok(graph)
+}
+
+/// Best-guess entry file: conventions first, then graph roots (files nothing
+/// imports that import something).
+fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<String> {
+    let code: Vec<&ProjectFile> = graph.files.iter().filter(|f| f.kind == "code").collect();
+
+    // 1. Python `if __name__ == "__main__":` guard.
+    for file in &code {
+        if let Ok(source) = std::fs::read_to_string(root.join(&file.id)) {
+            if source.contains("__name__") && source.contains("__main__") {
+                return Some(file.id.clone());
+            }
+        }
+    }
+
+    // 2. Conventional file names.
+    const NAMES: [&str; 12] = [
+        "__main__.py", "main.py", "app.py", "manage.py", "run.py", "cli.py", "index.ts", "index.tsx",
+        "index.js", "index.jsx", "server.ts", "server.js",
+    ];
+    for name in NAMES {
+        if let Some(file) = code
+            .iter()
+            .find(|file| file.id.rsplit('/').next() == Some(name))
+        {
+            return Some(file.id.clone());
+        }
+    }
+
+    // 3. package.json main / module / scripts.start.
+    let scope_dir = root.join(scope_rel);
+    if let Ok(text) = std::fs::read_to_string(scope_dir.join("package.json")) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+            let mut pointers: Vec<String> = Vec::new();
+            for key in ["main", "module"] {
+                if let Some(value) = json.get(key).and_then(|v| v.as_str()) {
+                    pointers.push(value.to_string());
+                }
+            }
+            if let Some(start) = json
+                .get("scripts")
+                .and_then(|scripts| scripts.get("start"))
+                .and_then(|value| value.as_str())
+            {
+                pointers.push(start.to_string());
+            }
+            let prefix = if scope_rel.is_empty() {
+                String::new()
+            } else {
+                format!("{}/", scope_rel.replace('\\', "/"))
+            };
+            for pointer in pointers {
+                let cleaned = pointer
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or("")
+                    .trim_start_matches("./");
+                for candidate in [
+                    format!("{prefix}{cleaned}"),
+                    format!("{prefix}{cleaned}.js"),
+                    format!("{prefix}{cleaned}.ts"),
+                    format!("{prefix}{cleaned}.tsx"),
+                ] {
+                    if let Some(file) = code.iter().find(|file| file.id == candidate) {
+                        return Some(file.id.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Graph roots: nothing imports them, but they import something.
+    let mut imported = std::collections::HashSet::new();
+    for edge in &graph.edges {
+        imported.insert(edge.target.clone());
+    }
+    let mut candidates: Vec<&str> = code
+        .iter()
+        .filter(|file| {
+            !imported.contains(&file.id)
+                && graph.edges.iter().any(|edge| edge.source == file.id)
+        })
+        .map(|file| file.id.as_str())
+        .collect();
+    candidates.sort_unstable();
+    candidates.first().map(|id| id.to_string())
 }
 
 #[cfg(test)]
@@ -364,6 +471,46 @@ mod tests {
         assert!(graph.edges.is_empty());
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+    }
+
+    #[test]
+    fn detects_entry_by_guard_and_sorts_it_first() {
+        let root = temp_project("entry-guard");
+        std::fs::write(root.join("helpers.py"), "def h():\n    return 1\n").unwrap();
+        std::fs::write(root.join("zeta.py"), "def z():\n    return 2\n").unwrap();
+        std::fs::write(
+            root.join("main.py"),
+            "from helpers import h\n\nif __name__ == \"__main__\":\n    h()\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entry.as_deref(), Some("main.py"));
+        assert_eq!(graph.files[0].id, "main.py");
+    }
+
+    #[test]
+    fn detects_entry_by_graph_root_when_no_convention() {
+        let root = temp_project("entry-root");
+        std::fs::write(root.join("b.py"), "def b():\n    return 1\n").unwrap();
+        std::fs::write(
+            root.join("a.py"),
+            "from b import b\n\ndef run():\n    return b()\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entry.as_deref(), Some("a.py"));
+    }
+
+    #[test]
+    fn detects_entry_by_conventional_name() {
+        let root = temp_project("entry-name");
+        std::fs::write(root.join("app.py"), "def run():\n    return 1\n").unwrap();
+        std::fs::write(root.join("zzz.py"), "def z():\n    return 1\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entry.as_deref(), Some("app.py"));
     }
 
     #[test]
