@@ -55,6 +55,83 @@ function hiddenIds(data: ProjectGraphData, collapsed: Set<string>): Set<string> 
   return hidden;
 }
 
+/**
+ * Nodes related to the selection, or null when nothing is selected.
+ * - a file: itself, the files it imports, the files importing it, and their folders
+ * - a folder: the folder, its descendants, and any file connected to one of them
+ */
+function highlightIds(
+  data: ProjectGraphData,
+  selectedId: string | null
+): Set<string> | null {
+  if (!selectedId) {
+    return null;
+  }
+  const set = new Set<string>();
+  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
+  const addFolderChain = (folderId: string) => {
+    set.add(folderId);
+    let parent = folderById.get(folderId)?.parentId;
+    while (parent) {
+      set.add(parent);
+      parent = folderById.get(parent)?.parentId;
+    }
+  };
+  if (folderById.has(selectedId)) {    set.add(selectedId);
+    for (const folder of data.folders) {
+      if (folder.id === selectedId || folder.id.startsWith(`${selectedId}/`)) {
+        set.add(folder.id);
+      }
+    }
+    const inside = data.files.filter(
+      (file) =>
+        file.folderId === selectedId ||
+        file.folderId.startsWith(`${selectedId}/`)
+    );
+    const insideIds = new Set(inside.map((file) => file.id));
+    for (const file of inside) {
+      set.add(file.id);
+      addFolderChain(file.folderId);
+    }
+    for (const file of data.files) {
+      if (insideIds.has(file.id)) {
+        continue;
+      }
+      const importsIn = file.imports.some((imp) => insideIds.has(imp.targetId));
+      const importedByInside = inside.some((source) =>
+        source.imports.some((imp) => imp.targetId === file.id)
+      );
+      if (importsIn || importedByInside) {
+        set.add(file.id);
+        addFolderChain(file.folderId);
+      }
+    }
+    return set;
+  }
+
+  set.add(selectedId);
+  const file = data.files.find((entry) => entry.id === selectedId);
+  if (file) {
+    addFolderChain(file.folderId);
+    for (const imp of file.imports) {
+      if (imp.targetId) {
+        set.add(imp.targetId);
+        const target = data.files.find((entry) => entry.id === imp.targetId);
+        if (target) {
+          addFolderChain(target.folderId);
+        }
+      }
+    }
+    for (const other of data.files) {
+      if (other.imports.some((imp) => imp.targetId === selectedId)) {
+        set.add(other.id);
+        addFolderChain(other.folderId);
+      }
+    }
+  }
+  return set;
+}
+
 function toNodes(
   data: ProjectGraphData,
   collapsed: Set<string>,
@@ -207,31 +284,42 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return;
     }
     const hidden = hiddenIds(data, collapsed);
+    const highlight = highlightIds(data, selectedId);
     setNodes((current) =>
       current.map((node) => {
         const shouldHide = hidden.has(node.id);
         const isFolder = Boolean((node.data as CodeNodeData).project?.kind === "folder");
         const collapsedFlag = collapsed.has(node.id);
         const currentFlag = (node.data as CodeNodeData).project?.collapsed;
-        if (node.hidden === shouldHide && (!isFolder || currentFlag === collapsedFlag)) {
+        const dimmed = highlight ? !highlight.has(node.id) : false;
+        const highlighted = highlight ? node.id === selectedId : false;
+        const data_ = node.data as CodeNodeData;
+        if (
+          node.hidden === shouldHide &&
+          data_.dimmed === dimmed &&
+          data_.highlighted === highlighted &&
+          (!isFolder || currentFlag === collapsedFlag)
+        ) {
           return node;
         }
         return {
           ...node,
           hidden: shouldHide,
-          data: isFolder
-            ? {
-                ...node.data,
-                project: {
+          data: {
+            ...node.data,
+            dimmed,
+            highlighted,
+            project: isFolder
+              ? {
                   ...(node.data as CodeNodeData).project,
                   collapsed: collapsedFlag,
-                },
-              }
-            : node.data,
+                }
+              : (node.data as CodeNodeData).project,
+          },
         };
       })
     );
-  }, [data, collapsed, setNodes]);
+  }, [data, collapsed, selectedId, setNodes]);
 
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}:${node.hidden ? 1 : 0}`)
@@ -257,6 +345,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return [];
     }
     const byId = new Map(nodes.map((node) => [node.id, node]));
+    const highlight = highlightIds(data, selectedId);
     const outCount = new Map<string, number>();
     const inCount = new Map<string, number>();
     return data.edges
@@ -272,10 +361,13 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const targetIndex = inCount.get(edge.target) ?? 0;
         outCount.set(edge.source, sourceIndex + 1);
         inCount.set(edge.target, targetIndex + 1);
-        const active =
+        const related = highlight
+          ? highlight.has(edge.source) && highlight.has(edge.target)
+          : false;
+        const unrelated = highlight !== null && !related;
+        const touchesSelection =
           selectedId !== null &&
           (edge.source === selectedId || edge.target === selectedId);
-        const unrelated = selectedId !== null && !active;
         const stroke =
           (source.data as CodeNodeData).color ?? "#00F0FF";
         return {
@@ -295,7 +387,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           style: {
             stroke,
             strokeWidth: 2,
-            opacity: unrelated ? 0.12 : active ? 1 : 0.7,
+            opacity: unrelated ? 0.12 : touchesSelection || related ? 1 : 0.7,
           },
         };
       });
@@ -327,6 +419,19 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     data && selectedId
       ? data.files.find((file) => file.id === selectedId)
       : undefined;
+
+  // Files that import the selected file, with the symbols they pull from it.
+  const importers =
+    data && selectedFile
+      ? data.files
+          .map((file) => ({
+            path: file.id,
+            names: file.imports
+              .filter((imp) => imp.targetId === selectedFile.id)
+              .flatMap((imp) => imp.names),
+          }))
+          .filter((entry) => entry.path !== selectedFile.id && entry.names.length > 0)
+      : [];
 
   if (error) {
     return <ErrorState message={error} />;
@@ -380,6 +485,19 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
               >
                 {entry.targetId || entry.specifier}
                 {entry.names.length > 0 ? `: ${entry.names.join(", ")}` : ""}
+              </div>
+            ))
+          )}
+          <div className="mt-2 text-[10px] uppercase tracking-wider text-dimmed">
+            Imported by
+          </div>
+          {importers.length === 0 ? (
+            <div className="font-mono text-white/80">none</div>
+          ) : (
+            importers.map((importer) => (
+              <div key={importer.path} className="break-words font-mono text-white/85">
+                {importer.path}
+                {importer.names.length > 0 ? `: ${importer.names.join(", ")}` : ""}
               </div>
             ))
           )}
