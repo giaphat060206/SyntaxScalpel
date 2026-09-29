@@ -34,3 +34,13 @@ html, body, #root {
   fill: #00F0FF;
   color: #00F0FF;
 }
+
+/* Edges draw beneath blocks by default. Focusing a block raises the whole edge
+   layer so its connections read clearly on top of every block. */
+.react-flow__edges {
+  z-index: 0;
+}
+
+.syntax-flow--elevate-edges .react-flow__edges {
+  z-index: 3;
+}

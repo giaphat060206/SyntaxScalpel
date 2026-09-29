@@ -431,7 +431,10 @@ function GraphViewInner({
 
   return (
     <div
-      className="relative h-full bg-bg"
+      className={
+        "relative h-full bg-bg" +
+        (selectedId !== null ? " syntax-flow--elevate-edges" : "")
+      }
       // Suppress WebView2's native context menu everywhere in the canvas (including
       // on our own menu), so only the custom menu below ever shows.
       onContextMenu={(event) => event.preventDefault()}

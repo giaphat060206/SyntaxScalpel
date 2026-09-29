@@ -420,7 +420,13 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   }
 
   return (
-    <div className="relative h-full bg-bg" onContextMenu={(event) => event.preventDefault()}>
+    <div
+      className={
+        "relative h-full bg-bg" +
+        (selectedId !== null ? " syntax-flow--elevate-edges" : "")
+      }
+      onContextMenu={(event) => event.preventDefault()}
+    >
       {entryList.length > 0 && (
         <div className="absolute left-3 top-3 z-10 max-w-[70%] rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
           {entryList.length === 1 ? "Start: " : `Starts (${entryList.length}): `}
