@@ -150,6 +150,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { fitView, getInternalNode, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
+  const lastLayoutKey = useRef<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -341,6 +342,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         setNodes((current) => reflowLayout(current));
         return;
       }
+      const key = `${scope}|${layoutRun}|${sizeSignature}|${collapsed.size}`;
+      if (lastLayoutKey.current === key) {
+        return;
+      }
+      lastLayoutKey.current = key;
       setSections(result.sections);
       setNodes((current) =>
         current.map((node) => {

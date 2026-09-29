@@ -186,6 +186,7 @@ function GraphViewInner({
   const [layoutRun, setLayoutRun] = useState(0);
   const { fitView } = useReactFlow();
   const lastFit = useRef<string>("");
+  const lastLayoutKey = useRef<string>("");
 
   // Rebuild the flow whenever a different file (or its import analysis) changes.
   useEffect(() => {
@@ -309,6 +310,7 @@ function GraphViewInner({
       return;
     }
     let cancelled = false;
+    const filePath = result.filePath;
     const timer = window.setTimeout(async () => {
       const result = await runElkLayout(nodes, edgesForLayout);
       if (cancelled) {
@@ -319,6 +321,11 @@ function GraphViewInner({
         setNodes((current) => reflowLayout(current));
         return;
       }
+      const key = `${filePath}|${layoutRun}|${sizeSignature}|${showLines}`;
+      if (lastLayoutKey.current === key) {
+        return;
+      }
+      lastLayoutKey.current = key;
       setSections(result.sections);
       setNodes((current) =>
         current.map((node) => {
