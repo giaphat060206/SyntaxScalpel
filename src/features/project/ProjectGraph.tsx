@@ -248,17 +248,46 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     setNodes((current) => reflowLayout(current));
   }, [sizeSignature, setNodes]);
 
+  // Centre the viewport on one block at a given zoom.
+  const centerOn = useCallback(
+    (id: string, zoom: number) => {
+      const node = nodes.find((entry) => entry.id === id);
+      if (!node) {
+        return false;
+      }
+      const parent = node.parentId
+        ? nodes.find((entry) => entry.id === node.parentId)
+        : undefined;
+      const x =
+        (parent?.position.x ?? 0) +
+        node.position.x +
+        (node.measured?.width ?? 180) / 2;
+      const y =
+        (parent?.position.y ?? 0) +
+        node.position.y +
+        (node.measured?.height ?? 60) / 2;
+      setCenter(x, y, { zoom, duration: 400 });
+      return true;
+    },
+    [nodes, setCenter]
+  );
+
+  // First view of a scope: centre on the start file when there is one, so the
+  // graph opens "at" the entry point instead of zoomed out over everything.
   const fitToken = `${root}|${scope}`;
   useEffect(() => {
-    if (!data || lastFit.current === fitToken) {
+    if (!data || nodes.length === 0 || lastFit.current === fitToken) {
       return;
     }
     const timer = window.setTimeout(() => {
+      const focused = data.entry ? centerOn(data.entry, 1.1) : false;
+      if (!focused) {
+        fitView({ padding: 0.2 });
+      }
       lastFit.current = fitToken;
-      fitView({ padding: 0.2 });
-    }, 120);
+    }, 150);
     return () => window.clearTimeout(timer);
-  }, [fitToken, sizeSignature, data, fitView]);
+  }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);
 
   const edges: Edge[] = useMemo(() => {
     if (!data) {
@@ -321,24 +350,9 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const focusEntry = useCallback(
     (id: string) => {
       setSelectedId(id);
-      const node = nodes.find((entry) => entry.id === id);
-      if (!node) {
-        return;
-      }
-      const parent = node.parentId
-        ? nodes.find((entry) => entry.id === node.parentId)
-        : undefined;
-      const x =
-        (parent?.position.x ?? 0) +
-        node.position.x +
-        (node.measured?.width ?? 180) / 2;
-      const y =
-        (parent?.position.y ?? 0) +
-        node.position.y +
-        (node.measured?.height ?? 60) / 2;
-      setCenter(x, y, { zoom: 1.2, duration: 400 });
+      centerOn(id, 1.2);
     },
-    [nodes, setCenter]
+    [centerOn]
   );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
