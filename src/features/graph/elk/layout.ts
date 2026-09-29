@@ -1,34 +1,72 @@
 import type { Edge, Node } from "@xyflow/react";
 import ELK from "elkjs/lib/elk-api";
+import MainThreadELK from "elkjs/lib/main";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
-import { buildElkGraph } from "./graph";
-import { applyElkResult, type ElkLayoutResult } from "./result";
+import { buildElkGraph, type ElkGraph } from "./graph";
+import { applyElkResult, type ElkLayoutResult, type ElkResultLike } from "./result";
 
 const MAX_NODES = 1500;
+const LAYOUT_TIMEOUT_MS = 15000;
 
-type LayoutFn = (graph: unknown) => Promise<unknown>;
+interface ElkLike {
+  layout(graph: ElkGraph): Promise<ElkResultLike>;
+}
 
-let elk: InstanceType<typeof ELK> | null = null;
+type ElkFactory = () => ElkLike;
+type LayoutFn = (graph: ElkGraph) => Promise<ElkResultLike>;
+
+let elk: ElkLike | null = null;
 let override: LayoutFn | null = null;
+let factoryOverride: ElkFactory | null = null;
+
+function createElk(): ElkLike {
+  if (factoryOverride) {
+    return factoryOverride();
+  }
+  try {
+    return new ELK({ workerUrl }) as unknown as ElkLike;
+  } catch {
+    // The api build cannot run without a worker; use the main-thread build.
+    return new MainThreadELK() as unknown as ElkLike;
+  }
+}
 
 function getLayoutFn(): LayoutFn {
   if (override) {
     return override;
   }
   if (!elk) {
-    try {
-      elk = new ELK({ workerUrl });
-    } catch {
-      // Worker unavailable (older WebView, CSP): fall back to the main thread.
-      elk = new ELK();
-    }
+    elk = createElk();
   }
-  return (graph) => elk!.layout(graph as never);
+  const instance = elk;
+  return (graph) => instance.layout(graph);
 }
 
-/** Test seam: replace the ELK call (pass null to restore the real one). */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error("elk layout timed out")), ms);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+/** Test seam: replace the ELK call (null restores the real one). */
 export function __setElkLayoutForTests(layoutFn: LayoutFn | null): void {
   override = layoutFn;
+}
+
+/** Test seam: replace the ELK instance factory (null restores the real one). */
+export function __setElkFactoryForTests(factory: ElkFactory | null): void {
+  factoryOverride = factory;
+  elk = null;
 }
 
 export async function runElkLayout(
@@ -40,8 +78,8 @@ export async function runElkLayout(
   }
   try {
     const graph = buildElkGraph(nodes, edges);
-    const result = await getLayoutFn()(graph);
-    return applyElkResult(nodes, result as never);
+    const result = await withTimeout(getLayoutFn()(graph), LAYOUT_TIMEOUT_MS);
+    return applyElkResult(nodes, result);
   } catch {
     return null;
   }
