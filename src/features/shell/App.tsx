@@ -57,8 +57,12 @@ export default function App() {
     if (relPath.toLowerCase().endsWith(".md")) {
       setDocFile(relPath);
       setDocsCollapsed(false);
+      setLocationState((current) =>
+        current.kind === "folder" ? { kind: "empty" } : current
+      );
     } else {
       setLocationState({ kind: "code", path: relPath });
+      setSelectedFile(relPath);
     }
   }, []);
 
@@ -124,7 +128,9 @@ export default function App() {
                     onOpenFolder={handleOpenFolder}
                     onSelectFile={handleSelectFile}
                     onSelectFolder={handleSelectFolder}
-                    selectedFile={selectedFile}
+                    selectedFile={
+                      location.kind === "empty" ? selectedFile : location.path
+                    }
                   />
                 </div>
               </div>
@@ -141,7 +147,11 @@ export default function App() {
               onNavigate={setLocationState}
             />
           )}
-          <div className="h-[calc(100%-28px)]">
+          <div
+            className={
+              location.kind === "empty" ? "h-full" : "h-[calc(100%-28px)]"
+            }
+          >
             {location.kind === "folder" ? (
               <ProjectGraph
                 root={root ?? ""}
