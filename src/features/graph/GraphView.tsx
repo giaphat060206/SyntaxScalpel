@@ -483,15 +483,16 @@ function GraphViewInner({
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />
-        <button
-          type="button"
-          onClick={() => setShowLines((value) => !value)}
-          className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
-        >
-          {showLines ? "Hide lines" : "Show lines"}
-        </button>
         <Controls />
       </ReactFlow>
+
+      <button
+        type="button"
+        onClick={() => setShowLines((value) => !value)}
+        className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+      >
+        {showLines ? "Hide lines" : "Show lines"}
+      </button>
 
       {activeGraph && (
         <div className="absolute right-3 top-3 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">

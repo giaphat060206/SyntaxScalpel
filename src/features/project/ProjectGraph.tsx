@@ -381,7 +381,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           },
         };
       });
-  }, [data, nodes, selectedId]);
+  }, [data, nodes, selectedId, showLines]);
 
   const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     setSelectedId(node.id);
@@ -486,6 +486,10 @@ className="relative h-full bg-bg"
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />
+
+        <Controls />
+      </ReactFlow>
+
         <button
           type="button"
           onClick={() => setShowLines((value) => !value)}
@@ -493,8 +497,6 @@ className="relative h-full bg-bg"
         >
           {showLines ? "Hide lines" : "Show lines"}
         </button>
-        <Controls />
-      </ReactFlow>
 
       {selectedFile && (
         <div className="absolute right-3 top-3 z-20 max-h-[60%] w-80 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">
