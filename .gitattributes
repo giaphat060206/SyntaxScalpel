@@ -1,0 +1,7 @@
+# Normalise line endings in the repository to LF; keep working-tree files LF too.
+* text=auto eol=lf
+
+# Binary assets are left untouched.
+*.png binary
+*.ico binary
+*.icns binary
