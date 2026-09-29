@@ -241,11 +241,17 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     );
   }, [data, collapsed, selectedId, setNodes]);
 
+  // Re-stack once the measured heights have settled. With many nodes, React Flow
+  // measures them in waves; coalescing the reflow avoids re-gridding the whole
+  // graph dozens of times (which reads as the graph flinging around).
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}:${node.hidden ? 1 : 0}`)
     .join("|");
   useEffect(() => {
-    setNodes((current) => reflowLayout(current));
+    const timer = window.setTimeout(() => {
+      setNodes((current) => reflowLayout(current));
+    }, 140);
+    return () => window.clearTimeout(timer);
   }, [sizeSignature, setNodes]);
 
   // Centre the viewport on one block at a given zoom. Uses React Flow's computed
@@ -284,11 +290,13 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
-      const focused = data.entry ? centerOn(data.entry, 1.1, 0) : false;
+      // Wait a beat so the first coalesced reflow has settled the positions.
+      const focused =
+        data.entry && attempts >= 2 ? centerOn(data.entry, 1.1, 0) : false;
       if (focused) {
         lastFit.current = fitToken;
         window.clearInterval(timer);
-      } else if (attempts >= 10) {
+      } else if (attempts >= 12) {
         lastFit.current = fitToken;
         fitView({ padding: 0.2, duration: 0 });
         window.clearInterval(timer);

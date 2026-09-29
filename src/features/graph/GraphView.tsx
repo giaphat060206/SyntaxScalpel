@@ -293,11 +293,17 @@ function GraphViewInner({
   // resize. Keyed on a height signature so dragging positions never triggers a
   // reflow, and converges because `reflowLayout` returns the same array when
   // nothing needs to move.
+  // Re-stack once the measured heights have settled. With many nodes, React Flow
+  // measures them in waves; coalescing the reflow avoids re-gridding the whole
+  // graph dozens of times (which reads as the graph flinging around).
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}`)
     .join("|");
   useEffect(() => {
-    setNodes((current) => reflowLayout(current));
+    const timer = window.setTimeout(() => {
+      setNodes((current) => reflowLayout(current));
+    }, 140);
+    return () => window.clearTimeout(timer);
   }, [sizeSignature, setNodes]);
 
   // Fit the view once per file (and once more when import blocks arrive), after
