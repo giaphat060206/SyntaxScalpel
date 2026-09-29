@@ -173,8 +173,14 @@ function toNodes(
     hidden: hidden.has(file.id),
     style: { width: 180 },
     data: {
-      project: { kind: "file", name: file.name, imports: file.imports },
-      color: colorForNode(file.id),
+      project: {
+        kind: "file",
+        name: file.name,
+        imports: file.imports,
+        fileKind: file.kind,
+      },
+      // Docs/config get a muted colour so they do not read as source files.
+      color: file.kind === "doc" ? "#8A93A0" : colorForNode(file.id),
       highlighted: false,
       dimmed: false,
     } satisfies CodeNodeData,

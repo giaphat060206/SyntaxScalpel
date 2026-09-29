@@ -7,6 +7,10 @@ use crate::parser::imports::{extract_imports, resolve_specifier, stem_index};
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
 const CODE_EXTENSIONS: [&str; 5] = ["py", "js", "jsx", "ts", "tsx"];
+const DOC_EXTENSIONS: [&str; 12] = [
+    "md", "txt", "json", "yaml", "yml", "toml", "ini", "css", "scss", "html",
+    "sql", "sh",
+];
 const SKIPPED_DIRS: [&str; 8] = [
     ".git", "node_modules", "target", "dist", ".scalpel", "__pycache__", ".venv", "venv",
 ];
@@ -35,6 +39,8 @@ pub struct ProjectFile {
     pub id: String,
     pub name: String,
     pub folder_id: String,
+    /// `"code"` for parsed languages, `"doc"` for markdown/config/text files.
+    pub kind: String,
     pub imports: Vec<FileImport>,
 }
 
@@ -146,20 +152,27 @@ fn collect(
             });
             collect(root, &path, scope_id, depth + 1, &id, graph, collected);
         } else if let Some((_, ext)) = name.rsplit_once('.') {
-            if CODE_EXTENSIONS.contains(&ext.to_lowercase().as_str()) {
-                if collected.len() >= MAX_FILES {
-                    graph.truncated = true;
-                    return;
-                }
-                let id = id_of(root, &path, scope_id);
-                graph.files.push(ProjectFile {
-                    id: id.clone(),
-                    name,
-                    folder_id: folder_id.to_string(),
-                    imports: Vec::new(),
-                });
-                collected.push((path, folder_id.to_string()));
+            let ext = ext.to_lowercase();
+            let kind = if CODE_EXTENSIONS.contains(&ext.as_str()) {
+                "code"
+            } else if DOC_EXTENSIONS.contains(&ext.as_str()) {
+                "doc"
+            } else {
+                continue;
+            };
+            if collected.len() >= MAX_FILES {
+                graph.truncated = true;
+                return;
             }
+            let id = id_of(root, &path, scope_id);
+            graph.files.push(ProjectFile {
+                id: id.clone(),
+                name,
+                folder_id: folder_id.to_string(),
+                kind: kind.to_string(),
+                imports: Vec::new(),
+            });
+            collected.push((path, folder_id.to_string()));
         }
     }
 }
@@ -181,13 +194,31 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     let root_path = Path::new(root);
     let (mut graph, collected) = build_tree(root_path, scope_rel)?;
 
-    let paths: Vec<PathBuf> = collected.iter().map(|(path, _)| path.clone()).collect();
-    let index = stem_index(&paths);
+    // Only parsed languages contribute import relationships; docs/config files
+    // are shown but never parsed for imports, and imports resolve to code.
+    let code_paths: Vec<PathBuf> = graph
+        .files
+        .iter()
+        .filter(|file| file.kind == "code")
+        .map(|file| root_path.join(&file.id))
+        .collect();
+    let index = stem_index(&code_paths);
     let ids: std::collections::HashSet<String> =
         graph.files.iter().map(|file| file.id.clone()).collect();
 
     for (path, _) in &collected {
         let id = id_of(root_path, path, &graph.root);
+        let Some(kind) = graph
+            .files
+            .iter()
+            .find(|file| file.id == id)
+            .map(|file| file.kind.clone())
+        else {
+            continue;
+        };
+        if kind != "code" {
+            continue;
+        }
         let source = std::fs::read_to_string(path).unwrap_or_default();
         let mut imports = Vec::new();
         let mut edges = Vec::new();
@@ -258,10 +289,16 @@ mod tests {
         let file_ids: Vec<&str> = graph.files.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(
             file_ids,
-            vec!["data/loader.py", "data/loaders/io.py", "main.py"]
+            vec![
+                "data/loader.py",
+                "data/loaders/io.py",
+                "data/notes.txt",
+                "main.py"
+            ]
         );
         assert_eq!(graph.files[0].folder_id, "data");
-        assert_eq!(graph.files[2].folder_id, ".");
+        assert_eq!(graph.files[2].kind, "doc");
+        assert_eq!(graph.files[3].folder_id, ".");
     }
 
     #[test]
@@ -319,6 +356,45 @@ mod tests {
         assert!(graph.edges.is_empty());
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+    }
+
+    #[test]
+    fn includes_docs_but_not_unknown_types() {
+        let root = temp_project("docs");
+        std::fs::write(root.join("README.md"), "# hi\n").unwrap();
+        std::fs::write(root.join("settings.json"), "{}\n").unwrap();
+        std::fs::write(root.join("styles.css"), "body {}\n").unwrap();
+        std::fs::write(root.join("app.py"), "def run():\n    return 1\n").unwrap();
+        std::fs::write(root.join("notes.xyz"), "x\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let kinds: Vec<(&str, &str)> = graph
+            .files
+            .iter()
+            .map(|file| (file.id.as_str(), file.kind.as_str()))
+            .collect();
+        assert!(kinds.contains(&("README.md", "doc")));
+        assert!(kinds.contains(&("settings.json", "doc")));
+        assert!(kinds.contains(&("styles.css", "doc")));
+        assert!(kinds.contains(&("app.py", "code")));
+        assert!(!kinds.iter().any(|(id, _)| *id == "notes.xyz"));
+    }
+
+    #[test]
+    fn edges_can_target_config_files() {
+        let root = temp_project("config-edge");
+        std::fs::write(root.join("settings.json"), "{}\n").unwrap();
+        std::fs::write(
+            root.join("cfg.py"),
+            "from settings import value\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "cfg.py" && edge.target == "settings.json"));
     }
 
     #[test]

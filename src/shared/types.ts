@@ -62,6 +62,7 @@ export interface ProjectFile {
   id: string;
   name: string;
   folderId: string;
+  kind: "code" | "doc";
   imports: FileImport[];
 }
 

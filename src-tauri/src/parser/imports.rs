@@ -258,7 +258,10 @@ pub fn resolve_specifier(
 
 fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
     let base = root.join(relative_base);
-    const EXTS: [&str; 5] = ["py", "ts", "tsx", "js", "jsx"];
+    const EXTS: [&str; 17] = [
+        "py", "ts", "tsx", "js", "jsx", "md", "json", "css", "scss", "html", "yaml", "yml",
+        "toml", "ini", "txt", "sql", "sh",
+    ];
     for ext in EXTS {
         let candidate = base.with_extension(ext);
         if candidate.is_file() {

@@ -19,6 +19,7 @@ export interface ProjectBlock {
   name: string;
   collapsed?: boolean;
   imports?: FileImport[];
+  fileKind?: "code" | "doc";
 }
 
 export interface CodeNodeData extends Record<string, unknown> {
@@ -179,7 +180,7 @@ export function CodeNode({ data, selected }: NodeProps) {
             style={{ color }}
             title={project.name}
           >
-            {isFolder ? "📁 " : ""}
+            {isFolder ? "📁 " : project.fileKind === "doc" ? "📄 " : ""}
             {project.name}
           </span>
           {isFolder && (
