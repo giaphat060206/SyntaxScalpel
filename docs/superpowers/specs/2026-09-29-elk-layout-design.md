@@ -30,11 +30,10 @@ The user asked for "full ELK" and dismissed the follow-up questions, so these ar
 
 ```
 src/features/graph/elk/
-  graph.ts        buildElkGraph(nodes, edges)      -> ElkNode (pure, tested)
-  result.ts       applyElkResult(nodes, result)    -> { nodes, sections } (pure, tested)
-  path.ts         sectionToPath(sections)          -> SVG path string (pure, tested)
-  worker.ts       elk worker bootstrap
-  layout.ts       runElkLayout(nodes, edges, opts) -> Promise<ElkLayoutResult> (worker + fallback)
+  graph.ts        buildElkGraph(nodes, edges)   -> ElkNode (pure, tested)
+  result.ts       applyElkResult(nodes, result) -> { positions, sizes, sections } (pure, tested)
+  path.ts         sectionToPath(sections)       -> SVG path string (pure, tested)
+  layout.ts       runElkLayout(nodes, edges)    -> Promise<ElkLayoutResult> (worker + fallback)
   ElkEdge.tsx     custom edge drawing ELK sections (falls back to smoothstep)
 ```
 
@@ -80,7 +79,7 @@ interface ElkLayoutResult {
 
 ### 3.4 Path building (`path.ts`)
 
-`sectionToPath(points)` → `"M x0 y0 L x1 y1 …"` with a small corner radius applied by `elk.layered` bend points; no smoothing needed since ELK already produces orthogonal channels. A final short segment is added toward the target so the arrow marker lands on the block edge.
+`sectionToPath(points)` → `"M x0 y0 L x1 y1 …"` with a small corner radius applied by `elk.layered` bend points; no smoothing needed since ELK already produces orthogonal channels and its `endPoint` already sits on the target block boundary.
 
 ### 3.5 Custom edge (`ElkEdge.tsx`)
 
