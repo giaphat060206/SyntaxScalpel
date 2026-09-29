@@ -40,11 +40,3 @@ export function projectGraph(root: string, scope: string): Promise<ProjectGraph>
 export function loadLayout(root: string, relPath: string): Promise<LayoutMap | null> {
   return invoke<LayoutMap | null>("load_layout", { root, relPath });
 }
-
-export function saveLayout(
-  root: string,
-  relPath: string,
-  layout: LayoutMap
-): Promise<void> {
-  return invoke<void>("save_layout", { root, relPath, layout });
-}

@@ -4,8 +4,6 @@ import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
 import { ProjectGraph } from "../project/ProjectGraph";
-import { useLayoutAutosave } from "../graph/useLayoutAutosave";
-import type { LayoutMap } from "../../shared/types";
 
 const iconButton =
   "flex h-6 w-6 items-center justify-center rounded-full border border-accent/40 bg-panel text-accent hover:bg-accent/10";
@@ -43,8 +41,6 @@ export default function App() {
 
   const codeFile = location.kind === "code" ? location.path : null;
 
-  const savePositions = useLayoutAutosave(root, codeFile);
-
   const handleOpenFolder = useCallback((nextRoot: string) => {
     setRoot(nextRoot);
     setDocFile(null);
@@ -71,11 +67,6 @@ export default function App() {
     setSelectedFile(relPath);
     setLocationState({ kind: "folder", path: relPath });
   }, []);
-
-  const handleDragStop = useCallback(
-    (positions: LayoutMap) => savePositions(positions),
-    [savePositions]
-  );
 
   const showDocs = Boolean(codeFile && docFile && !docsCollapsed);
   const mainFile = showDocs ? codeFile : (codeFile ?? docFile);
@@ -160,7 +151,7 @@ export default function App() {
                 onNavigate={setLocationState}
               />
             ) : (
-              <ContentPane root={root} filePath={mainFile} onDragStop={handleDragStop} />
+              <ContentPane root={root} filePath={mainFile} />
             )}
           </div>
           {codeFile && docFile && docsCollapsed && (
@@ -193,7 +184,7 @@ export default function App() {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <ContentPane root={root} filePath={docFile} onDragStop={handleDragStop} />
+                  <ContentPane root={root} filePath={docFile} />
                 </div>
               </div>
             </Panel>

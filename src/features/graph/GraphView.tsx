@@ -23,7 +23,6 @@ import type {
   GraphEdge,
   GraphNode,
   ImportAnalysis,
-  LayoutMap,
   ParseResult,
 } from "../../shared/types";
 import { buildFlow, type FlowNode } from "./flow";
@@ -163,8 +162,6 @@ interface Props {
   imports?: ImportAnalysis | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onDragStop: (positions: LayoutMap) => void;
-  onResetLayout?: () => void;
 }
 
 export function GraphView(props: Props) {
@@ -398,10 +395,6 @@ function GraphViewInner({
     []
   );
 
-  const handleDragStop = useCallback(() => {
-    setLayoutRun((value) => value + 1);
-  }, []);
-
   // Close the context menu on Escape.
   useEffect(() => {
     if (!menu) {
@@ -458,7 +451,6 @@ function GraphViewInner({
         onNodeClick={handleNodeClick}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
-        onNodeDragStop={handleDragStop}
         onPaneClick={() => {
           closeMenu();
           onSelect(null);
