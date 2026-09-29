@@ -320,4 +320,60 @@ mod tests {
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
     }
+
+    #[test]
+    fn resolves_cross_folder_edge() {
+        let root = temp_project("cross-folder");
+        std::fs::create_dir_all(root.join("pkg")).unwrap();
+        std::fs::write(root.join("helpers.py"), "thing = 1\n").unwrap();
+        std::fs::write(root.join("pkg/a.py"), "from helpers import thing\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let folder_ids: Vec<&str> = graph.folders.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(folder_ids, vec![".", "pkg"]);
+        let file_ids: Vec<&str> = graph.files.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(file_ids, vec!["helpers.py", "pkg/a.py"]);
+        assert_eq!(
+            graph.edges,
+            vec![ProjectEdge {
+                source: "pkg/a.py".into(),
+                target: "helpers.py".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn sorts_files_deterministically() {
+        let root = temp_project("ordering");
+        std::fs::write(root.join("zeta.py"), "").unwrap();
+        std::fs::write(root.join("alpha.py"), "").unwrap();
+        std::fs::write(root.join("mid.py"), "").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let ids: Vec<&str> = graph.files.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["alpha.py", "mid.py", "zeta.py"]);
+    }
+
+    #[test]
+    fn includes_empty_folders_and_no_files_when_scoped() {
+        let root = temp_project("empty-folder");
+        std::fs::create_dir_all(root.join("empty")).unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "empty").unwrap();
+        let folder_ids: Vec<&str> = graph.folders.iter().map(|f| f.id.as_str()).collect();
+        assert!(folder_ids.contains(&"empty"));
+        assert!(graph.files.is_empty());
+    }
+
+    #[test]
+    fn skips_node_modules() {
+        let root = temp_project("skip-dirs");
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules/junk.py"), "").unwrap();
+        std::fs::write(root.join("main.py"), "").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let ids: Vec<&str> = graph.files.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["main.py"]);
+    }
 }
