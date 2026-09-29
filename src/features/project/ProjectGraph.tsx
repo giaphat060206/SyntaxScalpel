@@ -252,7 +252,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   // absolute position + measured size (handles nested folders), and reports
   // false until the block has actually been measured.
   const centerOn = useCallback(
-    (id: string, zoom: number) => {
+    (id: string, zoom: number, duration: number) => {
       const internals = getInternalNode(id);
       if (!internals) {
         return false;
@@ -266,16 +266,16 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       setCenter(
         positionAbsolute.x + width / 2,
         positionAbsolute.y + height / 2,
-        { zoom, duration: 400 }
+        { zoom, duration }
       );
       return true;
     },
     [getInternalNode, setCenter]
   );
 
-  // First view of a scope: centre on the start file when there is one, so the
-  // graph opens "at" the entry point instead of zoomed out over everything.
-  // Retries briefly until the entry block has been measured.
+  // First view of a scope: snap the viewport onto the start file once its block
+  // has been measured. No animation here, and no `fitView` prop, so nothing
+  // competes with the reflow that is still settling.
   const fitToken = `${root}|${scope}`;
   useEffect(() => {
     if (!data || nodes.length === 0 || lastFit.current === fitToken) {
@@ -284,17 +284,18 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
-      const focused = data.entry ? centerOn(data.entry, 1.1) : false;
-      if (!focused) {
-        fitView({ padding: 0.2 });
-      }
-      if (focused || attempts >= 8) {
+      const focused = data.entry ? centerOn(data.entry, 1.1, 0) : false;
+      if (focused) {
         lastFit.current = fitToken;
         window.clearInterval(timer);
+      } else if (attempts >= 10) {
+        lastFit.current = fitToken;
+        fitView({ padding: 0.2, duration: 0 });
+        window.clearInterval(timer);
       }
-    }, 120);
+    }, 150);
     return () => window.clearInterval(timer);
-  }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);
+  }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);;
 
   const edges: Edge[] = useMemo(() => {
     if (!data) {
@@ -357,7 +358,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const focusEntry = useCallback(
     (id: string) => {
       setSelectedId(id);
-      centerOn(id, 1.2);
+      centerOn(id, 1.2, 400);
     },
     [centerOn]
   );
@@ -444,7 +445,6 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         onPaneClick={() => setSelectedId(null)}
         onPaneContextMenu={openMenu}
         onNodeContextMenu={openMenu}
-        fitView
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
