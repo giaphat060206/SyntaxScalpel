@@ -454,7 +454,7 @@ In `src-tauri/src/lib.rs`, add `commands::parse::project_graph,` to the `generat
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `cargo test --manifest-path src-tauri/Cargo.toml`
-Expected: all pass (62 total: 54 existing + 4 project tests, plus the 2 earlier ones).
+Expected: all pass (the controller's "62" estimate was wrong; the real count after this task was 58, and 62 after the final fix wave added four more project tests).
 
 - [ ] **Step 6: Commit**
 
@@ -1264,7 +1264,7 @@ Expected: all pass.
 | 2000-file cap + warning | 1 (cap), 6 (banner) |
 | Testing (cargo + vitest + build) | every task, plus 8 |
 
-Gaps: the spec's "layout helpers are shared" is Task 4; the spec's "no IMPORTS/CONSTANTS blocks in project mode" is satisfied because `ProjectGraph` never builds them. Nothing else outstanding.
+Gaps: the spec's "layout helpers are shared" is Task 4; the spec's "no IMPORTS/CONSTANTS blocks in project mode" is satisfied because `ProjectGraph` never builds them. The spec's right-click menu requirement was missed by this plan's Task 6 and caught by the final whole-branch review; a fix wave ported `GraphView`'s re-align/fit menu into `ProjectGraph`. The spec-named Rust tests for cross-folder edges, ordering, and empty folders were likewise added in that final wave.
 
 **Placeholder scan:** no TBD/TODO; every code step carries complete code. Task 1 notes explicitly why its RED run is folded into the same step (Rust cannot compile tests for missing symbols) — the pattern used throughout the project.
 
