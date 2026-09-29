@@ -269,7 +269,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         : "code";
       onNavigate({ kind, path: node.id });
     },
-    [data, onNavigate, scope]
+    [data, onNavigate]
   );
 
   const selectedFile =
@@ -324,7 +324,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           ) : (
             selectedFile.imports.map((entry) => (
               <div
-                key={entry.targetId || entry.specifier}
+                key={`${entry.targetId}|${entry.specifier}|${entry.names.join(",")}`}
                 className="break-words font-mono text-white/85"
               >
                 {entry.targetId || entry.specifier}
