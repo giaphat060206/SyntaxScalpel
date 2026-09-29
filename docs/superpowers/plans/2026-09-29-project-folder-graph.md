@@ -583,12 +583,13 @@ describe("arrangeGrid", () => {
   it("sizes each column from its longest block", () => {
     const items = [
       node("a", 0, 0, 200),
-      node("b", 0, 0, 400),
       node("c", 0, 0, 200),
+      node("b", 0, 0, 400),
       node("d", 0, 0, 200),
     ];
     const { positions } = arrangeGrid(items, 0, 0, 10, 10);
-    // Two columns: column 0 widest is 400, so column 1 starts at 410.
+    // Two columns: item index 2 (b, width 400) lands in column 0, so its widest
+    // block drives column 1's start to 410.
     expect(positions[1]).toEqual({ x: 410, y: 0 });
   });
 });
@@ -739,6 +740,8 @@ Add `project` to the destructure at the top of `CodeNode`:
 ```ts
   const { node, special, project, highlighted, dimmed } = data as CodeNodeData;
 ```
+
+**Resolved at implementation time:** the project **file** branch must also render the eight invisible handles from `layout.pickHandles`, or the project graph's file→file edges have no anchor. The eight `Handle`s are extracted into one `edgeHandles` fragment and rendered for both callable nodes and project file blocks (`{!isFolder && edgeHandles}`); folders get none. (Review caught this omission; fixed in `fix(ui): give project file blocks their edge handles`.)
 
 - [ ] **Step 3: Verify and commit**
 
