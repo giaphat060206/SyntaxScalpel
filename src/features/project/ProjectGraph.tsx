@@ -452,10 +452,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 
   return (
     <div
-      className={
-        "relative h-full bg-bg" +
-        (selectedId !== null ? " syntax-flow--elevate-edges" : "")
-      }
+className="relative h-full bg-bg"
       onContextMenu={(event) => event.preventDefault()}
     >
       {entryList.length > 0 && (

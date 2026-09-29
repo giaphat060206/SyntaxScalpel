@@ -35,12 +35,9 @@ html, body, #root {
   color: #00F0FF;
 }
 
-/* Edges draw beneath blocks by default. Focusing a block raises the whole edge
-   layer so its connections read clearly on top of every block. */
+/* Edges draw beneath blocks: leaves and unrelated containers are opaque and
+   hide lines; only the containers that hold an edge's endpoint are
+   transparent, so a line stays visible up to the block it belongs to. */
 .react-flow__edges {
   z-index: 0;
-}
-
-.syntax-flow--elevate-edges .react-flow__edges {
-  z-index: 3;
 }
