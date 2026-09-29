@@ -87,7 +87,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
         width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
       },
       draggable: false,
-      zIndex: 2,
+      zIndex: 4,
       data: {
         special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
         color: colorForNode(IMPORTS_NODE_ID),
@@ -106,7 +106,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
         ]),
       },
       draggable: false,
-      zIndex: 2,
+      zIndex: 4,
       data: {
         special: {
           title: `IMPORTED BY (${imports.importedBy.length})`,
@@ -146,7 +146,7 @@ function toFlowNode(
         ? { width: CLASS_WIDTH }
         : { width: naturalWidth(graphNodeLines(node.data.node)) }),
     draggable: node.data.node.kind !== "class",
-    zIndex: 2,
+    zIndex: node.data.node.kind === "class" ? 1 : 4,
     data: {
       node: node.data.node,
       color: colorForNode(node.id),
@@ -205,7 +205,7 @@ function GraphViewInner({
               position: { x: 0, y: 0 },
               style: { width: CLASS_WIDTH },
               draggable: false,
-              zIndex: 2,
+              zIndex: 1,
                 data: {
                   node: {
                     id: CONSTANTS_NODE_ID,
