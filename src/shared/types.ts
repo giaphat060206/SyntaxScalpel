@@ -78,4 +78,5 @@ export interface ProjectGraph {
   edges: ProjectEdge[];
   truncated: boolean;
   entry?: string;
+  entries?: string[];
 }

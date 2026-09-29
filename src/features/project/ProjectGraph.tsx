@@ -65,6 +65,12 @@ function toNodes(
     } satisfies CodeNodeData,
   }));
 
+  const entryList = data?.entries?.length
+    ? data.entries
+    : data?.entry
+      ? [data.entry]
+      : [];
+
   const fileNodes: Node[] = data.files.map((file) => ({
     id: file.id,
     type: "scalpel",
@@ -81,15 +87,14 @@ function toNodes(
         name: file.name,
         imports: file.imports,
         fileKind: file.kind,
-        entry: file.id === data.entry,
+        entry: entryList.includes(file.id),
       },
-      // Docs/config get a muted colour; the entry file gets the mint accent.
-      color:
-        file.id === data.entry
-          ? "#3DF0A8"
-          : file.kind === "doc"
-            ? "#8A93A0"
-            : colorForNode(file.id),
+      // Docs/config get a muted colour; entry files get the mint accent.
+      color: entryList.includes(file.id)
+        ? "#3DF0A8"
+        : file.kind === "doc"
+          ? "#8A93A0"
+          : colorForNode(file.id),
       highlighted: false,
       dimmed: false,
     } satisfies CodeNodeData,
@@ -325,6 +330,13 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     [data, onNavigate]
   );
 
+  // Entry points detected by the backend (conventions, then graph roots).
+  const entryList = data?.entries?.length
+    ? data.entries
+    : data?.entry
+      ? [data.entry]
+      : [];
+
   const selectedFile =
     data && selectedId
       ? data.files.find((file) => file.id === selectedId)
@@ -355,9 +367,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 
   return (
     <div className="relative h-full bg-bg" onContextMenu={(event) => event.preventDefault()}>
-      {data.entry && (
-        <div className="absolute left-3 top-3 z-10 rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
-          Start: {data.entry}
+      {entryList.length > 0 && (
+        <div className="absolute left-3 top-3 z-10 max-w-[70%] truncate rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
+          {entryList.length === 1
+            ? `Start: ${entryList[0]}`
+            : `Starts (${entryList.length}): ${entryList.join(", ")}`}
         </div>
       )}
       {data.truncated && (

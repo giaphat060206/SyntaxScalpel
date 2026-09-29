@@ -61,6 +61,8 @@ pub struct ProjectGraph {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<String>,
 }
 
 pub fn build_tree(
@@ -101,6 +103,7 @@ pub fn build_tree(
         edges: Vec::new(),
         truncated: false,
         entry: None,
+        entries: Vec::new(),
     };
     let mut collected: Vec<(PathBuf, String)> = Vec::new();
     collect(
@@ -264,9 +267,11 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     });
     graph.edges.dedup_by(|a, b| a.source == b.source && a.target == b.target);
 
-    graph.entry = detect_entry(root_path, scope_rel, &graph);
+    let entries = detect_entries(root_path, scope_rel, &graph);
+    graph.entry = entries.first().cloned();
+    graph.entries = entries;
 
-    // Show the entry file first inside its own folder so it is easy to spot.
+    // Show the primary entry file first inside its own folder so it is easy to spot.
     if let Some(entry) = graph.entry.clone() {
         graph.files.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(index) = graph.files.iter().position(|file| file.id == entry) {
@@ -283,18 +288,27 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     Ok(graph)
 }
 
-/// Best-guess entry file: conventions first, then graph roots (files nothing
-/// imports that import something).
-fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<String> {
+/// Entry-point candidates: conventions first (every match), then graph roots.
+/// The first candidate is treated as the primary entry point.
+fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
     let code: Vec<&ProjectFile> = graph.files.iter().filter(|f| f.kind == "code").collect();
+    let finish = |mut found: Vec<String>| -> Vec<String> {
+        found.sort();
+        found.dedup();
+        found
+    };
 
-    // 1. Python `if __name__ == "__main__":` guard.
+    // 1. Python `if __name__ == "__main__":` guard (may be several scripts).
+    let mut guarded = Vec::new();
     for file in &code {
         if let Ok(source) = std::fs::read_to_string(root.join(&file.id)) {
             if source.contains("__name__") && source.contains("__main__") {
-                return Some(file.id.clone());
+                guarded.push(file.id.clone());
             }
         }
+    }
+    if !guarded.is_empty() {
+        return finish(guarded);
     }
 
     // 2. Conventional file names.
@@ -302,13 +316,17 @@ fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<St
         "__main__.py", "main.py", "app.py", "manage.py", "run.py", "cli.py", "index.ts", "index.tsx",
         "index.js", "index.jsx", "server.ts", "server.js",
     ];
+    let mut named = Vec::new();
     for name in NAMES {
         if let Some(file) = code
             .iter()
             .find(|file| file.id.rsplit('/').next() == Some(name))
         {
-            return Some(file.id.clone());
+            named.push(file.id.clone());
         }
+    }
+    if !named.is_empty() {
+        return finish(named);
     }
 
     // 3. package.json main / module / scripts.start.
@@ -333,6 +351,7 @@ fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<St
             } else {
                 format!("{}/", scope_rel.replace('\\', "/"))
             };
+            let mut found = Vec::new();
             for pointer in pointers {
                 let cleaned = pointer
                     .split_whitespace()
@@ -346,9 +365,12 @@ fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<St
                     format!("{prefix}{cleaned}.tsx"),
                 ] {
                     if let Some(file) = code.iter().find(|file| file.id == candidate) {
-                        return Some(file.id.clone());
+                        found.push(file.id.clone());
                     }
                 }
+            }
+            if !found.is_empty() {
+                return finish(found);
             }
         }
     }
@@ -358,16 +380,16 @@ fn detect_entry(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Option<St
     for edge in &graph.edges {
         imported.insert(edge.target.clone());
     }
-    let mut candidates: Vec<&str> = code
+    let mut candidates: Vec<String> = code
         .iter()
         .filter(|file| {
             !imported.contains(&file.id)
                 && graph.edges.iter().any(|edge| edge.source == file.id)
         })
-        .map(|file| file.id.as_str())
+        .map(|file| file.id.clone())
         .collect();
-    candidates.sort_unstable();
-    candidates.first().map(|id| id.to_string())
+    candidates.sort();
+    candidates.into_iter().take(1).collect()
 }
 
 #[cfg(test)]
@@ -471,6 +493,31 @@ mod tests {
         assert!(graph.edges.is_empty());
         let use_file = &graph.files[0];
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+    }
+
+    #[test]
+    fn detects_every_guarded_script_as_an_entry() {
+        let root = temp_project("entry-multi");
+        std::fs::write(
+            root.join("main.py"),
+            "if __name__ == \"__main__\":\n    pass\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("generate_benchmarks.py"),
+            "if __name__ == \"__main__\":\n    pass\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("helpers.py"), "def h():\n    return 1\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(
+            graph.entries,
+            vec!["generate_benchmarks.py".to_string(), "main.py".to_string()]
+        );
+        // Primary (first) entry is the lexicographically smallest match.
+        assert_eq!(graph.entry.as_deref(), Some("generate_benchmarks.py"));
+        assert_eq!(graph.files[0].id, "generate_benchmarks.py");
     }
 
     #[test]
