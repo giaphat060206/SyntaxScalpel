@@ -47,9 +47,10 @@ export default function App() {
 
   const handleOpenFolder = useCallback((nextRoot: string) => {
     setRoot(nextRoot);
-    setLocationState({ kind: "empty" });
     setDocFile(null);
     setSelectedFile(null);
+    // Show the project graph for the newly opened folder straight away.
+    setLocationState({ kind: "folder", path: "" });
   }, []);
 
   const handleSelectFile = useCallback((relPath: string) => {
