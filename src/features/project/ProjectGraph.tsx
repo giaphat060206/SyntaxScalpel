@@ -118,7 +118,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { fitView, setCenter } = useReactFlow();
+  const { fitView, getInternalNode, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
 
   useEffect(() => {
@@ -248,45 +248,52 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     setNodes((current) => reflowLayout(current));
   }, [sizeSignature, setNodes]);
 
-  // Centre the viewport on one block at a given zoom.
+  // Centre the viewport on one block at a given zoom. Uses React Flow's computed
+  // absolute position + measured size (handles nested folders), and reports
+  // false until the block has actually been measured.
   const centerOn = useCallback(
     (id: string, zoom: number) => {
-      const node = nodes.find((entry) => entry.id === id);
-      if (!node) {
+      const internals = getInternalNode(id);
+      if (!internals) {
         return false;
       }
-      const parent = node.parentId
-        ? nodes.find((entry) => entry.id === node.parentId)
-        : undefined;
-      const x =
-        (parent?.position.x ?? 0) +
-        node.position.x +
-        (node.measured?.width ?? 180) / 2;
-      const y =
-        (parent?.position.y ?? 0) +
-        node.position.y +
-        (node.measured?.height ?? 60) / 2;
-      setCenter(x, y, { zoom, duration: 400 });
+      const { positionAbsolute, userNode } = internals.internals;
+      const width = userNode.measured?.width ?? 0;
+      const height = userNode.measured?.height ?? 0;
+      if (width === 0 || height === 0) {
+        return false;
+      }
+      setCenter(
+        positionAbsolute.x + width / 2,
+        positionAbsolute.y + height / 2,
+        { zoom, duration: 400 }
+      );
       return true;
     },
-    [nodes, setCenter]
+    [getInternalNode, setCenter]
   );
 
   // First view of a scope: centre on the start file when there is one, so the
   // graph opens "at" the entry point instead of zoomed out over everything.
+  // Retries briefly until the entry block has been measured.
   const fitToken = `${root}|${scope}`;
   useEffect(() => {
     if (!data || nodes.length === 0 || lastFit.current === fitToken) {
       return;
     }
-    const timer = window.setTimeout(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
       const focused = data.entry ? centerOn(data.entry, 1.1) : false;
       if (!focused) {
         fitView({ padding: 0.2 });
       }
-      lastFit.current = fitToken;
-    }, 150);
-    return () => window.clearTimeout(timer);
+      if (focused || attempts >= 8) {
+        lastFit.current = fitToken;
+        window.clearInterval(timer);
+      }
+    }, 120);
+    return () => window.clearInterval(timer);
   }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);
 
   const edges: Edge[] = useMemo(() => {
