@@ -62,6 +62,34 @@ describe("reflowLayout", () => {
     expect(child.position.y).toBeGreaterThan(0);
     expect((out[0].style as { height?: number }).height).toBeGreaterThan(100);
   });
+
+  it("ignores hidden children so a collapsed parent shrinks", () => {
+    const parent: Node = {
+      id: "C",
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      data: {},
+      style: { width: 240 },
+      measured: { width: 240, height: 100 },
+    };
+    const visible: Node = {
+      id: "C.a",
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      parentId: "C",
+      extent: "parent",
+      data: {},
+      style: { width: 200 },
+      measured: { width: 200, height: 60 },
+    };
+    const hidden: Node = { ...visible, id: "C.b", hidden: true };
+
+    const withHidden = reflowLayout([parent, visible, hidden]);
+    const withoutHidden = reflowLayout([parent, visible]);
+    expect((withHidden[0].style as { height?: number }).height).toBe(
+      (withoutHidden[0].style as { height?: number }).height
+    );
+  });
 });
 
 describe("pickHandles", () => {

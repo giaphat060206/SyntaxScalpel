@@ -195,9 +195,6 @@ export function CodeNode({ data, selected }: NodeProps) {
             </button>
           )}
         </div>
-        {isFolder && project.collapsed && (
-          <div className="mt-1 text-[10px] text-dimmed">collapsed</div>
-        )}
       </div>
     );
   }

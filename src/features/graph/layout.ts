@@ -117,7 +117,9 @@ export function reflowLayout(current: Node[]): Node[] {
   const next = current.map((node) => ({ ...node }));
   const childrenByParent = new Map<string, Node[]>();
   for (const node of next) {
-    if (!node.parentId) continue;
+    // Hidden nodes (e.g. inside a collapsed folder) are laid out nowhere, so a
+    // collapsed container shrinks instead of keeping the space.
+    if (!node.parentId || node.hidden) continue;
     const list = childrenByParent.get(node.parentId) ?? [];
     list.push(node);
     childrenByParent.set(node.parentId, list);
@@ -158,6 +160,7 @@ export function reflowLayout(current: Node[]): Node[] {
     .filter(
       (node) =>
         !node.parentId &&
+        !node.hidden &&
         node.id !== IMPORTS_NODE_ID &&
         node.id !== IMPORTED_BY_NODE_ID
     )
