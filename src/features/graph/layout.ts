@@ -5,7 +5,7 @@ import type { CodeNodeData } from "./CodeNode";
 // measured heights, so wrapped params/returns can never overlap the next method.
 export const CHILD_X = 20;
 export const CHILD_WIDTH = 200;
-export const CHILD_GAP = 28;
+export const CHILD_GAP = 48;
 export const CLASS_HEADER = 76;
 export const CLASS_PAD = 12;
 export const CLASS_WIDTH = 240;
@@ -55,6 +55,53 @@ export function pickHandles(
   return dy > 0
     ? { sourceHandle: "b-out", targetHandle: "t-in" }
     : { sourceHandle: "t-out", targetHandle: "b-in" };
+}
+
+// Preferred handle order per direction: the first entry faces the other node,
+// the rest rotate so parallel edges from the same block use different sides
+// instead of stacking on one segment.
+const OUT_ORDER: Record<string, string[]> = {
+  right: ["r-out", "b-out", "t-out", "l-out"],
+  left: ["l-out", "b-out", "t-out", "r-out"],
+  down: ["b-out", "r-out", "l-out", "t-out"],
+  up: ["t-out", "r-out", "l-out", "b-out"],
+};
+const IN_ORDER: Record<string, string[]> = {
+  right: ["l-in", "t-in", "b-in", "r-in"],
+  left: ["r-in", "t-in", "b-in", "l-in"],
+  down: ["t-in", "l-in", "r-in", "b-in"],
+  up: ["b-in", "l-in", "r-in", "t-in"],
+};
+
+/**
+ * Like `pickHandles`, but rotates through each block's four sides by edge index
+ * so many edges into or out of one block do not all overlap on a single path.
+ */
+export function spreadHandles(
+  source: Node,
+  target: Node,
+  byId: Map<string, Node>,
+  sourceIndex: number,
+  targetIndex: number
+): { sourceHandle: string; targetHandle: string } {
+  const from = absolutePosition(source, byId);
+  const to = absolutePosition(target, byId);
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const direction =
+    Math.abs(dx) > Math.abs(dy)
+      ? dx >= 0
+        ? "right"
+        : "left"
+      : dy >= 0
+        ? "down"
+        : "up";
+  const outs = OUT_ORDER[direction];
+  const ins = IN_ORDER[direction];
+  return {
+    sourceHandle: outs[sourceIndex % outs.length],
+    targetHandle: ins[targetIndex % ins.length],
+  };
 }
 
 /**

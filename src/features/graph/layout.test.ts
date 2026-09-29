@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "@xyflow/react";
-import { arrangeGrid, pickHandles, reflowLayout } from "./layout";
+import { arrangeGrid, pickHandles, reflowLayout, spreadHandles } from "./layout";
 
 function node(id: string, x: number, y: number, width = 200, height = 80): Node {
   return {
@@ -113,5 +113,18 @@ describe("pickHandles", () => {
       sourceHandle: "t-out",
       targetHandle: "b-in",
     });
+  });
+});
+
+describe("spreadHandles", () => {
+  it("rotates a block's outgoing edges across its sides", () => {
+    const byId = new Map<string, Node>([
+      ["a", node("a", 0, 0)],
+      ["b", node("b", 400, 0)],
+    ]);
+    const first = spreadHandles(byId.get("a")!, byId.get("b")!, byId, 0, 0);
+    const second = spreadHandles(byId.get("a")!, byId.get("b")!, byId, 1, 1);
+    expect(first.sourceHandle).toBe("r-out");
+    expect(second.sourceHandle).toBe("b-out");
   });
 });

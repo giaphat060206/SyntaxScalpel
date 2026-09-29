@@ -36,7 +36,7 @@ import {
   IMPORTED_BY_NODE_ID,
   IMPORTS_NODE_ID,
   CLASS_WIDTH,
-  pickHandles,
+  spreadHandles,
   reflowLayout,
 } from "./layout";
 import { EmptyState } from "../../shared/StateViews";
@@ -242,14 +242,23 @@ function GraphViewInner({
   }, [selectedId, result.edges, setNodes]);
 
   // Edges are derived from the current node positions so their handles can face
-  // the other block (side handles when side by side, top/bottom when stacked).
+  // the other block; each block rotates its edges across its four sides so
+  // parallel lines do not stack, and idle edges are faded for readability.
   const edges: Edge[] = useMemo(() => {
     const byId = new Map(nodes.map((node) => [node.id, node]));
+    const outCount = new Map<string, number>();
+    const inCount = new Map<string, number>();
     return result.edges.map((edge) => {
       const source = byId.get(edge.source);
       const target = byId.get(edge.target);
+      const sourceIndex = outCount.get(edge.source) ?? 0;
+      const targetIndex = inCount.get(edge.target) ?? 0;
+      outCount.set(edge.source, sourceIndex + 1);
+      inCount.set(edge.target, targetIndex + 1);
       const handles =
-        source && target ? pickHandles(source, target, byId) : {};
+        source && target
+          ? spreadHandles(source, target, byId, sourceIndex, targetIndex)
+          : {};
       const active =
         selectedId !== null &&
         (edge.source === selectedId || edge.target === selectedId);
@@ -261,7 +270,8 @@ function GraphViewInner({
         id: `${edge.source}->${edge.target}`,
         source: edge.source,
         target: edge.target,
-        type: "step",
+        type: "smoothstep",
+        pathOptions: { borderRadius: 14 },
         ...handles,
         zIndex: 0,
         markerEnd: {
@@ -273,7 +283,7 @@ function GraphViewInner({
         style: {
           stroke,
           strokeWidth: 2,
-          opacity: unrelated ? 0.12 : 1,
+          opacity: unrelated ? 0.12 : active ? 1 : 0.7,
         },
       };
     });

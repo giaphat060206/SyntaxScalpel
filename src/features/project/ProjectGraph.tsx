@@ -23,7 +23,7 @@ import type { ProjectGraph as ProjectGraphData } from "../../shared/types";
 import { projectGraph } from "../../shared/ipc";
 import { colorForNode } from "../graph/colors";
 import { CodeNode, type CodeNodeData } from "../graph/CodeNode";
-import { CLASS_WIDTH, pickHandles, reflowLayout } from "../graph/layout";
+import { CLASS_WIDTH, reflowLayout, spreadHandles } from "../graph/layout";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
@@ -257,6 +257,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return [];
     }
     const byId = new Map(nodes.map((node) => [node.id, node]));
+    const outCount = new Map<string, number>();
+    const inCount = new Map<string, number>();
     return data.edges
       .filter((edge) => {
         const source = byId.get(edge.source);
@@ -266,6 +268,10 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       .map((edge) => {
         const source = byId.get(edge.source)!;
         const target = byId.get(edge.target)!;
+        const sourceIndex = outCount.get(edge.source) ?? 0;
+        const targetIndex = inCount.get(edge.target) ?? 0;
+        outCount.set(edge.source, sourceIndex + 1);
+        inCount.set(edge.target, targetIndex + 1);
         const active =
           selectedId !== null &&
           (edge.source === selectedId || edge.target === selectedId);
@@ -276,8 +282,10 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           id: `${edge.source}->${edge.target}`,
           source: edge.source,
           target: edge.target,
-          type: "step",
-          ...pickHandles(source, target, byId),
+          type: "smoothstep",
+          pathOptions: { borderRadius: 14 },
+          ...spreadHandles(source, target, byId, sourceIndex, targetIndex),
+          zIndex: 0,
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: stroke,
@@ -287,7 +295,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           style: {
             stroke,
             strokeWidth: 2,
-            opacity: unrelated ? 0.12 : 1,
+            opacity: unrelated ? 0.12 : active ? 1 : 0.7,
           },
         };
       });
