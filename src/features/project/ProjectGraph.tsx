@@ -317,6 +317,23 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     setSelectedId(node.id);
   }, []);
 
+  // Centre the viewport on an entry-point block (used by the Start chip).
+  const focusEntry = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      const node = nodes.find((entry) => entry.id === id);
+      const parent = node?.parentId
+        ? nodes.find((entry) => entry.id === node.parentId)
+        : undefined;
+      fitView({
+        nodes: parent ? [{ id: parent.id }, { id }] : [{ id }],
+        padding: 0.6,
+        duration: 400,
+      });
+    },
+    [nodes, fitView]
+  );
+
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
     (_event, node) => {
       if (!data || node.id === data.root) {
@@ -368,10 +385,20 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   return (
     <div className="relative h-full bg-bg" onContextMenu={(event) => event.preventDefault()}>
       {entryList.length > 0 && (
-        <div className="absolute left-3 top-3 z-10 max-w-[70%] truncate rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
-          {entryList.length === 1
-            ? `Start: ${entryList[0]}`
-            : `Starts (${entryList.length}): ${entryList.join(", ")}`}
+        <div className="absolute left-3 top-3 z-10 max-w-[70%] rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
+          {entryList.length === 1 ? "Start: " : `Starts (${entryList.length}): `}
+          {entryList.map((id, index) => (
+            <span key={id}>
+              {index > 0 && ", "}
+              <button
+                type="button"
+                onClick={() => focusEntry(id)}
+                className="underline underline-offset-2 hover:text-white"
+              >
+                {id}
+              </button>
+            </span>
+          ))}
         </div>
       )}
       {data.truncated && (
@@ -390,6 +417,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         onPaneContextMenu={openMenu}
         onNodeContextMenu={openMenu}
         fitView
+        minZoom={0.05}
+        maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />

@@ -58,19 +58,19 @@ export function pickHandles(
 }
 
 // Preferred handle order per direction: the first entry faces the other node,
-// the rest rotate so parallel edges from the same block use different sides
-// instead of stacking on one segment.
+// the rest rotate to adjacent sides. The side facing *away* from the target is
+// excluded, so an edge never leaves backwards and loops (U-turn).
 const OUT_ORDER: Record<string, string[]> = {
-  right: ["r-out", "b-out", "t-out", "l-out"],
-  left: ["l-out", "b-out", "t-out", "r-out"],
-  down: ["b-out", "r-out", "l-out", "t-out"],
-  up: ["t-out", "r-out", "l-out", "b-out"],
+  right: ["r-out", "b-out", "t-out"],
+  left: ["l-out", "b-out", "t-out"],
+  down: ["b-out", "r-out", "l-out"],
+  up: ["t-out", "r-out", "l-out"],
 };
 const IN_ORDER: Record<string, string[]> = {
-  right: ["l-in", "t-in", "b-in", "r-in"],
-  left: ["r-in", "t-in", "b-in", "l-in"],
-  down: ["t-in", "l-in", "r-in", "b-in"],
-  up: ["b-in", "l-in", "r-in", "t-in"],
+  right: ["l-in", "t-in", "b-in"],
+  left: ["r-in", "t-in", "b-in"],
+  down: ["t-in", "l-in", "r-in"],
+  up: ["b-in", "l-in", "r-in"],
 };
 
 /**

@@ -451,6 +451,8 @@ function GraphViewInner({
         onPaneContextMenu={openMenu}
         onNodeContextMenu={openMenu}
         fitView
+        minZoom={0.05}
+        maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
       >
         <Background color="#2A3138" gap={20} />
