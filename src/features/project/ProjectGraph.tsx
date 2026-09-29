@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import {
   Background,
   Controls,
@@ -105,6 +112,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { fitView } = useReactFlow();
   const lastFit = useRef<string>("");
 
@@ -137,6 +145,43 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return next;
     });
   }, []);
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const openMenu = useCallback(
+    (event: ReactMouseEvent | globalThis.MouseEvent) => {
+      event.preventDefault();
+      setMenu({ x: event.clientX, y: event.clientY });
+    },
+    []
+  );
+
+  const handleRealign = useCallback(() => {
+    if (data) {
+      setNodes(toNodes(data, collapsed, toggleCollapse));
+    }
+    window.setTimeout(() => fitView({ padding: 0.2 }), 80);
+    setMenu(null);
+  }, [data, collapsed, toggleCollapse, setNodes, fitView]);
+
+  const handleFitView = useCallback(() => {
+    setMenu(null);
+    fitView({ padding: 0.2 });
+  }, [fitView]);
+
+  // Close the context menu on Escape.
+  useEffect(() => {
+    if (!menu) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenu(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [menu]);
 
   useEffect(() => {
     if (!data) {
@@ -257,6 +302,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={() => setSelectedId(null)}
+        onPaneContextMenu={openMenu}
+        onNodeContextMenu={openMenu}
         fitView
         proOptions={{ hideAttribution: true }}
       >
@@ -286,6 +333,38 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
             ))
           )}
         </div>
+      )}
+
+      {menu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={closeMenu}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              closeMenu();
+            }}
+          />
+          <div
+            className="fixed z-50 min-w-[160px] rounded border border-white/10 bg-panel py-1 shadow-lg"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              type="button"
+              onClick={handleRealign}
+              className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
+            >
+              Re-align nodes
+            </button>
+            <button
+              type="button"
+              onClick={handleFitView}
+              className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
+            >
+              Fit view
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
