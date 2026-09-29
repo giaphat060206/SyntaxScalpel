@@ -69,6 +69,7 @@ function toNodes(
     parentId: folder.parentId,
     extent: folder.parentId ? ("parent" as const) : undefined,
     draggable: false,
+    zIndex: 2,
     hidden: hidden.has(folder.id),
     style: { width: folder.parentId ? undefined : CLASS_WIDTH },
     data: {
@@ -91,6 +92,7 @@ function toNodes(
     parentId: file.folderId,
     extent: "parent" as const,
     draggable: false,
+    zIndex: 2,
     hidden: hidden.has(file.id),
     style: { width: 180 },
     data: {
