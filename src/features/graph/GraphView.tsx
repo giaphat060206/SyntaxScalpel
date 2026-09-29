@@ -36,12 +36,14 @@ import {
   IMPORTED_BY_NODE_ID,
   IMPORTS_NODE_ID,
   CLASS_WIDTH,
-  spreadHandles,
   reflowLayout,
 } from "./layout";
+import { runElkLayout } from "./elk/layout";
+import { ElkEdge } from "./elk/ElkEdge";
 import { EmptyState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
+const edgeTypes = { elk: ElkEdge };
 
 // Content-aware sizing: estimate the width a monospace line needs so a single
 // `in:`/`out:`/value stays on one line by default. Height stays content-driven.
@@ -186,6 +188,8 @@ function GraphViewInner({
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [showLines, setShowLines] = useState(true);
+  const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
+  const [layoutRun, setLayoutRun] = useState(0);
   const { fitView } = useReactFlow();
   const lastFit = useRef<string>("");
 
@@ -262,24 +266,13 @@ function GraphViewInner({
     );
   }, [selectedId, result.edges, setNodes]);
 
-  // Edges are derived from the current node positions so their handles can face
-  // the other block; each block rotates its edges across its four sides so
-  // parallel lines do not stack, and idle edges are faded for readability.
+  // Edges are routed by ELK from the section points it computed, falling back to
+  // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
   const edges: Edge[] = useMemo(() => {
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    const outCount = new Map<string, number>();
-    const inCount = new Map<string, number>();
-    return result.edges.map((edge, edgeIndex) => {
+    return result.edges.map((edge) => {
+      const id = `${edge.source}->${edge.target}`;
       const source = byId.get(edge.source);
-      const target = byId.get(edge.target);
-      const sourceIndex = outCount.get(edge.source) ?? 0;
-      const targetIndex = inCount.get(edge.target) ?? 0;
-      outCount.set(edge.source, sourceIndex + 1);
-      inCount.set(edge.target, targetIndex + 1);
-      const handles =
-        source && target
-          ? spreadHandles(source, target, byId, sourceIndex, targetIndex)
-          : {};
       const active =
         selectedId !== null &&
         (edge.source === selectedId || edge.target === selectedId);
@@ -288,12 +281,11 @@ function GraphViewInner({
         (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
       const stroke = sourceColor;
       return {
-        id: `${edge.source}->${edge.target}`,
+        id,
         source: edge.source,
         target: edge.target,
-        type: "smoothstep",
-        pathOptions: { borderRadius: 14, offset: 24 + (edgeIndex % 4) * 16 },
-        ...handles,
+        type: "elk",
+        data: { points: sections[id] },
         zIndex: 0,
         markerEnd: {
           type: MarkerType.ArrowClosed,
@@ -308,24 +300,53 @@ function GraphViewInner({
         },
       };
     });
-  }, [nodes, result.edges, selectedId]);
+  }, [nodes, result.edges, selectedId, sections, layoutRun]);
 
-  // Re-stack once React Flow has measured real node heights, and again after any
-  // resize. Keyed on a height signature so dragging positions never triggers a
-  // reflow, and converges because `reflowLayout` returns the same array when
-  // nothing needs to move.
-  // Re-stack once the measured heights have settled. With many nodes, React Flow
-  // measures them in waves; coalescing the reflow avoids re-gridding the whole
-  // graph dozens of times (which reads as the graph flinging around).
+  const edgesForLayout = edges;
+
+  // ELK owns placement: run it once the measured sizes settle, and again after a
+  // Re-align. On any failure (or above the node cap) fall back to the old grid.
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}`)
     .join("|");
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setNodes((current) => reflowLayout(current));
-    }, 140);
-    return () => window.clearTimeout(timer);
-  }, [sizeSignature, setNodes]);
+    if (nodes.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const result = await runElkLayout(nodes, edgesForLayout);
+      if (cancelled) {
+        return;
+      }
+      if (!result) {
+        setSections({});
+        setNodes((current) => reflowLayout(current));
+        return;
+      }
+      setSections(result.sections);
+      setNodes((current) =>
+        current.map((node) => {
+          const position = result.positions[node.id];
+          const size = result.sizes[node.id];
+          if (!position) {
+            return node;
+          }
+          return {
+            ...node,
+            position,
+            ...(size
+              ? { style: { ...(node.style ?? {}), ...size } }
+              : {}),
+          };
+        })
+      );
+    }, 160);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sizeSignature, layoutRun, result.filePath, setNodes]);
 
   // Fit the view once per file (and once more when import blocks arrive), after
   // React Flow has measured the nodes.
@@ -355,21 +376,8 @@ function GraphViewInner({
 
   const handleRealign = useCallback(() => {
     setMenu(null);
-    const cleared: ParseResult = {
-      ...result,
-      nodes: result.nodes.map((node) => ({ ...node, position: undefined })),
-    };
-    const flow = buildFlow(cleared);
-    setNodes([
-      ...specialFlowNodes(imports),
-      ...flow.nodes.map((node) => toFlowNode(node, null, result.edges)),
-    ]);
-    lastFit.current = "";
-    onResetLayout?.();
-    window.setTimeout(() => {
-      lastFit.current = fitToken;
-      fitView({ padding: 0.2 });
-    }, 80);
+    setSections({});
+    setLayoutRun((value) => value + 1);
   }, [result, imports, setNodes, onResetLayout, fitView, fitToken]);
 
   const handleFitView = useCallback(() => {
@@ -467,6 +475,7 @@ function GraphViewInner({
         edges={edges}
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={handleNodeClick}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
