@@ -87,7 +87,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
         width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
       },
       draggable: false,
-      zIndex: 2,
+      zIndex: 4,
       data: {
         special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
         color: colorForNode(IMPORTS_NODE_ID),
@@ -106,7 +106,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
         ]),
       },
       draggable: false,
-      zIndex: 2,
+      zIndex: 4,
       data: {
         special: {
           title: `IMPORTED BY (${imports.importedBy.length})`,
@@ -146,7 +146,7 @@ function toFlowNode(
         ? { width: CLASS_WIDTH }
         : { width: naturalWidth(graphNodeLines(node.data.node)) }),
     draggable: node.data.node.kind !== "class",
-    zIndex: 2,
+    zIndex: node.data.node.kind === "class" ? 1 : 4,
     data: {
       node: node.data.node,
       color: colorForNode(node.id),
@@ -205,7 +205,7 @@ function GraphViewInner({
               position: { x: 0, y: 0 },
               style: { width: CLASS_WIDTH },
               draggable: false,
-              zIndex: 2,
+              zIndex: 1,
                 data: {
                   node: {
                     id: CONSTANTS_NODE_ID,
@@ -229,7 +229,8 @@ function GraphViewInner({
       extent: "parent" as const,
     }));
 
-    // Class ids that own an edge endpoint — those containers stay transparent.
+    // Class ids that own an edge endpoint stay transparent so their method
+    // lines remain visible through the class container.
     const endpointParents = new Set<string>();
     for (const edge of result.edges) {
       for (const id of [edge.source, edge.target]) {
@@ -248,7 +249,9 @@ function GraphViewInner({
     ]);
   }, [result, imports, setNodes]);
 
-  // Re-decorate for trace highlighting without touching positions the user dragged.
+  // Re-decorate for trace highlighting without touching positions the user
+  // dragged. Class transparency comes from the rebuild (endpoint-based), so it
+  // is preserved here.
   useEffect(() => {
     setNodes((current) =>
       current.map((node) => ({
@@ -448,10 +451,7 @@ function GraphViewInner({
 
   return (
     <div
-      className={
-        "relative h-full bg-bg" +
-        (selectedId !== null ? " syntax-flow--elevate-edges" : "")
-      }
+      className="relative h-full bg-bg"
       // Suppress WebView2's native context menu everywhere in the canvas (including
       // on our own menu), so only the custom menu below ever shows.
       onContextMenu={(event) => event.preventDefault()}
