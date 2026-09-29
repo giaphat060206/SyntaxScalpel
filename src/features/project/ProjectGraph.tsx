@@ -118,7 +118,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { fitView } = useReactFlow();
+  const { fitView, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
 
   useEffect(() => {
@@ -322,16 +322,23 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     (id: string) => {
       setSelectedId(id);
       const node = nodes.find((entry) => entry.id === id);
-      const parent = node?.parentId
+      if (!node) {
+        return;
+      }
+      const parent = node.parentId
         ? nodes.find((entry) => entry.id === node.parentId)
         : undefined;
-      fitView({
-        nodes: parent ? [{ id: parent.id }, { id }] : [{ id }],
-        padding: 0.6,
-        duration: 400,
-      });
+      const x =
+        (parent?.position.x ?? 0) +
+        node.position.x +
+        (node.measured?.width ?? 180) / 2;
+      const y =
+        (parent?.position.y ?? 0) +
+        node.position.y +
+        (node.measured?.height ?? 60) / 2;
+      setCenter(x, y, { zoom: 1.2, duration: 400 });
     },
-    [nodes, fitView]
+    [nodes, setCenter]
   );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
