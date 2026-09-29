@@ -17,7 +17,6 @@ import {
   type Edge,
   type Node,
   type NodeMouseHandler,
-  type OnNodeDrag,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type {
@@ -181,8 +180,6 @@ function GraphViewInner({
   imports,
   selectedId,
   onSelect,
-  onDragStop,
-  onResetLayout,
 }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -195,6 +192,7 @@ function GraphViewInner({
 
   // Rebuild the flow whenever a different file (or its import analysis) changes.
   useEffect(() => {
+    setSections({});
     const flow = buildFlow(result);
     const variables = flow.nodes.filter(
       (node) => node.data.node.kind === "variable"
@@ -300,7 +298,7 @@ function GraphViewInner({
         },
       };
     });
-  }, [nodes, result.edges, selectedId, sections, layoutRun]);
+  }, [nodes, result.edges, selectedId, sections, showLines]);
 
   const edgesForLayout = edges;
 
@@ -378,7 +376,7 @@ function GraphViewInner({
     setMenu(null);
     setSections({});
     setLayoutRun((value) => value + 1);
-  }, [result, imports, setNodes, onResetLayout, fitView, fitToken]);
+  }, []);
 
   const handleFitView = useCallback(() => {
     setMenu(null);
@@ -400,28 +398,9 @@ function GraphViewInner({
     []
   );
 
-  const handleDragStop: OnNodeDrag = useCallback(
-    (_event, node) => {
-      // Save the FULL layout, not just the dragged node. `save_layout` replaces the
-      // entry for this file, so sending one node would erase every other node's
-      // saved position on the next open.
-      const positions: LayoutMap = {};
-      for (const current of nodes) {
-        const position = current.id === node.id ? node.position : current.position;
-        positions[current.id] = { x: position.x, y: position.y };
-      }
-      // Mark the dragged node pinned so auto-reflow leaves its position alone.
-      setNodes((current) =>
-        current.map((item) =>
-          item.id === node.id
-            ? { ...item, data: { ...item.data, pinned: true } }
-            : item
-        )
-      );
-      onDragStop(positions);
-    },
-    [nodes, onDragStop, setNodes]
-  );
+  const handleDragStop = useCallback(() => {
+    setLayoutRun((value) => value + 1);
+  }, []);
 
   // Close the context menu on Escape.
   useEffect(() => {

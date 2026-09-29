@@ -1,6 +1,5 @@
 import type { Edge, Node } from "@xyflow/react";
 import ELK from "elkjs/lib/elk-api";
-import MainThreadELK from "elkjs/lib/elk.bundled.js";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
 import { buildElkGraph, type ElkGraph } from "./graph";
 import { applyElkResult, type ElkLayoutResult, type ElkResultLike } from "./result";
@@ -19,7 +18,7 @@ let elk: ElkLike | null = null;
 let override: LayoutFn | null = null;
 let factoryOverride: ElkFactory | null = null;
 
-function createElk(): ElkLike {
+async function createElk(): Promise<ElkLike> {
   if (factoryOverride) {
     return factoryOverride();
   }
@@ -27,16 +26,17 @@ function createElk(): ElkLike {
     return new ELK({ workerUrl }) as unknown as ElkLike;
   } catch {
     // The api build cannot run without a worker; use the main-thread build.
+    const { default: MainThreadELK } = await import("elkjs/lib/elk.bundled.js");
     return new MainThreadELK() as unknown as ElkLike;
   }
 }
 
-function getLayoutFn(): LayoutFn {
+async function getLayoutFn(): Promise<LayoutFn> {
   if (override) {
     return override;
   }
   if (!elk) {
-    elk = createElk();
+    elk = await createElk();
   }
   const instance = elk;
   return (graph) => instance.layout(graph);
@@ -78,7 +78,8 @@ export async function runElkLayout(
   }
   try {
     const graph = buildElkGraph(nodes, edges);
-    const result = await withTimeout(getLayoutFn()(graph), LAYOUT_TIMEOUT_MS);
+    const layoutFn = await getLayoutFn();
+    const result = await withTimeout(layoutFn(graph), LAYOUT_TIMEOUT_MS);
     return applyElkResult(nodes, result);
   } catch {
     return null;
