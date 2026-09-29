@@ -281,12 +281,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: stroke,
-            width: active ? 20 : 16,
-            height: active ? 16 : 16,
+            width: 16,
+            height: 16,
           },
           style: {
             stroke,
-            strokeWidth: active ? 5 : 2,
+            strokeWidth: 2,
             opacity: unrelated ? 0.12 : 1,
           },
         };
