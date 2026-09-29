@@ -67,6 +67,75 @@ export function CodeNode({ data, selected }: NodeProps) {
     );
   }, [id, setNodes]);
 
+  const edgeHandles = (
+    <>
+      <Handle
+        id="t-in"
+        type="target"
+        position={Position.Top}
+        style={{ left: "40%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="l-in"
+        type="target"
+        position={Position.Left}
+        style={{ top: "40%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="b-in"
+        type="target"
+        position={Position.Bottom}
+        style={{ left: "40%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="r-in"
+        type="target"
+        position={Position.Right}
+        style={{ top: "40%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="t-out"
+        type="source"
+        position={Position.Top}
+        style={{ left: "60%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="l-out"
+        type="source"
+        position={Position.Left}
+        style={{ top: "60%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="b-out"
+        type="source"
+        position={Position.Bottom}
+        style={{ left: "60%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+      <Handle
+        id="r-out"
+        type="source"
+        position={Position.Right}
+        style={{ top: "60%" }}
+        className={handleClass}
+        isConnectable={false}
+      />
+    </>
+  );
+
   if (special) {
     return (
       <div
@@ -103,6 +172,7 @@ export function CodeNode({ data, selected }: NodeProps) {
         className={`h-full w-full min-w-[140px] overflow-hidden rounded border-2 bg-panel px-3 py-2 transition-opacity ${opacity}`}
         style={{ borderColor, boxShadow }}
       >
+        {!isFolder && edgeHandles}
         <div className="flex items-center justify-between gap-2">
           <span
             className="truncate font-mono text-sm"
@@ -153,74 +223,7 @@ export function CodeNode({ data, selected }: NodeProps) {
         className={`h-full w-full min-w-[160px] overflow-hidden rounded border-2 bg-panel px-3 py-2 transition-opacity ${opacity}`}
         style={{ borderColor, boxShadow }}
       >
-        {callable && (
-          <>
-            <Handle
-              id="t-in"
-              type="target"
-              position={Position.Top}
-              style={{ left: "40%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="l-in"
-              type="target"
-              position={Position.Left}
-              style={{ top: "40%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="b-in"
-              type="target"
-              position={Position.Bottom}
-              style={{ left: "40%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="r-in"
-              type="target"
-              position={Position.Right}
-              style={{ top: "40%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="t-out"
-              type="source"
-              position={Position.Top}
-              style={{ left: "60%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="l-out"
-              type="source"
-              position={Position.Left}
-              style={{ top: "60%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="b-out"
-              type="source"
-              position={Position.Bottom}
-              style={{ left: "60%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-            <Handle
-              id="r-out"
-              type="source"
-              position={Position.Right}
-              style={{ top: "60%" }}
-              className={handleClass}
-              isConnectable={false}
-            />
-          </>
-        )}
+        {callable && edgeHandles}
         {container && (
           <>
             <Handle
