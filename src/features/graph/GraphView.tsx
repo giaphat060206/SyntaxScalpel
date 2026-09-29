@@ -44,6 +44,7 @@ const CLASS_HEADER = 76;
 const CLASS_PAD = 12;
 const CLASS_WIDTH = 240;
 const TOP_GAP = 40;
+const TOP_WIDTH = 240;
 
 // Content-aware sizing: estimate the width a monospace line needs so a single
 // `in:`/`out:`/value stays on one line by default. Height stays content-driven.
@@ -92,7 +93,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
       style: {
         width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
       },
-      draggable: true,
+      draggable: false,
       data: {
         special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
         color: colorForNode(IMPORTS_NODE_ID),
@@ -110,7 +111,7 @@ function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
           ...importerLines,
         ]),
       },
-      draggable: true,
+      draggable: false,
       data: {
         special: {
           title: `IMPORTED BY (${imports.importedBy.length})`,
@@ -264,19 +265,43 @@ function reflowLayout(current: Node[]): Node[] {
   }
 
   const topLevel = next
-    .filter((node) => !node.parentId)
+    .filter(
+      (node) =>
+        !node.parentId &&
+        node.id !== IMPORTS_NODE_ID &&
+        node.id !== IMPORTED_BY_NODE_ID
+    )
     .sort(
       (a, b) => a.position.y - b.position.y || a.position.x - b.position.x
     );
+
+  // Keep the import blocks anchored along the top edge; everything else starts
+  // below them so they never drift or get overlapped.
+  let anchorX = 0;
+  let topOffset = 0;
+  for (const special of next) {
+    if (special.id !== IMPORTS_NODE_ID && special.id !== IMPORTED_BY_NODE_ID) {
+      continue;
+    }
+    if (special.position.x !== anchorX || special.position.y !== 0) {
+      special.position = { x: anchorX, y: 0 };
+      changed = true;
+    }
+    const width =
+      (special.style as { width?: number } | undefined)?.width ?? TOP_WIDTH;
+    anchorX += width + TOP_GAP;
+    topOffset = Math.max(topOffset, nodeHeight(special));
+  }
+  topOffset += TOP_GAP;
 
   const anyPinned = topLevel.some(
     (node) => (node.data as CodeNodeData).pinned === true
   );
   if (anyPinned) {
-    let cursor = 0;
+    let cursor = topOffset;
     for (const node of topLevel) {
       const pinned = (node.data as CodeNodeData).pinned === true;
-      const desiredY = pinned ? node.position.y : cursor;
+      const desiredY = pinned ? Math.max(node.position.y, topOffset) : cursor;
       if (!pinned && (node.position.x !== 0 || node.position.y !== desiredY)) {
         node.position = { x: 0, y: desiredY };
         changed = true;
@@ -284,7 +309,7 @@ function reflowLayout(current: Node[]): Node[] {
       cursor = Math.max(cursor, desiredY) + nodeHeight(node) + TOP_GAP;
     }
   } else {
-    const grid = arrangeGrid(topLevel, 0, 0, TOP_GAP, TOP_GAP);
+    const grid = arrangeGrid(topLevel, 0, topOffset, TOP_GAP, TOP_GAP);
     topLevel.forEach((node, index) => {
       const desired = grid.positions[index];
       if (node.position.x !== desired.x || node.position.y !== desired.y) {
