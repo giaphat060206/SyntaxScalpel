@@ -595,6 +595,33 @@ mod tests {
     }
 
     #[test]
+    fn resolves_any_dotted_file_name_not_just_one_example() {
+        let root = temp_project("dotted-generic");
+        std::fs::write(root.join("theme.dark.css"), "body {}\n").unwrap();
+        std::fs::write(root.join("settings.app.js"), "export const s = 1;\n").unwrap();
+        std::fs::write(root.join("data.min.js"), "export const d = 1;\n").unwrap();
+        std::fs::write(root.join("utils.js"), "export const u = 1;\n").unwrap();
+        std::fs::write(
+            root.join("entry.js"),
+            "import './theme.dark';\nimport './settings.app';\nimport './data.min';\nimport './utils';\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let targets: Vec<&str> = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.source == "entry.js")
+            .map(|edge| edge.target.as_str())
+            .collect();
+        assert!(targets.contains(&"theme.dark.css"));
+        assert!(targets.contains(&"settings.app.js"));
+        assert!(targets.contains(&"data.min.js"));
+        // Ordinary names keep resolving by extension replacement.
+        assert!(targets.contains(&"utils.js"));
+    }
+
+    #[test]
     fn resolves_relative_imports_to_dotted_file_names() {
         let root = temp_project("dotted-names");
         std::fs::write(root.join("ai.js"), "").unwrap();
