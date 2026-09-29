@@ -1,3 +1,19 @@
+export interface Crumb {
+  label: string;
+  path: string;
+  navigable: boolean;
+}
+
+export function breadcrumbs(path: string, kind: "folder" | "code"): Crumb[] {
+  const segments = path.split("/").filter(Boolean);
+  const folderCount = kind === "code" ? segments.length - 1 : segments.length;
+  return segments.map((segment, index) => ({
+    label: segment,
+    path: segments.slice(0, index + 1).join("/"),
+    navigable: index < folderCount - 1,
+  }));
+}
+
 interface Props {
   path: string;
   kind: "folder" | "code";
@@ -5,9 +21,6 @@ interface Props {
 }
 
 export function Breadcrumb({ path, kind, onNavigate }: Props) {
-  const segments = path.split("/").filter(Boolean);
-  const folderCount = kind === "code" ? segments.length - 1 : segments.length;
-
   return (
     <div className="flex items-center gap-1 overflow-x-auto border-b border-white/10 bg-panel px-3 py-1 text-xs">
       <button
@@ -17,27 +30,22 @@ export function Breadcrumb({ path, kind, onNavigate }: Props) {
       >
         root
       </button>
-      {segments.map((segment, index) => {
-        const folderPath = segments.slice(0, index + 1).join("/");
-        const isLast = index === segments.length - 1;
-        const navigable = index < folderCount;
-        return (
-          <span key={folderPath} className="flex items-center gap-1">
-            <span className="text-dimmed">/</span>
-            {navigable && !isLast ? (
-              <button
-                type="button"
-                onClick={() => onNavigate({ kind: "folder", path: folderPath })}
-                className="rounded px-1 text-accent hover:bg-accent/10"
-              >
-                {segment}
-              </button>
-            ) : (
-              <span className="px-1 text-white/80">{segment}</span>
-            )}
-          </span>
-        );
-      })}
+      {breadcrumbs(path, kind).map((crumb) => (
+        <span key={crumb.path} className="flex items-center gap-1">
+          <span className="text-dimmed">/</span>
+          {crumb.navigable ? (
+            <button
+              type="button"
+              onClick={() => onNavigate({ kind: "folder", path: crumb.path })}
+              className="rounded px-1 text-accent hover:bg-accent/10"
+            >
+              {crumb.label}
+            </button>
+          ) : (
+            <span className="px-1 text-white/80">{crumb.label}</span>
+          )}
+        </span>
+      ))}
     </div>
   );
 }
