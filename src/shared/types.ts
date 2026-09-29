@@ -64,6 +64,8 @@ export interface ProjectFile {
   folderId: string;
   kind: "code" | "doc";
   imports: FileImport[];
+  /** True for a file outside the scope that an in-scope file imports. */
+  external?: boolean;
 }
 
 export interface ProjectEdge {

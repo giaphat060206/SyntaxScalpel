@@ -114,11 +114,13 @@ function toNodes(
           imports: file.imports,
           fileKind: file.kind,
           entry: entryList.includes(file.id),
+          external: file.external === true,
         },
-        // Docs/config get a muted colour; entry files get the mint accent.
+        // Docs/config get a muted colour; entry files get the mint accent;
+        // out-of-scope targets stay grey so they read as external.
         color: entryList.includes(file.id)
           ? "#3DF0A8"
-          : file.kind === "doc"
+          : file.kind === "doc" || file.external
             ? "#8A93A0"
             : colorForNode(file.id),
         highlighted: false,
@@ -147,6 +149,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
   const [layoutRun, setLayoutRun] = useState(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { fitView, getInternalNode, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
@@ -348,6 +351,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       }
       lastLayoutKey.current = key;
       setSections(result.sections);
+      setLayoutVersion((value) => value + 1);
       setNodes((current) =>
         current.map((node) => {
           const position = result.positions[node.id];
@@ -397,7 +401,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   // First view of a scope: snap the viewport onto the start file once its block
   // has been measured. No animation here, and no `fitView` prop, so nothing
   // competes with the reflow that is still settling.
-  const fitToken = `${root}|${scope}`;
+  const fitToken = `${root}|${scope}|${layoutVersion}`;
   useEffect(() => {
     if (!data || nodes.length === 0 || lastFit.current === fitToken) {
       return;
@@ -411,7 +415,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       if (focused) {
         lastFit.current = fitToken;
         window.clearInterval(timer);
-      } else if (attempts >= 12) {
+      } else if (attempts >= 40) {
         lastFit.current = fitToken;
         fitView({ padding: 0.2, duration: 0 });
         window.clearInterval(timer);

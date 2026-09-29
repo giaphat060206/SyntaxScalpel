@@ -22,6 +22,8 @@ export interface ProjectBlock {
   fileKind?: "code" | "doc";
   entry?: boolean;
   transparent?: boolean;
+  /** A file outside the current scope, shown because something imports it. */
+  external?: boolean;
 }
 
 export interface CodeNodeData extends Record<string, unknown> {
@@ -194,6 +196,11 @@ export function CodeNode({ data, selected }: NodeProps) {
           {project.entry && (
             <span className="rounded bg-mint/20 px-1 text-[9px] uppercase tracking-wider text-mint">
               start
+            </span>
+          )}
+          {project.external && (
+            <span className="rounded bg-white/10 px-1 text-[9px] uppercase tracking-wider text-dimmed">
+              ext
             </span>
           )}
           {isFolder && (
