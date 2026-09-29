@@ -34,11 +34,8 @@ interface Props {
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
 }
 
-function toNodes(
-  data: ProjectGraphData,
-  collapsed: Set<string>,
-  onToggleCollapse: (id: string) => void
-): Node[] {
+/** Ids hidden because they sit inside a collapsed folder (transitively). */
+function hiddenIds(data: ProjectGraphData, collapsed: Set<string>): Set<string> {
   const hidden = new Set<string>();
   for (const folder of data.folders) {
     let parent = folder.parentId;
@@ -55,6 +52,15 @@ function toNodes(
       hidden.add(file.id);
     }
   }
+  return hidden;
+}
+
+function toNodes(
+  data: ProjectGraphData,
+  collapsed: Set<string>,
+  onToggleCollapse: (id: string) => void
+): Node[] {
+  const hidden = hiddenIds(data, collapsed);
 
   const folderNodes: Node[] = data.folders.map((folder) => ({
     id: folder.id,
@@ -183,12 +189,47 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [menu]);
 
+  // Build the nodes once per loaded graph.
   useEffect(() => {
     if (!data) {
       return;
     }
-    setNodes(toNodes(data, collapsed, toggleCollapse));
-  }, [data, collapsed, toggleCollapse, setNodes]);
+    setNodes(toNodes(data, new Set(), toggleCollapse));
+  }, [data, toggleCollapse, setNodes]);
+
+  // Collapse only flips `hidden` flags (and the folder glyph) on the existing
+  // nodes, preserving positions and measurements so the graph does not jump or
+  // fully re-layout on every toggle.
+  useEffect(() => {
+    if (!data) {
+      return;
+    }
+    const hidden = hiddenIds(data, collapsed);
+    setNodes((current) =>
+      current.map((node) => {
+        const shouldHide = hidden.has(node.id);
+        const isFolder = Boolean((node.data as CodeNodeData).project?.kind === "folder");
+        const collapsedFlag = collapsed.has(node.id);
+        const currentFlag = (node.data as CodeNodeData).project?.collapsed;
+        if (node.hidden === shouldHide && (!isFolder || currentFlag === collapsedFlag)) {
+          return node;
+        }
+        return {
+          ...node,
+          hidden: shouldHide,
+          data: isFolder
+            ? {
+                ...node.data,
+                project: {
+                  ...(node.data as CodeNodeData).project,
+                  collapsed: collapsedFlag,
+                },
+              }
+            : node.data,
+        };
+      })
+    );
+  }, [data, collapsed, setNodes]);
 
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}:${node.hidden ? 1 : 0}`)
