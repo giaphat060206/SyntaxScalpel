@@ -169,9 +169,12 @@ export function CodeNode({ data, selected }: NodeProps) {
 
   if (project) {
     const isFolder = project.kind === "folder";
+    // Parent (folder) blocks are transparent so edges routed underneath them
+    // stay visible; leaf (file) blocks are opaque and hide lines beneath them.
+    const background = isFolder ? "bg-transparent" : "bg-panel";
     return (
       <div
-        className={`h-full w-full min-w-[140px] overflow-hidden rounded border-2 bg-panel px-3 py-2 transition-opacity ${opacity}`}
+        className={`h-full w-full min-w-[140px] overflow-hidden rounded border-2 px-3 py-2 transition-opacity ${background} ${opacity}`}
         style={{ borderColor, boxShadow }}
       >
         {!isFolder && edgeHandles}
@@ -224,7 +227,9 @@ export function CodeNode({ data, selected }: NodeProps) {
         onResizeEnd={clearHeight}
       />
       <div
-        className={`h-full w-full min-w-[160px] overflow-hidden rounded border-2 bg-panel px-3 py-2 transition-opacity ${opacity}`}
+        className={`h-full w-full min-w-[160px] overflow-hidden rounded border-2 px-3 py-2 transition-opacity ${
+          container ? "bg-transparent" : "bg-panel"
+        } ${opacity}`}
         style={{ borderColor, boxShadow }}
       >
         {callable && edgeHandles}
