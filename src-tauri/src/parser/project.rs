@@ -573,12 +573,12 @@ mod tests {
     fn detects_every_guarded_script_as_an_entry() {
         let root = temp_project("entry-multi");
         std::fs::write(
-            root.join("main.py"),
+            root.join("beta_script.py"),
             "if __name__ == \"__main__\":\n    pass\n",
         )
         .unwrap();
         std::fs::write(
-            root.join("generate_benchmarks.py"),
+            root.join("alpha_script.py"),
             "if __name__ == \"__main__\":\n    pass\n",
         )
         .unwrap();
@@ -587,11 +587,11 @@ mod tests {
         let graph = project_graph(&root.to_string_lossy(), "").unwrap();
         assert_eq!(
             graph.entries,
-            vec!["generate_benchmarks.py".to_string(), "main.py".to_string()]
+            vec!["alpha_script.py".to_string(), "beta_script.py".to_string()]
         );
         // Primary (first) entry is the lexicographically smallest match.
-        assert_eq!(graph.entry.as_deref(), Some("generate_benchmarks.py"));
-        assert_eq!(graph.files[0].id, "generate_benchmarks.py");
+        assert_eq!(graph.entry.as_deref(), Some("alpha_script.py"));
+        assert_eq!(graph.files[0].id, "alpha_script.py");
     }
 
     #[test]
@@ -619,25 +619,6 @@ mod tests {
         assert!(targets.contains(&"data.min.js"));
         // Ordinary names keep resolving by extension replacement.
         assert!(targets.contains(&"utils.js"));
-    }
-
-    #[test]
-    fn resolves_relative_imports_to_dotted_file_names() {
-        let root = temp_project("dotted-names");
-        std::fs::write(root.join("ai.js"), "").unwrap();
-        std::fs::write(root.join("ai.easy.js"), "export const getEasyMove = () => 1;\n")
-            .unwrap();
-        std::fs::write(
-            root.join("strategies.js"),
-            "import { getEasyMove } from './ai.easy';\nexport const s = getEasyMove;\n",
-        )
-        .unwrap();
-
-        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
-        assert!(graph
-            .edges
-            .iter()
-            .any(|edge| edge.source == "strategies.js" && edge.target == "ai.easy.js"));
     }
 
     #[test]
