@@ -654,23 +654,23 @@ mod tests {
     #[test]
     fn resolves_parent_directory_imports_with_dotted_file_names() {
         let root = temp_project("parent-dir");
-        std::fs::create_dir_all(root.join("pkg/repositories")).unwrap();
-        std::fs::create_dir_all(root.join("pkg/interfaces")).unwrap();
+        std::fs::create_dir_all(root.join("pkg/lib")).unwrap();
+        std::fs::create_dir_all(root.join("pkg/app")).unwrap();
         std::fs::write(
-            root.join("pkg/repositories/subscription.repository.js"),
-            "export const SubscriptionRepository = {};\n",
+            root.join("pkg/lib/util.helpers.js"),
+            "export const util = {};\n",
         )
         .unwrap();
         std::fs::write(
-            root.join("pkg/interfaces/subscription.interface.js"),
-            "import { SubscriptionRepository } from '../repositories/subscription.repository.js';\nexport const SubscriptionInterface = SubscriptionRepository;\n",
+            root.join("pkg/app/main.entry.js"),
+            "import { util } from '../lib/util.helpers.js';\nexport const entry = util;\n",
         )
         .unwrap();
 
         let graph = project_graph(&root.to_string_lossy(), "").unwrap();
         assert!(graph.edges.iter().any(|edge| {
-            edge.source == "pkg/interfaces/subscription.interface.js"
-                && edge.target == "pkg/repositories/subscription.repository.js"
+            edge.source == "pkg/app/main.entry.js"
+                && edge.target == "pkg/lib/util.helpers.js"
         }));
     }
 
