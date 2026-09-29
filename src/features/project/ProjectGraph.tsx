@@ -399,14 +399,9 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       });
   }, [data, nodes, selectedId]);
 
-  const handleNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => {
-      setSelectedId(
-        data?.folders.some((folder) => folder.id === node.id) ? null : node.id
-      );
-    },
-    [data]
-  );
+  const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
+    setSelectedId(node.id);
+  }, []);
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
     (_event, node) => {
