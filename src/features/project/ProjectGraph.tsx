@@ -24,10 +24,13 @@ import { projectGraph } from "../../shared/ipc";
 import { colorForNode } from "../graph/colors";
 import { hiddenIds, selectionInfo } from "./selection";
 import { CodeNode, type CodeNodeData } from "../graph/CodeNode";
-import { CLASS_WIDTH, reflowLayout, spreadHandles } from "../graph/layout";
+import { CLASS_WIDTH, reflowLayout } from "../graph/layout";
+import { runElkLayout } from "../graph/elk/layout";
+import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
 
 const nodeTypes = { scalpel: CodeNode };
+const edgeTypes = { elk: ElkEdge };
 
 interface Props {
   root: string;
@@ -142,6 +145,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLines, setShowLines] = useState(true);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
+  const [layoutRun, setLayoutRun] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const { fitView, getInternalNode, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
@@ -152,6 +157,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     setError(null);
     setCollapsed(new Set());
     setSelectedId(null);
+    setSections({});
     projectGraph(root, scope)
       .then((next) => {
         if (!cancelled) setData(next);
@@ -187,12 +193,10 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   );
 
   const handleRealign = useCallback(() => {
-    if (data) {
-      setNodes(toNodes(data, collapsed, toggleCollapse));
-    }
-    window.setTimeout(() => fitView({ padding: 0.2 }), 80);
     setMenu(null);
-  }, [data, collapsed, toggleCollapse, setNodes, fitView]);
+    setSections({});
+    setLayoutRun((value) => value + 1);
+  }, []);
 
   const handleFitView = useCallback(() => {
     setMenu(null);
@@ -218,6 +222,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     if (!data) {
       return;
     }
+    setSections({});
     setNodes(toNodes(data, new Set(), toggleCollapse));
   }, [data, toggleCollapse, setNodes]);
 
@@ -266,18 +271,97 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     );
   }, [data, collapsed, selectedId, setNodes]);
 
-  // Re-stack once the measured heights have settled. With many nodes, React Flow
-  // measures them in waves; coalescing the reflow avoids re-gridding the whole
-  // graph dozens of times (which reads as the graph flinging around).
+  // Edges are routed by ELK from the section points it computed, falling back to
+  // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
+  const edges: Edge[] = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const selection = selectionInfo(data, selectedId);
+    const focus = selection?.focus ?? null;
+    return data.edges
+      .filter((edge) => {
+        const source = byId.get(edge.source);
+        const target = byId.get(edge.target);
+        return source && target && !source.hidden && !target.hidden;
+      })
+      .map((edge) => {
+        const id = `${edge.source}->${edge.target}`;
+        const source = byId.get(edge.source)!;
+        // Only edges that touch the focused files stay bright; an edge between
+        // two merely-highlighted files (e.g. two imports of the selection) dims.
+        const focused = focus
+          ? focus.has(edge.source) || focus.has(edge.target)
+          : false;
+        const unrelated = focus !== null && !focused;
+        const stroke = (source.data as CodeNodeData).color ?? "#00F0FF";
+        return {
+          id,
+          source: edge.source,
+          target: edge.target,
+          type: "elk",
+          data: { points: sections[id] },
+          zIndex: 0,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: stroke,
+            width: 16,
+            height: 16,
+          },
+          style: {
+            stroke,
+            strokeWidth: 2,
+            opacity: unrelated ? 0.12 : focused ? 1 : showLines ? 0.7 : 0,
+          },
+        };
+      });
+  }, [data, nodes, selectedId, showLines, sections]);
+
+  const edgesForLayout = edges;
+
+  // ELK owns placement: run it once the measured sizes settle, and again after a
+  // Re-align or a collapse/scope change. On any failure (or above the node cap)
+  // fall back to the old grid.
   const sizeSignature = nodes
     .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}:${node.hidden ? 1 : 0}`)
     .join("|");
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setNodes((current) => reflowLayout(current));
-    }, 140);
-    return () => window.clearTimeout(timer);
-  }, [sizeSignature, setNodes]);
+    if (nodes.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const result = await runElkLayout(nodes, edgesForLayout);
+      if (cancelled) {
+        return;
+      }
+      if (!result) {
+        setSections({});
+        setNodes((current) => reflowLayout(current));
+        return;
+      }
+      setSections(result.sections);
+      setNodes((current) =>
+        current.map((node) => {
+          const position = result.positions[node.id];
+          const size = result.sizes[node.id];
+          if (!position) {
+            return node;
+          }
+          return {
+            ...node,
+            position,
+            ...(size ? { style: { ...(node.style ?? {}), ...size } } : {}),
+          };
+        })
+      );
+    }, 160);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sizeSignature, layoutRun, collapsed, data, setNodes]);
 
   // Centre the viewport on one block at a given zoom. Uses React Flow's computed
   // absolute position + measured size (handles nested folders), and reports
@@ -329,59 +413,6 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     }, 150);
     return () => window.clearInterval(timer);
   }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);;
-
-  const edges: Edge[] = useMemo(() => {
-    if (!data) {
-      return [];
-    }
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const selection = selectionInfo(data, selectedId);
-    const focus = selection?.focus ?? null;
-    const outCount = new Map<string, number>();
-    const inCount = new Map<string, number>();
-    return data.edges
-      .filter((edge) => {
-        const source = byId.get(edge.source);
-        const target = byId.get(edge.target);
-        return source && target && !source.hidden && !target.hidden;
-      })
-      .map((edge, edgeIndex) => {
-        const source = byId.get(edge.source)!;
-        const target = byId.get(edge.target)!;
-        const sourceIndex = outCount.get(edge.source) ?? 0;
-        const targetIndex = inCount.get(edge.target) ?? 0;
-        outCount.set(edge.source, sourceIndex + 1);
-        inCount.set(edge.target, targetIndex + 1);
-        // Only edges that touch the focused files stay bright; an edge between
-        // two merely-highlighted files (e.g. two imports of the selection) dims.
-        const focused = focus
-          ? focus.has(edge.source) || focus.has(edge.target)
-          : false;
-        const unrelated = focus !== null && !focused;
-        const stroke =
-          (source.data as CodeNodeData).color ?? "#00F0FF";
-        return {
-          id: `${edge.source}->${edge.target}`,
-          source: edge.source,
-          target: edge.target,
-          type: "smoothstep",
-          pathOptions: { borderRadius: 14, offset: 24 + (edgeIndex % 4) * 16 },
-          ...spreadHandles(source, target, byId, sourceIndex, targetIndex),
-          zIndex: 0,
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: stroke,
-            width: 16,
-            height: 16,
-          },
-          style: {
-            stroke,
-            strokeWidth: 2,
-            opacity: unrelated ? 0.12 : focused ? 1 : showLines ? 0.7 : 0,
-          },
-        };
-      });
-  }, [data, nodes, selectedId, showLines]);
 
   const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     setSelectedId(node.id);
@@ -476,6 +507,7 @@ className="relative h-full bg-bg"
         edges={edges}
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodeClick={handleNodeClick}
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={() => setSelectedId(null)}
