@@ -22,6 +22,7 @@ import "@xyflow/react/dist/style.css";
 import type { ProjectGraph as ProjectGraphData } from "../../shared/types";
 import { projectGraph } from "../../shared/ipc";
 import { colorForNode } from "../graph/colors";
+import { hiddenIds, selectionInfo } from "./selection";
 import { CodeNode, type CodeNodeData } from "../graph/CodeNode";
 import { CLASS_WIDTH, reflowLayout, spreadHandles } from "../graph/layout";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
@@ -32,104 +33,6 @@ interface Props {
   root: string;
   scope: string;
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
-}
-
-/** Ids hidden because they sit inside a collapsed folder (transitively). */
-function hiddenIds(data: ProjectGraphData, collapsed: Set<string>): Set<string> {
-  const hidden = new Set<string>();
-  for (const folder of data.folders) {
-    let parent = folder.parentId;
-    while (parent) {
-      if (collapsed.has(parent)) {
-        hidden.add(folder.id);
-        break;
-      }
-      parent = data.folders.find((f) => f.id === parent)?.parentId;
-    }
-  }
-  for (const file of data.files) {
-    if (collapsed.has(file.folderId) || hidden.has(file.folderId)) {
-      hidden.add(file.id);
-    }
-  }
-  return hidden;
-}
-
-/**
- * Nodes related to the selection, or null when nothing is selected.
- * - a file: itself, the files it imports, the files importing it, and their folders
- * - a folder: the folder, its descendants, and any file connected to one of them
- */
-function highlightIds(
-  data: ProjectGraphData,
-  selectedId: string | null
-): Set<string> | null {
-  if (!selectedId) {
-    return null;
-  }
-  const set = new Set<string>();
-  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
-  const addFolderChain = (folderId: string) => {
-    set.add(folderId);
-    let parent = folderById.get(folderId)?.parentId;
-    while (parent) {
-      set.add(parent);
-      parent = folderById.get(parent)?.parentId;
-    }
-  };
-  if (folderById.has(selectedId)) {    set.add(selectedId);
-    for (const folder of data.folders) {
-      if (folder.id === selectedId || folder.id.startsWith(`${selectedId}/`)) {
-        set.add(folder.id);
-      }
-    }
-    const inside = data.files.filter(
-      (file) =>
-        file.folderId === selectedId ||
-        file.folderId.startsWith(`${selectedId}/`)
-    );
-    const insideIds = new Set(inside.map((file) => file.id));
-    for (const file of inside) {
-      set.add(file.id);
-      addFolderChain(file.folderId);
-    }
-    for (const file of data.files) {
-      if (insideIds.has(file.id)) {
-        continue;
-      }
-      const importsIn = file.imports.some((imp) => insideIds.has(imp.targetId));
-      const importedByInside = inside.some((source) =>
-        source.imports.some((imp) => imp.targetId === file.id)
-      );
-      if (importsIn || importedByInside) {
-        set.add(file.id);
-        addFolderChain(file.folderId);
-      }
-    }
-    return set;
-  }
-
-  set.add(selectedId);
-  const file = data.files.find((entry) => entry.id === selectedId);
-  if (file) {
-    addFolderChain(file.folderId);
-    for (const imp of file.imports) {
-      if (imp.targetId) {
-        set.add(imp.targetId);
-        const target = data.files.find((entry) => entry.id === imp.targetId);
-        if (target) {
-          addFolderChain(target.folderId);
-        }
-      }
-    }
-    for (const other of data.files) {
-      if (other.imports.some((imp) => imp.targetId === selectedId)) {
-        set.add(other.id);
-        addFolderChain(other.folderId);
-      }
-    }
-  }
-  return set;
 }
 
 function toNodes(
@@ -290,7 +193,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return;
     }
     const hidden = hiddenIds(data, collapsed);
-    const highlight = highlightIds(data, selectedId);
+    const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
     setNodes((current) =>
       current.map((node) => {
         const shouldHide = hidden.has(node.id);
@@ -351,7 +254,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return [];
     }
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    const highlight = highlightIds(data, selectedId);
+    const selection = selectionInfo(data, selectedId);
+    const focus = selection?.focus ?? null;
     const outCount = new Map<string, number>();
     const inCount = new Map<string, number>();
     return data.edges
@@ -367,13 +271,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const targetIndex = inCount.get(edge.target) ?? 0;
         outCount.set(edge.source, sourceIndex + 1);
         inCount.set(edge.target, targetIndex + 1);
-        const related = highlight
-          ? highlight.has(edge.source) && highlight.has(edge.target)
+        // Only edges that touch the focused files stay bright; an edge between
+        // two merely-highlighted files (e.g. two imports of the selection) dims.
+        const focused = focus
+          ? focus.has(edge.source) || focus.has(edge.target)
           : false;
-        const unrelated = highlight !== null && !related;
-        const touchesSelection =
-          selectedId !== null &&
-          (edge.source === selectedId || edge.target === selectedId);
+        const unrelated = focus !== null && !focused;
         const stroke =
           (source.data as CodeNodeData).color ?? "#00F0FF";
         return {
@@ -393,7 +296,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           style: {
             stroke,
             strokeWidth: 2,
-            opacity: unrelated ? 0.12 : touchesSelection || related ? 1 : 0.7,
+            opacity: unrelated ? 0.12 : focused ? 1 : 0.7,
           },
         };
       });
