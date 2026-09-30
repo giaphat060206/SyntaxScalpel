@@ -28,7 +28,10 @@ import { CLASS_WIDTH, reflowLayout } from "../graph/layout";
 import { runElkLayout } from "../graph/elk/layout";
 import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
-import { GraphSearch, type SearchItem } from "../graph/GraphSearch";
+import {
+  useSearchRegistration,
+  type SearchItem,
+} from "../shell/SearchContext";
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
@@ -516,13 +519,10 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     return [...folders, ...files];
   }, [data, scope]);
 
-  const handleSearchPick = useCallback(
-    (id: string) => {
-      setSelectedId(id);
-      centerOn(id, 1.2, 400);
-    },
-    [centerOn]
-  );
+  useSearchRegistration(searchItems, (id) => {
+    setSelectedId(id);
+    centerOn(id, 1.2, 400);
+  });
 
   const selectedFile =
     data && selectedId
@@ -557,12 +557,6 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 className="relative h-full bg-bg"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <GraphSearch
-        items={searchItems}
-        onPick={handleSearchPick}
-        placeholder="Search files and folders…"
-      />
-
       {entryList.length > 0 && (
         <div className="absolute left-3 top-3 z-10 max-h-[45%] w-64 overflow-auto rounded border border-mint/40 bg-panel text-xs text-mint">
           <button

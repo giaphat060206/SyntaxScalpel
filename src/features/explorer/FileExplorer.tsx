@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listDirectory, type FileEntry } from "../../shared/ipc";
+import { useSearch } from "../shell/SearchContext";
 
 interface Props {
   root: string | null;
@@ -44,6 +45,36 @@ export function FileExplorer({
   // Directories start collapsed; the set holds the ones the user opened.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [recents, setRecents] = useState<string[]>(() => readRecents());
+  const { items: searchItems, pick: pickSearch } = useSearch();
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  // Ctrl/Cmd+F focuses the search box.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const trimmedQuery = query.trim().toLowerCase();
+  const results = trimmedQuery
+    ? searchItems
+        .filter((item) => item.label.toLowerCase().includes(trimmedQuery))
+        .slice(0, 50)
+    : [];
+
+  const pickResult = useCallback(
+    (id: string) => {
+      pickSearch(id);
+      setQuery("");
+    },
+    [pickSearch]
+  );
 
   useEffect(() => {
     setExpanded(new Set());
@@ -155,10 +186,52 @@ export function FileExplorer({
       <button
         type="button"
         onClick={pickFolder}
-        className="mb-3 w-full rounded border border-accent/40 px-3 py-2 text-sm text-accent hover:bg-accent/10"
+        className="mb-2 w-full rounded border border-accent/40 px-3 py-2 text-sm text-accent hover:bg-accent/10"
       >
         Open Folder
       </button>
+      <input
+        ref={searchRef}
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && results[0]) {
+            pickResult(results[0].id);
+          }
+          if (event.key === "Escape") {
+            setQuery("");
+            event.currentTarget.blur();
+          }
+        }}
+        placeholder="Search (Ctrl+F)…"
+        className="mb-2 w-full rounded border border-white/15 bg-bg px-2 py-1 text-xs text-white outline-none focus:border-accent"
+      />
+      {query.trim().length > 0 && (
+        <ul className="m-0 mb-2 max-h-56 list-none overflow-auto p-0">
+          {results.length === 0 ? (
+            <li className="px-1 py-1 text-xs text-dimmed">no matches</li>
+          ) : (
+            results.map((item) => (
+              <li key={item.id} className="flex items-start gap-1">
+                <span className="shrink-0 text-accent/60">•</span>
+                <button
+                  type="button"
+                  onClick={() => pickResult(item.id)}
+                  title={item.id}
+                  className="min-w-0 flex-1 truncate py-0.5 text-left text-xs text-white/85 hover:text-accent"
+                >
+                  {item.hint && (
+                    <span className="mr-1 text-[10px] uppercase tracking-wider text-dimmed">
+                      {item.hint}
+                    </span>
+                  )}
+                  {item.label}
+                </button>
+              </li>
+            ))
+          )}
+        </ul>
+      )}
       {!root && <p className="text-dimmed text-sm">No folder open.</p>}
       {recents.length > 0 && (
         <div className="mb-3">

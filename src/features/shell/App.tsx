@@ -3,6 +3,7 @@ import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
+import { SearchProvider } from "./SearchContext";
 import { ProjectGraph } from "../project/ProjectGraph";
 
 const iconButton =
@@ -72,7 +73,8 @@ export default function App() {
   const mainFile = showDocs ? codeFile : (codeFile ?? docFile);
 
   return (
-    <div className="h-full bg-bg">
+    <SearchProvider>
+      <div className="h-full bg-bg">
       <Group orientation="horizontal">
         {explorerCollapsed ? (
           <Panel
@@ -191,6 +193,7 @@ export default function App() {
           </>
         )}
       </Group>
-    </div>
+      </div>
+    </SearchProvider>
   );
 }
