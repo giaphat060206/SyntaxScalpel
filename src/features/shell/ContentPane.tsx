@@ -53,6 +53,14 @@ export function ContentPane({ root, filePath }: Props) {
     return state.result.nodes.find((node) => node.id === selectedId);
   }, [isGraph, state, selectedId]);
 
+  const handleSelect = useCallback((id: string | null) => {
+    setSelectedId(id);
+    // Picking a definition (single or double click) reopens the code pane.
+    if (id) {
+      setCodePaneOpen(true);
+    }
+  }, []);
+
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;
   }
@@ -65,17 +73,6 @@ export function ContentPane({ root, filePath }: Props) {
   if (state.status === "markdown") {
     return <MarkdownView content={state.content} />;
   }
-
-  const handleSelect = useCallback(
-    (id: string | null) => {
-      setSelectedId(id);
-      // Picking a definition (single or double click) reopens the code pane.
-      if (id) {
-        setCodePaneOpen(true);
-      }
-    },
-    []
-  );
 
   const graph = (
     <GraphView
