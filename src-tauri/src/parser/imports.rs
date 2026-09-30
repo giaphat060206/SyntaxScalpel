@@ -267,13 +267,95 @@ pub fn resolve_specifier(
     stem_index.get(last).cloned()
 }
 
+/// Path aliases from `tsconfig.json` / `jsconfig.json` (`baseUrl` + `paths`),
+/// so imports like `@shared/utils` or `~/lib/x` can resolve to real files.
+#[derive(Debug, Default, Clone)]
+pub struct AliasMap {
+    base_url: String,
+    paths: Vec<(String, Vec<String>)>,
+}
+
+impl AliasMap {
+    /// Read `tsconfig.json` or `jsconfig.json` from `root`. Unreadable or
+    /// malformed files yield an empty map (no aliases), never an error.
+    pub fn load(root: &Path) -> AliasMap {
+        for name in ["tsconfig.json", "jsconfig.json"] {
+            let Ok(text) = std::fs::read_to_string(root.join(name)) else {
+                continue;
+            };
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+                continue;
+            };
+            let options = json.get("compilerOptions");
+            let base_url = options
+                .and_then(|value| value.get("baseUrl"))
+                .and_then(|value| value.as_str())
+                .unwrap_or(".")
+                .trim_start_matches("./")
+                .to_string();
+            let mut paths = Vec::new();
+            if let Some(map) = options
+                .and_then(|value| value.get("paths"))
+                .and_then(|value| value.as_object())
+            {
+                for (pattern, targets) in map {
+                    let Some(targets) = targets.as_array() else {
+                        continue;
+                    };
+                    let targets: Vec<String> = targets
+                        .iter()
+                        .filter_map(|value| value.as_str())
+                        .map(|value| value.trim_start_matches("./").to_string())
+                        .collect();
+                    if !targets.is_empty() {
+                        paths.push((pattern.clone(), targets));
+                    }
+                }
+            }
+            if !paths.is_empty() {
+                return AliasMap { base_url, paths };
+            }
+        }
+        AliasMap::default()
+    }
+
+    /// Resolve a non-relative specifier through the alias patterns.
+    pub fn resolve(&self, specifier: &str, root: &Path) -> Option<PathBuf> {
+        for (pattern, targets) in &self.paths {
+            let (prefix, suffix) = match pattern.split_once('*') {
+                Some((prefix, suffix)) => (prefix, Some(suffix)),
+                None => (pattern.as_str(), None),
+            };
+            let star = match suffix {
+                Some(_) if !specifier.starts_with(prefix) => continue,
+                Some(_) => &specifier[prefix.len()..],
+                None if specifier == prefix => "",
+                None => continue,
+            };
+            for target in targets {
+                let replaced = target.replacen('*', star, 1);
+                let candidate = Path::new(&self.base_url).join(replaced);
+                if let Some(found) = try_candidates(root, &candidate) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+}
+
 /// Resolve one import entry to target files, excluding the importing file.
 ///
 /// Package-relative imports like `from . import constants` carry the specifier
 /// `"."` plus imported names, so resolving the specifier alone would point at the
 /// package's own `__init__.py`. When the plain specifier resolves to the importer
 /// itself, each imported name is tried as a submodule (`".constants"`), which
-/// yields the real target files.
+/// yields the real target files. Aliases are tried for non-relative specifiers
+/// before the package-relative fallback.
+///
+/// The alias-aware variant is what callers use, so a whole project scan reads
+/// `tsconfig.json` once; this convenience wrapper exists for single-file use.
+#[allow(dead_code)]
 pub fn resolve_import_targets(
     specifier: &str,
     names: &[String],
@@ -281,10 +363,37 @@ pub fn resolve_import_targets(
     root: &Path,
     index: &HashMap<String, PathBuf>,
 ) -> Vec<(PathBuf, String, Vec<String>)> {
+    resolve_import_targets_with_aliases(
+        specifier,
+        names,
+        importer_rel,
+        root,
+        index,
+        &AliasMap::default(),
+    )
+}
+
+/// Same as [`resolve_import_targets`] but with a pre-loaded alias map, so a whole
+/// project scan reads `tsconfig.json` once.
+pub fn resolve_import_targets_with_aliases(
+    specifier: &str,
+    names: &[String],
+    importer_rel: &str,
+    root: &Path,
+    index: &HashMap<String, PathBuf>,
+    aliases: &AliasMap,
+) -> Vec<(PathBuf, String, Vec<String>)> {
     let importer = root.join(importer_rel);
     if let Some(primary) = resolve_specifier(specifier, importer_rel, root, index) {
         if primary != importer {
             return vec![(primary, specifier.to_string(), names.to_vec())];
+        }
+    }
+    if !specifier.starts_with('.') {
+        if let Some(aliased) = aliases.resolve(specifier, root) {
+            if aliased != importer {
+                return vec![(aliased, specifier.to_string(), names.to_vec())];
+            }
         }
     }
     let separator = if specifier.contains('/') {
@@ -370,6 +479,7 @@ pub fn analyze(path: &str, root: &str) -> Result<ImportAnalysis, String> {
 
     let files = project_files(root_path, 0);
     let index = stem_index(&files);
+    let aliases = AliasMap::load(root_path);
 
     let mut imported_by = Vec::new();
     for file in &files {
@@ -383,8 +493,14 @@ pub fn analyze(path: &str, root: &str) -> Result<ImportAnalysis, String> {
         let mut names: Vec<String> = Vec::new();
         let mut matched = false;
         for entry in extract_imports(&other_source, &other_rel) {
-            let targets =
-                resolve_import_targets(&entry.specifier, &entry.names, &other_rel, root_path, &index);
+            let targets = resolve_import_targets_with_aliases(
+                &entry.specifier,
+                &entry.names,
+                &other_rel,
+                root_path,
+                &index,
+                &aliases,
+            );
             if targets.iter().any(|(target, _, _)| same_file(target, &full)) {
                 matched = true;
                 for name in entry.names {

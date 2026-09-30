@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::parser::imports::{extract_imports, resolve_import_targets, stem_index};
+use crate::parser::imports::{
+    extract_imports, resolve_import_targets_with_aliases, stem_index, AliasMap,
+};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
@@ -220,6 +222,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         .map(|file| root_path.join(&file.id))
         .collect();
     let index = stem_index(&code_paths);
+    let aliases = AliasMap::load(root_path);
     let ids: std::collections::HashSet<String> =
         graph.files.iter().map(|file| file.id.clone()).collect();
     let mut external_files: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -242,7 +245,14 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         let mut edges = Vec::new();
         for entry in extract_imports(&source, &id) {
             let targets =
-                resolve_import_targets(&entry.specifier, &entry.names, &id, root_path, &index);
+                resolve_import_targets_with_aliases(
+                    &entry.specifier,
+                    &entry.names,
+                    &id,
+                    root_path,
+                    &index,
+                    &aliases,
+                );
             if targets.is_empty() {
                 imports.push(FileImport {
                     target_id: String::new(),
@@ -325,15 +335,16 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     Ok(graph)
 }
 
-/// Modules referenced by a web entry HTML (`index.html`'s module scripts).
-fn html_entry_points(root: &Path, scope_rel: &str, code: &[&ProjectFile]) -> Vec<String> {
-    let Ok(html) = std::fs::read_to_string(root.join(scope_rel).join("index.html")) else {
+/// Modules referenced by a `index.html` in one folder.
+fn html_entry_points(root: &Path, folder_rel: &str, code: &[&ProjectFile]) -> Vec<String> {
+    let folder_rel = if folder_rel == "." { "" } else { folder_rel };
+    let Ok(html) = std::fs::read_to_string(root.join(folder_rel).join("index.html")) else {
         return Vec::new();
     };
-    let prefix = if scope_rel.is_empty() {
+    let prefix = if folder_rel.is_empty() {
         String::new()
     } else {
-        format!("{}/", scope_rel.replace('\\', "/"))
+        format!("{}/", folder_rel.replace('\\', "/"))
     };
     let mut found = Vec::new();
     for chunk in html.split("src=") {
@@ -361,23 +372,77 @@ fn html_entry_points(root: &Path, scope_rel: &str, code: &[&ProjectFile]) -> Vec
     found
 }
 
-/// Entry-point candidates: conventions first (every match), then graph roots.
-/// The first candidate is treated as the primary entry point.
-fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
+/// Entry files named by a folder's own `package.json` (`main`/`module`/`scripts.start`).
+fn package_entry_points(root: &Path, folder_rel: &str, code: &[&ProjectFile]) -> Vec<String> {
+    let folder_rel = if folder_rel == "." { "" } else { folder_rel };
+    let Ok(text) = std::fs::read_to_string(root.join(folder_rel).join("package.json")) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Vec::new();
+    };
+    let mut pointers: Vec<String> = Vec::new();
+    for key in ["main", "module"] {
+        if let Some(value) = json.get(key).and_then(|v| v.as_str()) {
+            pointers.push(value.to_string());
+        }
+    }
+    if let Some(start) = json
+        .get("scripts")
+        .and_then(|scripts| scripts.get("start"))
+        .and_then(|value| value.as_str())
+    {
+        pointers.push(start.to_string());
+    }
+    let prefix = if folder_rel.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", folder_rel.replace('\\', "/"))
+    };
+    let mut found = Vec::new();
+    for pointer in pointers {
+        let cleaned = pointer
+            .split_whitespace()
+            .last()
+            .unwrap_or("")
+            .trim_start_matches("./");
+        for candidate in [
+            format!("{prefix}{cleaned}"),
+            format!("{prefix}{cleaned}.js"),
+            format!("{prefix}{cleaned}.ts"),
+            format!("{prefix}{cleaned}.tsx"),
+        ] {
+            if let Some(file) = code.iter().find(|file| file.id == candidate) {
+                found.push(file.id.clone());
+            }
+        }
+    }
+    found
+}
+
+/// Entry-point candidates: conventions first, then graph roots.
+///
+/// Detection is **per folder** so a monorepo marks each package's own entry
+/// (`backend/server.js` and `frontend/main.jsx` both count); the first candidate
+/// is treated as the primary entry point.
+fn detect_entries(root: &Path, _scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
     let code: Vec<&ProjectFile> = graph
         .files
         .iter()
         .filter(|f| f.kind == "code" && !f.external)
         .collect();
+    let folders: Vec<String> = graph.folders.iter().map(|f| f.id.clone()).collect();
     let finish = |mut found: Vec<String>| -> Vec<String> {
         found.sort();
         found.dedup();
         found
     };
 
-    // 1. A web entry HTML (`index.html`) points at its real module, which beats
-    //    any file-name convention (`index.js` is often just a barrel file).
-    let html_entries = html_entry_points(root, scope_rel, &code);
+    // 1. A folder's own web entry HTML points at its real module.
+    let mut html_entries = Vec::new();
+    for folder in &folders {
+        html_entries.extend(html_entry_points(root, folder, &code));
+    }
     if !html_entries.is_empty() {
         return finish(html_entries);
     }
@@ -395,70 +460,42 @@ fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<Str
         return finish(guarded);
     }
 
-    // 3. Conventional file names, highest priority group first.
+    // 3. Conventional file names, per folder, highest priority group first.
     const NAMES: [&str; 16] = [
         "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "__main__.py", "app.py",
         "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
         "server.ts", "server.js",
     ];
-    for name in NAMES {
-        let matches: Vec<String> = code
-            .iter()
-            .filter(|file| file.id.rsplit('/').next() == Some(name))
-            .map(|file| file.id.clone())
-            .collect();
-        if !matches.is_empty() {
-            return finish(matches);
-        }
-    }
-
-    // 4. package.json main / module / scripts.start.
-    let scope_dir = root.join(scope_rel);
-    if let Ok(text) = std::fs::read_to_string(scope_dir.join("package.json")) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-            let mut pointers: Vec<String> = Vec::new();
-            for key in ["main", "module"] {
-                if let Some(value) = json.get(key).and_then(|v| v.as_str()) {
-                    pointers.push(value.to_string());
-                }
-            }
-            if let Some(start) = json
-                .get("scripts")
-                .and_then(|scripts| scripts.get("start"))
-                .and_then(|value| value.as_str())
-            {
-                pointers.push(start.to_string());
-            }
-            let prefix = if scope_rel.is_empty() {
-                String::new()
-            } else {
-                format!("{}/", scope_rel.replace('\\', "/"))
-            };
-            let mut found = Vec::new();
-            for pointer in pointers {
-                let cleaned = pointer
-                    .split_whitespace()
-                    .last()
-                    .unwrap_or("")
-                    .trim_start_matches("./");
-                for candidate in [
-                    format!("{prefix}{cleaned}"),
-                    format!("{prefix}{cleaned}.js"),
-                    format!("{prefix}{cleaned}.ts"),
-                    format!("{prefix}{cleaned}.tsx"),
-                ] {
-                    if let Some(file) = code.iter().find(|file| file.id == candidate) {
-                        found.push(file.id.clone());
-                    }
-                }
-            }
-            if !found.is_empty() {
-                return finish(found);
+    let mut named = Vec::new();
+    for folder in &folders {
+        for name in NAMES {
+            let matches: Vec<String> = code
+                .iter()
+                .filter(|file| {
+                    file.folder_id == *folder && file.id.rsplit('/').next() == Some(name)
+                })
+                .map(|file| file.id.clone())
+                .collect();
+            if !matches.is_empty() {
+                named.extend(matches);
+                break;
             }
         }
     }
+    if !named.is_empty() {
+        return finish(named);
+    }
 
-    // 4. Graph roots: nothing imports them, but they import something.
+    // 4. Each folder's own package.json pointers.
+    let mut packaged = Vec::new();
+    for folder in &folders {
+        packaged.extend(package_entry_points(root, folder, &code));
+    }
+    if !packaged.is_empty() {
+        return finish(packaged);
+    }
+
+    // 5. Graph roots: nothing imports them, but they import something.
     let mut imported = std::collections::HashSet::new();
     for edge in &graph.edges {
         imported.insert(edge.target.clone());
@@ -699,6 +736,44 @@ mod tests {
         assert!(targets.contains(&"data.min.js"));
         // Ordinary names keep resolving by extension replacement.
         assert!(targets.contains(&"utils.js"));
+    }
+
+    #[test]
+    fn detects_one_entry_per_folder_in_a_monorepo() {
+        let root = temp_project("monorepo-entries");
+        std::fs::create_dir_all(root.join("backend")).unwrap();
+        std::fs::create_dir_all(root.join("frontend")).unwrap();
+        std::fs::write(root.join("backend/server.js"), "const x = 1;\n").unwrap();
+        std::fs::write(root.join("frontend/main.jsx"), "const y = 2;\n").unwrap();
+        std::fs::write(root.join("backend/util.js"), "export const u = 1;\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph.entries.contains(&"backend/server.js".to_string()));
+        assert!(graph.entries.contains(&"frontend/main.jsx".to_string()));
+        assert_eq!(graph.entry.as_deref(), Some("backend/server.js"));
+    }
+
+    #[test]
+    fn resolves_tsconfig_path_aliases() {
+        let root = temp_project("alias");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            "{\n  \"compilerOptions\": {\n    \"baseUrl\": \".\",\n    \"paths\": { \"@/*\": [\"src/*\"] }\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/util.js"), "export const u = 1;\n").unwrap();
+        std::fs::write(
+            root.join("app.js"),
+            "import { u } from '@/util';\nexport const v = u;\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "app.js" && edge.target == "src/util.js"));
     }
 
     #[test]
