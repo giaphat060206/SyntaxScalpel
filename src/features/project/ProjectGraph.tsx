@@ -574,10 +574,13 @@ className="relative h-full bg-bg"
             selectedFile.imports.map((entry) => (
               <div
                 key={`${entry.targetId}|${entry.specifier}|${entry.names.join(",")}`}
-                className="break-words font-mono text-white/85"
+                className="flex items-start gap-1 font-mono text-white/85"
               >
-                {entry.targetId || entry.specifier}
-                {entry.names.length > 0 ? `: ${entry.names.join(", ")}` : ""}
+                <span className="shrink-0 text-accent/60">•</span>
+                <span className="min-w-0 break-words">
+                  {entry.targetId || entry.specifier}
+                  {entry.names.length > 0 ? `: ${entry.names.join(", ")}` : ""}
+                </span>
               </div>
             ))
           )}
@@ -588,9 +591,15 @@ className="relative h-full bg-bg"
             <div className="font-mono text-white/80">none</div>
           ) : (
             importers.map((importer) => (
-              <div key={importer.path} className="break-words font-mono text-white/85">
-                {importer.path}
-                {importer.names.length > 0 ? `: ${importer.names.join(", ")}` : ""}
+              <div
+                key={importer.path}
+                className="flex items-start gap-1 font-mono text-white/85"
+              >
+                <span className="shrink-0 text-mint/60">•</span>
+                <span className="min-w-0 break-words">
+                  {importer.path}
+                  {importer.names.length > 0 ? `: ${importer.names.join(", ")}` : ""}
+                </span>
               </div>
             ))
           )}
