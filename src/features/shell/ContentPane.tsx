@@ -18,9 +18,11 @@ export function ContentPane({ root, filePath }: Props) {
   const imports = useImports(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [source, setSource] = useState<string | null>(null);
+  const [codePaneOpen, setCodePaneOpen] = useState(true);
 
   useEffect(() => {
     setSelectedId(null);
+    setCodePaneOpen(true);
   }, [filePath]);
 
   const isGraph = state.status === "graph";
@@ -73,15 +75,14 @@ export function ContentPane({ root, filePath }: Props) {
     />
   );
 
-  // Clicking a function, method or class shows its source section beside the
-  // graph; the graph stays visible so other definitions can be picked.
-  if (
+  const hasSection =
     source !== null &&
-    filePath &&
-    selectedNode &&
+    filePath !== null &&
+    selectedNode !== undefined &&
     selectedNode.startLine !== undefined &&
-    selectedNode.endLine !== undefined
-  ) {
+    selectedNode.endLine !== undefined;
+
+  if (hasSection && codePaneOpen) {
     return (
       <Group orientation="horizontal">
         <Panel minSize="30%">{graph}</Panel>
@@ -93,9 +94,27 @@ export function ContentPane({ root, filePath }: Props) {
             startLine={selectedNode.startLine}
             endLine={selectedNode.endLine}
             title={selectedNode.name}
+            onCollapse={() => setCodePaneOpen(false)}
           />
         </Panel>
       </Group>
+    );
+  }
+
+  // Collapsed: keep the graph full width with a button to bring the code back.
+  if (hasSection) {
+    return (
+      <div className="relative h-full">
+        {graph}
+        <button
+          type="button"
+          onClick={() => setCodePaneOpen(true)}
+          title={`Show ${selectedNode.name}`}
+          className="absolute bottom-3 right-28 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        >
+          Show code
+        </button>
+      </div>
     );
   }
 

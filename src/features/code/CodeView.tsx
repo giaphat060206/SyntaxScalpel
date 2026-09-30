@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { highlightCode, languageForPath } from "./highlight";
 
 interface Props {
@@ -11,9 +11,20 @@ interface Props {
   endLine?: number;
   /** Name of the selected definition, shown in the header. */
   title?: string;
+  /** Collapses the pane back to the graph. */
+  onCollapse?: () => void;
 }
 
-export function CodeView({ code, filePath, startLine, endLine, title }: Props) {
+export function CodeView({
+  code,
+  filePath,
+  startLine,
+  endLine,
+  title,
+  onCollapse,
+}: Props) {
+  const [wrap, setWrap] = useState(false);
+
   const { section, firstLine } = useMemo(() => {
     const lines = code.split("\n");
     const from = Math.max(1, startLine ?? 1);
@@ -40,10 +51,35 @@ export function CodeView({ code, filePath, startLine, endLine, title }: Props) {
           {title ? `${title} — ` : ""}
           {filePath}
         </span>
-        <span className="shrink-0 text-[10px] text-dimmed">
-          {startLine !== undefined && endLine !== undefined
-            ? `L${startLine}–${endLine}`
-            : `${lineNumbers.length} lines`}
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-[10px] text-dimmed">
+            {startLine !== undefined && endLine !== undefined
+              ? `L${startLine}–${endLine}`
+              : `${lineNumbers.length} lines`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setWrap((value) => !value)}
+            title={wrap ? "Disable line wrap" : "Wrap long lines"}
+            className={
+              "rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wider " +
+              (wrap
+                ? "border-accent/60 text-accent"
+                : "border-white/15 text-dimmed hover:text-accent")
+            }
+          >
+            Wrap
+          </button>
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              title="Collapse code view"
+              className="rounded border border-white/15 px-1.5 py-0.5 text-[10px] text-dimmed hover:text-accent"
+            >
+              »
+            </button>
+          )}
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -53,7 +89,12 @@ export function CodeView({ code, filePath, startLine, endLine, title }: Props) {
               <div key={line}>{line}</div>
             ))}
           </pre>
-          <pre className="m-0 flex-1 overflow-x-auto px-3 py-2 text-white/90">
+          <pre
+            className={
+              "m-0 flex-1 px-3 py-2 text-white/90 " +
+              (wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre overflow-x-auto")
+            }
+          >
             <code dangerouslySetInnerHTML={{ __html: html }} />
           </pre>
         </div>
