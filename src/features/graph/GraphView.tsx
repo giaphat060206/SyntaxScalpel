@@ -190,6 +190,16 @@ function GraphViewInner({
   const lastFit = useRef<string>("");
   const lastLayoutKey = useRef<string>("");
 
+  // A selection that does not match any node on the canvas (stale id from a
+  // previous file) must not dim the whole graph.
+  const activeSelectedId = useMemo(
+    () =>
+      selectedId !== null && nodes.some((node) => node.id === selectedId)
+        ? selectedId
+        : null,
+    [selectedId, nodes]
+  );
+
   // Rebuild the flow whenever a different file (or its import analysis) changes.
   useEffect(() => {
     setSections({});
@@ -259,10 +269,10 @@ function GraphViewInner({
     setNodes((current) =>
       current.map((node) => ({
         ...node,
-        data: { ...node.data, ...visibilityOf(node.id, result.edges, selectedId) },
+        data: { ...node.data, ...visibilityOf(node.id, result.edges, activeSelectedId) },
       }))
     );
-  }, [selectedId, result.edges, setNodes]);
+  }, [activeSelectedId, result.edges, setNodes]);
 
   // Edges are routed by ELK from the section points it computed, falling back to
   // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
@@ -272,9 +282,9 @@ function GraphViewInner({
       const id = `${edge.source}->${edge.target}`;
       const source = byId.get(edge.source);
       const active =
-        selectedId !== null &&
-        (edge.source === selectedId || edge.target === selectedId);
-      const unrelated = selectedId !== null && !active;
+        activeSelectedId !== null &&
+        (edge.source === activeSelectedId || edge.target === activeSelectedId);
+      const unrelated = activeSelectedId !== null && !active;
       const sourceColor =
         (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
       const stroke = sourceColor;
@@ -298,7 +308,7 @@ function GraphViewInner({
         },
       };
     });
-  }, [nodes, result.edges, selectedId, sections, showLines]);
+  }, [nodes, result.edges, activeSelectedId, sections, showLines]);
 
   const edgesForLayout = edges;
 
@@ -468,7 +478,7 @@ function GraphViewInner({
     return <EmptyState message="No functions detected" />;
   }
 
-  const activeId = selectedId ?? hoveredId;
+  const activeId = activeSelectedId ?? hoveredId;
   const activeNode = activeId
     ? nodes.find((node) => node.id === activeId)
     : undefined;

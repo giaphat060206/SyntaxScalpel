@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Group, Panel, Separator } from "react-resizable-panels";
 import { useFileContent } from "./useFileContent";
 import { useImports } from "./useImports";
 import { GraphView } from "../graph/GraphView";
@@ -94,39 +93,42 @@ export function ContentPane({ root, filePath }: Props) {
       selectedNode.endLine !== undefined
   );
 
-  // One stable tree: the graph Panel is always in the same position, so opening
-  // or collapsing the code pane never remounts React Flow (which would rebuild
-  // the graph and re-run ELK).
+  // One stable tree: the graph sits in an absolutely positioned layer that is
+  // always present, and the code pane is an overlay beside it. Opening or
+  // collapsing the pane therefore never remounts React Flow (no rebuild, no
+  // ELK re-run).
+  const codeOpen = hasSection && codePaneOpen;
+
   return (
-    <Group orientation="horizontal">
-      <Panel minSize="30%" className="relative">
+    <div className="relative h-full">
+      <div
+        className="absolute bottom-0 left-0 top-0"
+        style={{ right: codeOpen ? "45%" : 0 }}
+      >
         {graph}
-        {hasSection && !codePaneOpen && (
-          <button
-            type="button"
-            onClick={() => setCodePaneOpen(true)}
-            title={`Show ${selectedNode?.name}`}
-            className="absolute bottom-3 right-28 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
-          >
-            Show code
-          </button>
-        )}
-      </Panel>
-      {hasSection && codePaneOpen && (
-        <>
-          <Separator className="w-1 bg-white/10" />
-          <Panel defaultSize="45%" minSize="20%">
-            <CodeView
-              code={source ?? ""}
-              filePath={filePath ?? ""}
-              startLine={selectedNode?.startLine}
-              endLine={selectedNode?.endLine}
-              title={selectedNode?.name}
-              onCollapse={() => setCodePaneOpen(false)}
-            />
-          </Panel>
-        </>
+      </div>
+      {hasSection && !codePaneOpen && (
+        <button
+          type="button"
+          onClick={() => setCodePaneOpen(true)}
+          title={`Show ${selectedNode?.name}`}
+          className="absolute bottom-3 right-28 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        >
+          Show code
+        </button>
       )}
-    </Group>
+      {codeOpen && (
+        <div className="absolute right-0 top-0 z-20 h-full w-[45%] border-l border-white/10">
+          <CodeView
+            code={source ?? ""}
+            filePath={filePath ?? ""}
+            startLine={selectedNode?.startLine}
+            endLine={selectedNode?.endLine}
+            title={selectedNode?.name}
+            onCollapse={() => setCodePaneOpen(false)}
+          />
+        </div>
+      )}
+    </div>
   );
 }

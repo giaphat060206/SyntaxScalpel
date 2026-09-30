@@ -150,6 +150,17 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Ignore a selection that is not on the canvas (stale id) so the graph does
+  // not dim entirely.
+  const activeSelectedId = useMemo(() => {
+    if (!selectedId || !data) {
+      return null;
+    }
+    return data.folders.some((folder) => folder.id === selectedId) ||
+      data.files.some((file) => file.id === selectedId)
+      ? selectedId
+      : null;
+  }, [selectedId, data]);
   const [showLines, setShowLines] = useState(true);
   const [startsOpen, setStartsOpen] = useState(true);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -271,7 +282,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return;
     }
     const hidden = hiddenIds(data, collapsed);
-    const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
+    const highlight = selectionInfo(data, activeSelectedId)?.highlight ?? null;
     setNodes((current) =>
       current.map((node) => {
         const shouldHide = hidden.has(node.id);
@@ -279,7 +290,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         const collapsedFlag = collapsed.has(node.id);
         const currentFlag = (node.data as CodeNodeData).project?.collapsed;
         const dimmed = highlight ? !highlight.has(node.id) : false;
-        const highlighted = highlight ? node.id === selectedId : false;
+        const highlighted = highlight ? node.id === activeSelectedId : false;
         const data_ = node.data as CodeNodeData;
         if (
           node.hidden === shouldHide &&
@@ -306,7 +317,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
         };
       })
     );
-  }, [data, collapsed, selectedId, setNodes]);
+  }, [data, collapsed, activeSelectedId, setNodes]);
 
   // Edges are routed by ELK from the section points it computed, falling back to
   // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
@@ -315,7 +326,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       return [];
     }
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    const selection = selectionInfo(data, selectedId);
+    const selection = selectionInfo(data, activeSelectedId);
     const focus = selection?.focus ?? null;
     return data.edges
       .filter((edge) => {
@@ -353,7 +364,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
           },
         };
       });
-  }, [data, nodes, selectedId, showLines, sections]);
+  }, [data, nodes, activeSelectedId, showLines, sections]);
 
   const edgesForLayout = edges;
 
@@ -542,8 +553,8 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   );
 
   const selectedFile =
-    data && selectedId
-      ? data.files.find((file) => file.id === selectedId)
+    data && activeSelectedId
+      ? data.files.find((file) => file.id === activeSelectedId)
       : undefined;
 
   // Files that import the selected file, with the symbols they pull from it.
