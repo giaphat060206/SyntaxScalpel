@@ -146,6 +146,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showLines, setShowLines] = useState(true);
+  const [startsOpen, setStartsOpen] = useState(true);
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
   const [layoutRun, setLayoutRun] = useState(0);
@@ -496,21 +497,34 @@ className="relative h-full bg-bg"
       onContextMenu={(event) => event.preventDefault()}
     >
       {entryList.length > 0 && (
-        <div className="absolute left-3 top-3 z-10 max-w-[70%] rounded border border-mint/40 bg-panel px-2 py-1 text-xs text-mint">
-          {entryList.length === 1 ? "Start: " : `Starts (${entryList.length}): `}
-          {entryList.map((id, index) => (
-            <span key={id}>
-              {index > 0 && ", "}
-              <button
-                type="button"
-                onClick={() => focusEntry(id)}
-                title={id}
-                className="underline underline-offset-2 hover:text-white"
-              >
-                {shortPath(id)}
-              </button>
+        <div className="absolute left-3 top-3 z-10 max-h-[45%] w-64 overflow-auto rounded border border-mint/40 bg-panel text-xs text-mint">
+          <button
+            type="button"
+            onClick={() => setStartsOpen((value) => !value)}
+            className="flex w-full items-center justify-between px-2 py-1 text-left hover:bg-mint/10"
+          >
+            <span>
+              {entryList.length === 1 ? "Start" : `Starts (${entryList.length})`}
             </span>
-          ))}
+            <span className="text-mint/80">{startsOpen ? "▾" : "▸"}</span>
+          </button>
+          {startsOpen && (
+            <ul className="m-0 list-none p-0 px-2 pb-1">
+              {entryList.map((id) => (
+                <li key={id} className="flex items-start gap-1">
+                  <span className="shrink-0 text-mint/70">•</span>
+                  <button
+                    type="button"
+                    onClick={() => focusEntry(id)}
+                    title={id}
+                    className="min-w-0 flex-1 truncate text-left underline underline-offset-2 hover:text-white"
+                  >
+                    {shortPath(id)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {data.truncated && (
