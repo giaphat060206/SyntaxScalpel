@@ -5,6 +5,7 @@ import { GraphView } from "../graph/GraphView";
 import { MarkdownView } from "../markdown/MarkdownView";
 import { CodeView } from "../code/CodeView";
 import { ErrorState, EmptyState } from "../../shared/StateViews";
+import { ErrorBoundary } from "../../shared/ErrorBoundary";
 import { readFile } from "../../shared/ipc";
 
 interface Props {
@@ -100,13 +101,14 @@ export function ContentPane({ root, filePath }: Props) {
   const codeOpen = hasSection && codePaneOpen;
 
   return (
-    <div className="relative h-full">
-      <div
-        className="absolute bottom-0 left-0 top-0"
-        style={{ right: codeOpen ? "45%" : 0 }}
-      >
-        {graph}
-      </div>
+    <ErrorBoundary>
+      <div className="relative h-full">
+        <div
+          className="absolute bottom-0 left-0 top-0"
+          style={{ right: codeOpen ? "45%" : 0 }}
+        >
+          {graph}
+        </div>
       {hasSection && !codePaneOpen && (
         <button
           type="button"
@@ -129,6 +131,7 @@ export function ContentPane({ root, filePath }: Props) {
           />
         </div>
       )}
-    </div>
+      </div>
+    </ErrorBoundary>
   );
 }

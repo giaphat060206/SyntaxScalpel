@@ -5,6 +5,7 @@ import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
 import { SearchProvider } from "./SearchContext";
+import { ErrorBoundary } from "../../shared/ErrorBoundary";
 import { Welcome } from "./Welcome";
 import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
@@ -234,11 +235,13 @@ export default function App() {
             }
           >
             {location.kind === "folder" ? (
-              <ProjectGraph
-                root={root ?? ""}
-                scope={location.path}
-                onNavigate={setLocationState}
-              />
+              <ErrorBoundary>
+                <ProjectGraph
+                  root={root ?? ""}
+                  scope={location.path}
+                  onNavigate={setLocationState}
+                />
+              </ErrorBoundary>
             ) : (
               <ContentPane root={root} filePath={mainFile} />
             )}
