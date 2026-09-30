@@ -162,8 +162,11 @@ export function CodeNode({ data, selected }: NodeProps) {
             <div className="text-dimmed">none</div>
           ) : (
             special.lines.map((line, index) => (
-              <div key={index} className="whitespace-pre-wrap break-words">
-                {line}
+              <div key={index} className="flex items-start gap-1">
+                <span className="shrink-0 text-accent/60">•</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words">
+                  {line}
+                </span>
               </div>
             ))
           )}
