@@ -457,6 +457,11 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
       ? [data.entry]
       : [];
 
+  // Show entry paths relative to the folder the user is looking at, so a deep
+  // start file reads `folder3/startFile` instead of the whole project path.
+  const shortPath = (path: string) =>
+    scope && path.startsWith(`${scope}/`) ? path.slice(scope.length + 1) : path;
+
   const selectedFile =
     data && selectedId
       ? data.files.find((file) => file.id === selectedId)
@@ -499,9 +504,10 @@ className="relative h-full bg-bg"
               <button
                 type="button"
                 onClick={() => focusEntry(id)}
+                title={id}
                 className="underline underline-offset-2 hover:text-white"
               >
-                {id}
+                {shortPath(id)}
               </button>
             </span>
           ))}
