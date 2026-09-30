@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { useFileContent } from "./useFileContent";
 import { useImports } from "./useImports";
@@ -66,57 +66,67 @@ export function ContentPane({ root, filePath }: Props) {
     return <MarkdownView content={state.content} />;
   }
 
+  const handleSelect = useCallback(
+    (id: string | null) => {
+      setSelectedId(id);
+      // Picking a definition (single or double click) reopens the code pane.
+      if (id) {
+        setCodePaneOpen(true);
+      }
+    },
+    []
+  );
+
   const graph = (
     <GraphView
       result={state.result}
       imports={imports}
       selectedId={selectedId}
-      onSelect={setSelectedId}
+      onSelect={handleSelect}
     />
   );
 
-  const hasSection =
+  const hasSection = Boolean(
     source !== null &&
-    filePath !== null &&
-    selectedNode !== undefined &&
-    selectedNode.startLine !== undefined &&
-    selectedNode.endLine !== undefined;
+      filePath !== null &&
+      selectedNode !== undefined &&
+      selectedNode.startLine !== undefined &&
+      selectedNode.endLine !== undefined
+  );
 
-  if (hasSection && codePaneOpen) {
-    return (
-      <Group orientation="horizontal">
-        <Panel minSize="30%">{graph}</Panel>
-        <Separator className="w-1 bg-white/10" />
-        <Panel defaultSize="45%" minSize="20%">
-          <CodeView
-            code={source}
-            filePath={filePath}
-            startLine={selectedNode.startLine}
-            endLine={selectedNode.endLine}
-            title={selectedNode.name}
-            onCollapse={() => setCodePaneOpen(false)}
-          />
-        </Panel>
-      </Group>
-    );
-  }
-
-  // Collapsed: keep the graph full width with a button to bring the code back.
-  if (hasSection) {
-    return (
-      <div className="relative h-full">
+  // One stable tree: the graph Panel is always in the same position, so opening
+  // or collapsing the code pane never remounts React Flow (which would rebuild
+  // the graph and re-run ELK).
+  return (
+    <Group orientation="horizontal">
+      <Panel minSize="30%" className="relative">
         {graph}
-        <button
-          type="button"
-          onClick={() => setCodePaneOpen(true)}
-          title={`Show ${selectedNode.name}`}
-          className="absolute bottom-3 right-28 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
-        >
-          Show code
-        </button>
-      </div>
-    );
-  }
-
-  return graph;
+        {hasSection && !codePaneOpen && (
+          <button
+            type="button"
+            onClick={() => setCodePaneOpen(true)}
+            title={`Show ${selectedNode?.name}`}
+            className="absolute bottom-3 right-28 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+          >
+            Show code
+          </button>
+        )}
+      </Panel>
+      {hasSection && codePaneOpen && (
+        <>
+          <Separator className="w-1 bg-white/10" />
+          <Panel defaultSize="45%" minSize="20%">
+            <CodeView
+              code={source ?? ""}
+              filePath={filePath ?? ""}
+              startLine={selectedNode?.startLine}
+              endLine={selectedNode?.endLine}
+              title={selectedNode?.name}
+              onCollapse={() => setCodePaneOpen(false)}
+            />
+          </Panel>
+        </>
+      )}
+    </Group>
+  );
 }
