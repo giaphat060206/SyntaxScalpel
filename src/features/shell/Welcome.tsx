@@ -1,3 +1,5 @@
+import logo from "../../assets/SyntaxScalpel-darkTheme.png";
+
 interface Props {
   recents: string[];
   onOpenFolder: () => void;
@@ -21,7 +23,8 @@ export function Welcome({
   return (
     <div className="h-full overflow-auto bg-bg px-8 py-10">
       <div className="mx-auto w-full max-w-2xl">
-        <h1 className="font-mono text-2xl text-accent">SyntaxScalpel</h1>
+        <img src={logo} alt="SyntaxScalpel" className="h-20 w-auto object-contain" />
+        <h1 className="mt-3 font-mono text-2xl text-accent">SyntaxScalpel</h1>
         <p className="mt-1 text-sm text-dimmed">
           Dissect a codebase into graphs and docs. Open a folder to begin.
         </p>
