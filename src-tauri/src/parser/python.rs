@@ -13,7 +13,13 @@ struct Def<'a> {
     uses: Vec<String>,
     value: Option<String>,
     parent: Option<String>,
+    start_line: usize,
+    end_line: usize,
     body: Option<Node<'a>>,
+}
+
+fn line_range(node: Node) -> (usize, usize) {
+    (node.start_position().row + 1, node.end_position().row + 1)
 }
 
 pub fn parse_source(
@@ -80,6 +86,8 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
                     uses: class_uses,
                     value: None,
                     parent: None,
+                    start_line: line_range(child).0,
+                    end_line: line_range(child).1,
                     body: None,
                 });
             }
@@ -128,6 +136,8 @@ fn function_def<'a>(
         uses,
         value: None,
         parent,
+        start_line: line_range(node).0,
+        end_line: line_range(node).1,
         body: Some(body),
     })
 }
@@ -164,6 +174,8 @@ fn variable_def<'a>(
         uses,
         value,
         parent: None,
+        start_line: line_range(statement).0,
+        end_line: line_range(statement).1,
         body: None,
     })
 }
@@ -353,6 +365,8 @@ fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
         params: def.params.clone(),
         returns: def.returns.clone(),
         uses: def.uses.clone(),
+        start_line: def.start_line,
+        end_line: def.end_line,
         value: def.value.clone(),
         parent: def.parent.clone(),
         position: layout.get(&def.id).cloned(),
@@ -461,6 +475,15 @@ def build():
             .map(|n| n.name.as_str())
             .collect();
         assert_eq!(variables, vec!["X"]);
+    }
+
+    #[test]
+    fn records_the_line_range_of_each_definition() {
+        let source = "\n\ndef add(a, b):\n    return a + b\n";
+        let result = parse(source);
+        let add = result.nodes.iter().find(|n| n.name == "add").unwrap();
+        assert_eq!(add.start_line, 3);
+        assert_eq!(add.end_line, 4);
     }
 
     #[test]

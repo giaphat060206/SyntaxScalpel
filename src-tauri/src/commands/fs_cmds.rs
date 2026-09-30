@@ -162,3 +162,10 @@ pub fn read_markdown(path: String, root: String) -> Result<String, String> {
     let full = Path::new(&root).join(&path);
     std::fs::read_to_string(&full).map_err(|e| format!("{}: {e}", full.display()))
 }
+
+/// Raw text of any project file, for the code reader.
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_file(path: String, root: String) -> Result<String, String> {
+    let full = Path::new(&root).join(&path);
+    std::fs::read_to_string(&full).map_err(|e| format!("{}: {e}", full.display()))
+}

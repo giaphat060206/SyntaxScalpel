@@ -24,6 +24,9 @@ pub struct GraphNode {
     pub params: Vec<String>,
     pub returns: Vec<String>,
     pub uses: Vec<String>,
+    /// 1-based inclusive line range of the definition in its file.
+    pub start_line: usize,
+    pub end_line: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +61,8 @@ mod tests {
             params: vec!["self".into(), "name".into()],
             returns: vec!["name".into()],
             uses: vec!["imported_thing".into()],
+            start_line: 10,
+            end_line: 12,
             value: None,
             parent: Some("Greeter".into()),
             position: None,

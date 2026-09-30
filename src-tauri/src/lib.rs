@@ -17,6 +17,7 @@ pub fn run() {
             greet,
             commands::fs_cmds::list_directory,
             commands::fs_cmds::read_markdown,
+            commands::fs_cmds::read_file,
             commands::parse::parse_python,
             commands::parse::parse_js_ts,
             commands::parse::analyze_imports,
