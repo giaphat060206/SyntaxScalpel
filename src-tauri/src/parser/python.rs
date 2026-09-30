@@ -47,31 +47,48 @@ pub fn parse_source(
     })
 }
 
+/// Decorated definitions (`@staticmethod`, `@app.route`) wrap the real
+/// definition; unwrap so the definition can be extracted, while the outer node
+/// keeps the decorators inside the reported line range.
+fn unwrap_decorated(node: Node) -> Node {
+    if node.kind() == "decorated_definition" {
+        node.child_by_field_name("definition").unwrap_or(node)
+    } else {
+        node
+    }
+}
+
 fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        match child.kind() {
+        let member = unwrap_decorated(child);
+        match member.kind() {
             "function_definition" => {
-                if let Some(def) = function_def(child, source, None, imported) {
+                if let Some(def) = function_def(member, source, None, imported, Some(child)) {
                     defs.push(def);
                 }
             }
             "class_definition" => {
-                let class_name = child
+                let class_name = member
                     .child_by_field_name("name")
                     .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                     .unwrap_or("")
                     .to_string();
                 let mut class_uses = Vec::new();
-                if let Some(body) = child.child_by_field_name("body") {
+                if let Some(body) = member.child_by_field_name("body") {
                     class_uses = uses_in(body, source, imported);
                     let mut inner_cursor = body.walk();
                     for inner in body.children(&mut inner_cursor) {
-                        if inner.kind() == "function_definition" {
-                            if let Some(def) =
-                                function_def(inner, source, Some(class_name.clone()), imported)
-                            {
+                        let method = unwrap_decorated(inner);
+                        if method.kind() == "function_definition" {
+                            if let Some(def) = function_def(
+                                method,
+                                source,
+                                Some(class_name.clone()),
+                                imported,
+                                Some(inner),
+                            ) {
                                 defs.push(def);
                             }
                         }
@@ -107,6 +124,7 @@ fn function_def<'a>(
     source: &str,
     parent: Option<String>,
     imported: &[String],
+    range_node: Option<Node<'a>>,
 ) -> Option<Def<'a>> {
     let name = node
         .child_by_field_name("name")?
@@ -126,6 +144,7 @@ fn function_def<'a>(
     let body = node.child_by_field_name("body")?;
     let returns = return_names(body, source);
     let uses = uses_in(body, source, imported);
+    let span = range_node.unwrap_or(node);
 
     Some(Def {
         id,
@@ -136,8 +155,8 @@ fn function_def<'a>(
         uses,
         value: None,
         parent,
-        start_line: line_range(node).0,
-        end_line: line_range(node).1,
+        start_line: line_range(span).0,
+        end_line: line_range(span).1,
         body: Some(body),
     })
 }
@@ -475,6 +494,31 @@ def build():
             .map(|n| n.name.as_str())
             .collect();
         assert_eq!(variables, vec!["X"]);
+    }
+
+    #[test]
+    fn extracts_decorated_methods_and_top_level_functions() {
+        let source = "\
+class C:
+    @staticmethod
+    def a():
+        return 1
+
+@app.route('/')
+def handler():
+    return 2
+";
+        let result = parse(source);
+        let method = result.nodes.iter().find(|n| n.id == "C.a").unwrap();
+        assert_eq!(method.kind, NodeKind::Method);
+        // The range includes the decorator line.
+        assert_eq!(method.start_line, 2);
+        assert_eq!(method.end_line, 4);
+
+        let handler = result.nodes.iter().find(|n| n.name == "handler").unwrap();
+        assert_eq!(handler.kind, NodeKind::Function);
+        assert_eq!(handler.start_line, 6);
+        assert_eq!(handler.end_line, 8);
     }
 
     #[test]

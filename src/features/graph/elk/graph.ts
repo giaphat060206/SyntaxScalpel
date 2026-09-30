@@ -76,7 +76,9 @@ export function buildElkGraph(nodes: Node[], edges: Edge[]): ElkGraph {
           id: node.id,
           children,
           layoutOptions: {
-            "elk.padding": "[top=40,left=20,bottom=20,right=20]",
+            // Top padding leaves room for the container's own header row
+            // (kind + name), so children never overlap the title.
+            "elk.padding": "[top=72,left=20,bottom=20,right=20]",
           },
         };
       }
