@@ -29,6 +29,7 @@ import { buildFlow, type FlowNode } from "./flow";
 import { traceNeighbors } from "./trace";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
+import { GraphSearch } from "./GraphSearch";
 import { colorForNode } from "./colors";
 import {
   CONSTANTS_NODE_ID,
@@ -423,10 +424,16 @@ function GraphViewInner({
     [nodes]
   );
 
-  useSearchRegistration(searchItems, (id) => {
-    onSelect(id);
-    centerOn(id, 1.2, 400);
-  });
+  const handleSearchPick = useCallback(
+    (id: string) => {
+      onSelect(id);
+      centerOn(id, 1.2, 400);
+    },
+    [onSelect, centerOn]
+  );
+
+  // The explorer's search picks the same way (a function cannot be "opened").
+  useSearchRegistration(searchItems, handleSearchPick);
 
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => onSelect(node.id),
@@ -521,6 +528,12 @@ function GraphViewInner({
       >
         {showLines ? "Hide lines" : "Show lines"}
       </button>
+
+      <GraphSearch
+        items={searchItems}
+        onPick={handleSearchPick}
+        placeholder="Search functions and methods…"
+      />
 
       {activeGraph && (
         <div className="absolute right-3 top-12 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">

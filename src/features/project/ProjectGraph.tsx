@@ -32,6 +32,7 @@ import {
   useSearchRegistration,
   type SearchItem,
 } from "../shell/SearchContext";
+import { GraphSearch } from "../graph/GraphSearch";
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
@@ -519,10 +520,26 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     return [...folders, ...files];
   }, [data, scope]);
 
+  // Picking from the explorer's search navigates straight to that folder's or
+  // file's graph.
   useSearchRegistration(searchItems, (id) => {
-    setSelectedId(id);
-    centerOn(id, 1.2, 400);
+    if (id === data?.root) {
+      return;
+    }
+    const kind = data?.folders.some((folder) => folder.id === id)
+      ? "folder"
+      : "code";
+    onNavigate({ kind, path: id });
   });
+
+  // Picking from the panel's own search box centres the view on the block.
+  const handlePanelSearchPick = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      centerOn(id, 1.2, 400);
+    },
+    [centerOn]
+  );
 
   const selectedFile =
     data && selectedId
@@ -557,6 +574,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 className="relative h-full bg-bg"
       onContextMenu={(event) => event.preventDefault()}
     >
+      <GraphSearch
+        items={searchItems}
+        onPick={handlePanelSearchPick}
+        placeholder="Search files and folders…"
+      />
+
       {entryList.length > 0 && (
         <div className="absolute left-3 top-3 z-10 max-h-[45%] w-64 overflow-auto rounded border border-mint/40 bg-panel text-xs text-mint">
           <button

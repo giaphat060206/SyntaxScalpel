@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listDirectory, type FileEntry } from "../../shared/ipc";
-import { useSearch } from "../shell/SearchContext";
+import { useSearch, type SearchItem } from "../shell/SearchContext";
 
 interface Props {
   root: string | null;
@@ -26,18 +26,6 @@ export function FileExplorer({
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
 
-  // Ctrl/Cmd+F focuses the search box.
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
   const trimmedQuery = query.trim().toLowerCase();
   const results = trimmedQuery
     ? searchItems
@@ -46,11 +34,19 @@ export function FileExplorer({
     : [];
 
   const pickResult = useCallback(
-    (id: string) => {
-      pickSearch(id);
+    (item: SearchItem) => {
+      // Files and folders open their graph; symbols (functions, methods…)
+      // centre inside the code graph that published them.
+      if (item.hint === "folder") {
+        onSelectFolder(item.id);
+      } else if (item.hint === "code" || item.hint === "doc" || item.hint === "ext") {
+        onSelectFile(item.id);
+      } else {
+        pickSearch(item.id);
+      }
       setQuery("");
     },
-    [pickSearch]
+    [onSelectFolder, onSelectFile, pickSearch]
   );
 
   useEffect(() => {
@@ -161,7 +157,7 @@ export function FileExplorer({
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && results[0]) {
-            pickResult(results[0].id);
+            pickResult(results[0]);
           }
           if (event.key === "Escape") {
             setQuery("");
@@ -181,7 +177,7 @@ export function FileExplorer({
                 <span className="shrink-0 text-accent/60">•</span>
                 <button
                   type="button"
-                  onClick={() => pickResult(item.id)}
+                  onClick={() => pickResult(item)}
                   title={item.id}
                   className="min-w-0 flex-1 truncate py-0.5 text-left text-xs text-white/85 hover:text-accent"
                 >

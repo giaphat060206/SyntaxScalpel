@@ -6,6 +6,7 @@ import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
 import { SearchProvider } from "./SearchContext";
 import { Welcome } from "./Welcome";
+import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
 
@@ -119,6 +120,16 @@ export default function App() {
 
   return (
     <SearchProvider>
+      <div className="flex h-full flex-col bg-bg">
+        <TopBar
+          hasFolder={Boolean(root)}
+          recents={recents}
+          onOpenFolder={pickFolder}
+          onOpenFile={handleOpenFile}
+          onOpenRecent={handleOpenFolder}
+          onCloseFolder={handleCloseFolder}
+        />
+        <div className="min-h-0 flex-1">
       {!root ? (
         <Welcome
           recents={recents}
@@ -271,6 +282,8 @@ export default function App() {
       </Group>
       </div>
       )}
+        </div>
+      </div>
     </SearchProvider>
   );
 }
