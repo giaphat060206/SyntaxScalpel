@@ -28,6 +28,7 @@ import { CLASS_WIDTH, reflowLayout } from "../graph/layout";
 import { runElkLayout } from "../graph/elk/layout";
 import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
+import { GraphSearch, type SearchItem } from "../graph/GraphSearch";
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
@@ -187,15 +188,42 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     });
   }, []);
 
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const [menuNode, setMenuNode] = useState<string | null>(null);
+
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    setMenuNode(null);
+  }, []);
 
   const openMenu = useCallback(
     (event: ReactMouseEvent | globalThis.MouseEvent) => {
       event.preventDefault();
+      setMenuNode(null);
       setMenu({ x: event.clientX, y: event.clientY });
     },
     []
   );
+
+  const openNodeMenu = useCallback(
+    (event: ReactMouseEvent | globalThis.MouseEvent, nodeId: string) => {
+      event.preventDefault();
+      setMenuNode(nodeId);
+      setMenu({ x: event.clientX, y: event.clientY });
+    },
+    []
+  );
+
+  const handleOpenFromMenu = useCallback(() => {
+    if (!menuNode || menuNode === data?.root) {
+      closeMenu();
+      return;
+    }
+    const kind = data?.folders.some((folder) => folder.id === menuNode)
+      ? "folder"
+      : "code";
+    onNavigate({ kind, path: menuNode });
+    closeMenu();
+  }, [menuNode, data, onNavigate, closeMenu]);
 
   const handleRealign = useCallback(() => {
     setMenu(null);
@@ -463,6 +491,39 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const shortPath = (path: string) =>
     scope && path.startsWith(`${scope}/`) ? path.slice(scope.length + 1) : path;
 
+  // Searchable folders and files for the Ctrl+F search box.
+  const searchItems = useMemo<SearchItem[]>(() => {
+    if (!data) {
+      return [];
+    }
+    const folders: SearchItem[] = data.folders
+      .filter((folder) => folder.id !== data.root)
+      .map((folder) => ({
+        id: folder.id,
+        label: scope && folder.id.startsWith(`${scope}/`)
+          ? folder.id.slice(scope.length + 1)
+          : folder.id,
+        hint: "folder",
+      }));
+    const files: SearchItem[] = data.files.map((file) => ({
+      id: file.id,
+      label:
+        scope && file.id.startsWith(`${scope}/`)
+          ? file.id.slice(scope.length + 1)
+          : file.id,
+      hint: file.external ? "ext" : file.kind,
+    }));
+    return [...folders, ...files];
+  }, [data, scope]);
+
+  const handleSearchPick = useCallback(
+    (id: string) => {
+      setSelectedId(id);
+      centerOn(id, 1.2, 400);
+    },
+    [centerOn]
+  );
+
   const selectedFile =
     data && selectedId
       ? data.files.find((file) => file.id === selectedId)
@@ -496,6 +557,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 className="relative h-full bg-bg"
       onContextMenu={(event) => event.preventDefault()}
     >
+      <GraphSearch
+        items={searchItems}
+        onPick={handleSearchPick}
+        placeholder="Search files and folders…"
+      />
+
       {entryList.length > 0 && (
         <div className="absolute left-3 top-3 z-10 max-h-[45%] w-64 overflow-auto rounded border border-mint/40 bg-panel text-xs text-mint">
           <button
@@ -542,7 +609,7 @@ className="relative h-full bg-bg"
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={() => setSelectedId(null)}
         onPaneContextMenu={openMenu}
-        onNodeContextMenu={openMenu}
+        onNodeContextMenu={(event, node) => openNodeMenu(event, node.id)}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
@@ -620,6 +687,17 @@ className="relative h-full bg-bg"
             className="fixed z-50 min-w-[160px] rounded border border-white/10 bg-panel py-1 shadow-lg"
             style={{ left: menu.x, top: menu.y }}
           >
+            {menuNode && menuNode !== data?.root && (
+              <button
+                type="button"
+                onClick={handleOpenFromMenu}
+                className="block w-full px-3 py-1.5 text-left text-xs text-mint hover:bg-mint/10"
+              >
+                {data?.folders.some((folder) => folder.id === menuNode)
+                  ? "Open folder graph"
+                  : "Open file graph"}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleRealign}

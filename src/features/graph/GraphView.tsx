@@ -28,6 +28,7 @@ import type {
 import { buildFlow, type FlowNode } from "./flow";
 import { traceNeighbors } from "./trace";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
+import { GraphSearch, type SearchItem } from "./GraphSearch";
 import { colorForNode } from "./colors";
 import {
   CONSTANTS_NODE_ID,
@@ -184,7 +185,7 @@ function GraphViewInner({
   const [showLines, setShowLines] = useState(true);
   const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
   const [layoutRun, setLayoutRun] = useState(0);
-  const { fitView } = useReactFlow();
+  const { fitView, getInternalNode, setCenter } = useReactFlow();
   const lastFit = useRef<string>("");
   const lastLayoutKey = useRef<string>("");
 
@@ -387,6 +388,49 @@ function GraphViewInner({
     fitView({ padding: 0.2 });
   }, [fitView]);
 
+  // Centre the viewport on one node at a given zoom (used by search picks).
+  const centerOn = useCallback(
+    (id: string, zoom: number, duration: number) => {
+      const internals = getInternalNode(id);
+      if (!internals) {
+        return;
+      }
+      const { positionAbsolute, userNode } = internals.internals;
+      const width = userNode.measured?.width ?? 0;
+      const height = userNode.measured?.height ?? 0;
+      if (width === 0 || height === 0) {
+        return;
+      }
+      setCenter(
+        positionAbsolute.x + width / 2,
+        positionAbsolute.y + height / 2,
+        { zoom, duration }
+      );
+    },
+    [getInternalNode, setCenter]
+  );
+
+  const searchItems = useMemo<SearchItem[]>(
+    () =>
+      nodes
+        .map((node) => (node.data as CodeNodeData).node)
+        .filter((graph): graph is NonNullable<typeof graph> => Boolean(graph))
+        .map((graph) => ({
+          id: graph.id,
+          label: graph.name,
+          hint: graph.kind,
+        })),
+    [nodes]
+  );
+
+  const handleSearchPick = useCallback(
+    (id: string) => {
+      onSelect(id);
+      centerOn(id, 1.2, 400);
+    },
+    [onSelect, centerOn]
+  );
+
   const handleNodeClick: NodeMouseHandler = useCallback(
     (_event, node) => onSelect(node.id),
     [onSelect]
@@ -481,8 +525,14 @@ function GraphViewInner({
         {showLines ? "Hide lines" : "Show lines"}
       </button>
 
+      <GraphSearch
+        items={searchItems}
+        onPick={handleSearchPick}
+        placeholder="Search functions and methods…"
+      />
+
       {activeGraph && (
-        <div className="absolute right-3 top-3 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">
+        <div className="absolute right-3 top-12 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">
           <div className="break-words font-mono text-sm text-accent">
             {activeGraph.name}
           </div>
