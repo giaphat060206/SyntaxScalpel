@@ -11,28 +11,6 @@ interface Props {
   selectedFile: string | null;
 }
 
-const RECENTS_KEY = "scalpel.recentRoots";
-
-function readRecents(): string[] {
-  try {
-    const raw = window.localStorage.getItem(RECENTS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeRecents(paths: string[]): void {
-  try {
-    window.localStorage.setItem(RECENTS_KEY, JSON.stringify(paths));
-  } catch {
-    // Storage unavailable: recents simply do not persist.
-  }
-}
-
 export function FileExplorer({
   root,
   onOpenFolder,
@@ -44,7 +22,6 @@ export function FileExplorer({
   const [error, setError] = useState<string | null>(null);
   // Directories start collapsed; the set holds the ones the user opened.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [recents, setRecents] = useState<string[]>(() => readRecents());
   const { items: searchItems, pick: pickSearch } = useSearch();
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -78,18 +55,6 @@ export function FileExplorer({
 
   useEffect(() => {
     setExpanded(new Set());
-  }, [root]);
-
-  // Remember the opened folder so it can be reopened from the recents list.
-  useEffect(() => {
-    if (!root) {
-      return;
-    }
-    setRecents((current) => {
-      const next = [root, ...current.filter((entry) => entry !== root)].slice(0, 8);
-      writeRecents(next);
-      return next;
-    });
   }, [root]);
 
   const toggleFolder = useCallback((path: string) => {
@@ -233,28 +198,6 @@ export function FileExplorer({
         </ul>
       )}
       {!root && <p className="text-dimmed text-sm">No folder open.</p>}
-      {recents.length > 0 && (
-        <div className="mb-3">
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-dimmed">
-            Recent folders
-          </div>
-          <ul className="m-0 list-none p-0">
-            {recents.map((path) => (
-              <li key={path} className="flex items-start gap-1">
-                <span className="shrink-0 text-accent/60">•</span>
-                <button
-                  type="button"
-                  title={path}
-                  onClick={() => onOpenFolder(path)}
-                  className="min-w-0 flex-1 truncate py-0.5 text-left text-xs text-white/85 hover:text-accent"
-                >
-                  {path.split(/[\\/]/).filter(Boolean).pop() ?? path}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       {error && <p className="text-red-400 text-sm">{error}</p>}
       {root && renderEntries(entries, 0)}
     </div>

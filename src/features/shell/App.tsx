@@ -1,9 +1,12 @@
 import { useCallback, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
 import { SearchProvider } from "./SearchContext";
+import { Welcome } from "./Welcome";
+import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
 
 const iconButton =
@@ -39,16 +42,58 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [docsCollapsed, setDocsCollapsed] = useState(false);
+  const { recents, remember, clear } = useRecents();
 
   const codeFile = location.kind === "code" ? location.path : null;
 
-  const handleOpenFolder = useCallback((nextRoot: string) => {
-    setRoot(nextRoot);
+  const handleOpenFolder = useCallback(
+    (nextRoot: string) => {
+      setRoot(nextRoot);
+      setDocFile(null);
+      setSelectedFile(null);
+      remember(nextRoot);
+      // Show the project graph for the newly opened folder straight away.
+      setLocationState({ kind: "folder", path: "" });
+    },
+    [remember]
+  );
+
+  const handleCloseFolder = useCallback(() => {
+    setRoot(null);
     setDocFile(null);
     setSelectedFile(null);
-    // Show the project graph for the newly opened folder straight away.
-    setLocationState({ kind: "folder", path: "" });
+    setLocationState({ kind: "empty" });
   }, []);
+
+  const pickFolder = useCallback(async () => {
+    const picked = await open({ directory: true, multiple: false });
+    if (typeof picked === "string") {
+      handleOpenFolder(picked);
+    }
+  }, [handleOpenFolder]);
+
+  // Open a single file: treat its directory as the project root.
+  const handleOpenFile = useCallback(async () => {
+    const picked = await open({ directory: false, multiple: false });
+    if (typeof picked !== "string") {
+      return;
+    }
+    const normalized = picked.replace(/\\/g, "/");
+    const slash = normalized.lastIndexOf("/");
+    const dir = slash > 0 ? normalized.slice(0, slash) : normalized;
+    const name = slash >= 0 ? normalized.slice(slash + 1) : normalized;
+    setRoot(dir);
+    setDocFile(null);
+    setSelectedFile(null);
+    remember(dir);
+    setSelectedFile(name);
+    if (name.toLowerCase().endsWith(".md")) {
+      setDocFile(name);
+      setLocationState({ kind: "empty" });
+    } else {
+      setLocationState({ kind: "code", path: name });
+    }
+  }, [remember]);
 
   const handleSelectFile = useCallback((relPath: string) => {
     setSelectedFile(relPath);
@@ -74,6 +119,15 @@ export default function App() {
 
   return (
     <SearchProvider>
+      {!root ? (
+        <Welcome
+          recents={recents}
+          onOpenFolder={pickFolder}
+          onOpenFile={handleOpenFile}
+          onOpenRecent={handleOpenFolder}
+          onClearRecents={clear}
+        />
+      ) : (
       <div className="h-full bg-bg">
       <Group orientation="horizontal">
         {explorerCollapsed ? (
@@ -107,14 +161,36 @@ export default function App() {
                   <span className="text-[10px] uppercase tracking-wider text-dimmed">
                     Files
                   </span>
-                  <button
-                    type="button"
-                    title="Hide files"
-                    onClick={() => setExplorerCollapsed(true)}
-                    className={iconButton}
-                  >
-                    <Chevron direction="left" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      title="Close folder (back to Welcome)"
+                      onClick={handleCloseFolder}
+                      className={iconButton}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 10.5 12 3l9 7.5" />
+                        <path d="M5 9.5V21h14V9.5" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Hide files"
+                      onClick={() => setExplorerCollapsed(true)}
+                      className={iconButton}
+                    >
+                      <Chevron direction="left" />
+                    </button>
+                  </div>
                 </div>
                 <div className="min-h-0 flex-1">
                   <FileExplorer
@@ -194,6 +270,7 @@ export default function App() {
         )}
       </Group>
       </div>
+      )}
     </SearchProvider>
   );
 }
