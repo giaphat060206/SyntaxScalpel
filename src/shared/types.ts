@@ -12,6 +12,9 @@ export interface GraphNode {
   params: string[];
   returns: string[];
   uses?: string[];
+  /** 1-based inclusive line range of the definition in its file. */
+  startLine?: number;
+  endLine?: number;
   value?: string;
   parent?: string;
   position?: Position;

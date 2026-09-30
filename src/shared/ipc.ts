@@ -21,6 +21,10 @@ export function readMarkdown(path: string, root: string): Promise<string> {
   return invoke<string>("read_markdown", { path, root });
 }
 
+export function readFile(path: string, root: string): Promise<string> {
+  return invoke<string>("read_file", { path, root });
+}
+
 export function parsePython(path: string, root: string): Promise<ParseResult> {
   return invoke<ParseResult>("parse_python", { path, root });
 }
