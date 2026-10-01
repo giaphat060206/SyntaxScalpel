@@ -1,22 +1,12 @@
 import type { Node } from "@xyflow/react";
-import type { ProjectFolder, ProjectGraph } from "../../shared/types";
+import type { ProjectGraph } from "../../shared/types";
 import { colorForNode } from "../graph/colors";
 import { CLASS_WIDTH } from "../graph/layout";
 import { type CodeNodeData } from "../graph/CodeNode";
 import { hiddenIds, selectionInfo } from "./selection";
+import { folderChain } from "./folderChain";
 
-export function folderChain(
-  folderId: string,
-  folderById: Map<string, ProjectFolder>
-): string[] {
-  const chain: string[] = [];
-  let current: string | undefined = folderId;
-  while (current) {
-    chain.push(current);
-    current = folderById.get(current)?.parentId;
-  }
-  return chain;
-}
+export { folderChain };
 
 export function buildProjectNodes(
   data: ProjectGraph,

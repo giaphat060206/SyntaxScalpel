@@ -1,5 +1,5 @@
 import type { ProjectGraph } from "../../shared/types";
-import { folderChain } from "./nodes";
+import { folderChain } from "./folderChain";
 
 /** Ids hidden because they sit inside a collapsed folder (transitively). */
 export function hiddenIds(
