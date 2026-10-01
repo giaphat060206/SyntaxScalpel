@@ -8,27 +8,13 @@ import {
   Controls,
   ReactFlow,
   ReactFlowProvider,
-  type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type {
-  GraphEdge,
-  GraphNode,
-  ImportAnalysis,
-  ParseResult,
-} from "../../shared/types";
-import { buildFlow, type FlowNode } from "./flow";
-import { traceNeighbors } from "./trace";
+import type { ImportAnalysis, ParseResult } from "../../shared/types";
+import { buildFunctionNodes, decorateFunctionNodes } from "./nodes";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
 import { GraphSearch } from "./GraphSearch";
-import { colorForNode } from "./colors";
-import {
-  CONSTANTS_NODE_ID,
-  IMPORTED_BY_NODE_ID,
-  IMPORTS_NODE_ID,
-  CLASS_WIDTH,
-} from "./layout";
 import { ElkEdge } from "./elk/ElkEdge";
 import { EmptyState } from "../../shared/StateViews";
 import {
@@ -39,120 +25,6 @@ import {
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
-
-// Content-aware sizing: estimate the width a monospace line needs so a single
-// `in:`/`out:`/value stays on one line by default. Height stays content-driven.
-const CHAR_WIDTH = 7.2;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 560;
-
-function naturalWidth(lines: string[]): number {
-  const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(longest * CHAR_WIDTH) + 32));
-}
-
-function graphNodeLines(node: GraphNode): string[] {
-  return [
-    node.name,
-    ...node.params.map((param) => `in: ${param}`),
-    ...node.returns.map((value) => `out: ${value}`),
-    ...(node.value !== undefined ? [`= ${node.value}`] : []),
-  ];
-}
-
-function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
-  if (!imports) {
-    return [];
-  }
-  const importLines = imports.imports.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.specifier}: ${entry.names.join(", ")}`
-      : entry.specifier
-  );
-  const importerLines = imports.importedBy.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.path}: ${entry.names.join(", ")}`
-      : entry.path
-  );
-
-  return [
-    {
-      id: IMPORTS_NODE_ID,
-      type: "scalpel",
-      position: { x: 0, y: 0 },
-      style: {
-        width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
-      },
-      draggable: false,
-      zIndex: 4,
-      data: {
-        special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
-        color: colorForNode(IMPORTS_NODE_ID),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    },
-    {
-      id: IMPORTED_BY_NODE_ID,
-      type: "scalpel",
-      position: { x: 0, y: 300 },
-      style: {
-        width: naturalWidth([
-          `IMPORTED BY (${imports.importedBy.length})`,
-          ...importerLines,
-        ]),
-      },
-      draggable: false,
-      zIndex: 4,
-      data: {
-        special: {
-          title: `IMPORTED BY (${imports.importedBy.length})`,
-          lines: importerLines,
-        },
-        color: colorForNode(IMPORTED_BY_NODE_ID),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    },
-  ];
-}
-
-function visibilityOf(id: string, edges: GraphEdge[], selectedId: string | null) {
-  const traced = selectedId ? traceNeighbors(edges, selectedId) : null;
-  return {
-    highlighted: traced ? traced.has(id) : false,
-    dimmed: traced ? !traced.has(id) : false,
-  };
-}
-
-function toFlowNode(
-  node: FlowNode,
-  selectedId: string | null,
-  edges: GraphEdge[],
-  endpointParents: Set<string> = new Set()
-): Node {
-  return {
-    id: node.id,
-    type: node.type,
-    position: node.position,
-    parentId: node.parentId,
-    extent: node.extent,
-    style:
-      node.style ??
-      (node.data.node.kind === "class"
-        ? { width: CLASS_WIDTH }
-        : { width: naturalWidth(graphNodeLines(node.data.node)) }),
-    draggable: node.data.node.kind !== "class",
-    zIndex: node.data.node.kind === "class" ? 1 : 4,
-    data: {
-      node: node.data.node,
-      color: colorForNode(node.id),
-      transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
-      pinned: node.data.node.position != null,
-      ...visibilityOf(node.id, edges, selectedId),
-    } satisfies CodeNodeData,
-  };
-}
 
 interface Props {
   result: ParseResult;
@@ -177,66 +49,10 @@ function GraphViewInner({
 }: Props) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  // Rebuild the flow whenever a different file (or its import analysis) changes.
-  const builtNodes = useMemo<Node[]>(() => {
-    const flow = buildFlow(result);
-    const variables = flow.nodes.filter(
-      (node) => node.data.node.kind === "variable"
-    );
-    const others = flow.nodes.filter((node) => node.data.node.kind !== "variable");
-
-    const constantsContainer: Node[] =
-      variables.length > 0
-        ? [
-            {
-              id: CONSTANTS_NODE_ID,
-              type: "scalpel",
-              position: { x: 0, y: 0 },
-              style: { width: CLASS_WIDTH },
-              draggable: false,
-              zIndex: 1,
-              data: {
-                node: {
-                  id: CONSTANTS_NODE_ID,
-                  kind: "class",
-                  name: `CONSTANTS (${variables.length})`,
-                  params: [],
-                  returns: [],
-                  uses: [],
-                },
-                color: colorForNode(CONSTANTS_NODE_ID),
-                highlighted: false,
-                dimmed: false,
-              } satisfies CodeNodeData,
-            },
-          ]
-        : [];
-
-    const constantChildren = variables.map((node) => ({
-      ...toFlowNode(node, null, result.edges),
-      parentId: CONSTANTS_NODE_ID,
-      extent: "parent" as const,
-    }));
-
-    // Class ids that own an edge endpoint stay transparent so their method
-    // lines remain visible through the class container.
-    const endpointParents = new Set<string>();
-    for (const edge of result.edges) {
-      for (const id of [edge.source, edge.target]) {
-        const dot = id.lastIndexOf(".");
-        if (dot > 0) {
-          endpointParents.add(id.slice(0, dot));
-        }
-      }
-    }
-
-    return [
-      ...specialFlowNodes(imports),
-      ...constantsContainer,
-      ...constantChildren,
-      ...others.map((node) => toFlowNode(node, null, result.edges, endpointParents)),
-    ];
-  }, [result, imports]);
+  const builtNodes = useMemo(
+    () => buildFunctionNodes(result, imports),
+    [result, imports]
+  );
 
   // A selection that does not match any node on the canvas (stale id from a
   // previous file) must not dim the whole graph.
@@ -248,18 +64,8 @@ function GraphViewInner({
     [selectedId, builtNodes]
   );
 
-  // Re-decorate for trace highlighting without touching positions the user
-  // dragged. Class transparency comes from the rebuild (endpoint-based), so it
-  // is preserved here.
-  const decoratedNodes = useMemo<Node[]>(
-    () =>
-      builtNodes.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          ...visibilityOf(node.id, result.edges, activeSelectedId),
-        },
-      })),
+  const decoratedNodes = useMemo(
+    () => decorateFunctionNodes(builtNodes, result.edges, activeSelectedId),
     [builtNodes, result.edges, activeSelectedId]
   );
 
