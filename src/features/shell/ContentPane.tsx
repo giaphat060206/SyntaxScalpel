@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFileContent } from "./useFileContent";
 import { useImports } from "./useImports";
+import { useSource } from "./useSource";
 import { GraphView } from "../graph/GraphView";
 import { MarkdownView } from "../markdown/MarkdownView";
 import { CodeView } from "../code/CodeView";
 import { ErrorState, EmptyState } from "../../shared/StateViews";
 import { ErrorBoundary } from "../../shared/ErrorBoundary";
-import { readFile } from "../../shared/ipc";
 
 interface Props {
   root: string | null;
@@ -17,7 +17,6 @@ export function ContentPane({ root, filePath }: Props) {
   const state = useFileContent(root, filePath);
   const imports = useImports(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [source, setSource] = useState<string | null>(null);
   const [codePaneOpen, setCodePaneOpen] = useState(true);
 
   useEffect(() => {
@@ -26,25 +25,7 @@ export function ContentPane({ root, filePath }: Props) {
   }, [filePath]);
 
   const isGraph = state.status === "graph";
-
-  // Load the file source once per open file, for the code reader.
-  useEffect(() => {
-    if (!root || !filePath || !isGraph) {
-      setSource(null);
-      return;
-    }
-    let cancelled = false;
-    readFile(filePath, root)
-      .then((text) => {
-        if (!cancelled) setSource(text);
-      })
-      .catch(() => {
-        if (!cancelled) setSource(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [root, filePath, isGraph]);
+  const source = useSource(root, filePath, isGraph);
 
   const selectedNode = useMemo(() => {
     if (!isGraph || !selectedId) {

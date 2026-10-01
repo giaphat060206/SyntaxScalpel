@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import type { ParseResult } from "../../shared/types";
 import { routeForExtension } from "../../shared/extensions";
 import { parseJsTs, parsePython, readMarkdown } from "../../shared/ipc";
+import { useAsyncLoad } from "./useAsyncLoad";
 
 export type FileState =
   | { status: "idle" }
@@ -10,48 +11,43 @@ export type FileState =
   | { status: "graph"; result: ParseResult }
   | { status: "markdown"; content: string };
 
+type FileContent =
+  | { status: "graph"; result: ParseResult }
+  | { status: "markdown"; content: string };
+
 export function useFileContent(
   root: string | null,
   filePath: string | null
 ): FileState {
-  const [state, setState] = useState<FileState>({ status: "idle" });
+  const route = filePath ? routeForExtension(filePath) : "unsupported";
+  const supported = Boolean(root && filePath && route !== "unsupported");
 
-  useEffect(() => {
+  const load = useCallback(async (): Promise<FileContent> => {
     if (!root || !filePath) {
-      setState({ status: "idle" });
-      return;
+      throw new Error("Unsupported file type");
     }
-    let cancelled = false;
-    setState({ status: "loading" });
+    switch (route) {
+      case "python":
+        return { status: "graph", result: await parsePython(filePath, root) };
+      case "jsts":
+        return { status: "graph", result: await parseJsTs(filePath, root) };
+      case "markdown":
+        return { status: "markdown", content: await readMarkdown(filePath, root) };
+      default:
+        throw new Error("Unsupported file type");
+    }
+  }, [root, filePath, route]);
 
-    const route = routeForExtension(filePath);
-    const load = async (): Promise<FileState> => {
-      switch (route) {
-        case "python":
-          return { status: "graph", result: await parsePython(filePath, root) };
-        case "jsts":
-          return { status: "graph", result: await parseJsTs(filePath, root) };
-        case "markdown":
-          return { status: "markdown", content: await readMarkdown(filePath, root) };
-        default:
-          return { status: "error", message: "Unsupported file type" };
-      }
-    };
+  const state = useAsyncLoad<FileContent>(
+    supported ? `${root}|${filePath}` : null,
+    supported ? load : null
+  );
 
-    load()
-      .then((next) => {
-        if (!cancelled) setState(next);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setState({ status: "error", message: String(error) });
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [root, filePath]);
-
+  if (!supported && root && filePath) {
+    return { status: "error", message: "Unsupported file type" };
+  }
+  if (state.status === "ready") {
+    return state.value;
+  }
   return state;
 }

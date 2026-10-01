@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import type { ImportAnalysis } from "../../shared/types";
 import { routeForExtension } from "../../shared/extensions";
 import { analyzeImports } from "../../shared/ipc";
+import { useAsyncLoad } from "./useAsyncLoad";
 
 /**
  * Loads the import analysis (this file's imports + project files importing it)
@@ -12,32 +13,21 @@ export function useImports(
   root: string | null,
   filePath: string | null
 ): ImportAnalysis | null {
-  const [analysis, setAnalysis] = useState<ImportAnalysis | null>(null);
+  const route = filePath ? routeForExtension(filePath) : "unsupported";
+  const isCode = route === "python" || route === "jsts";
+  const enabled = Boolean(root && filePath && isCode);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (!root || !filePath) {
-      setAnalysis(null);
-      return;
+      return Promise.reject(new Error("No file"));
     }
-    const route = routeForExtension(filePath);
-    if (route !== "python" && route !== "jsts") {
-      setAnalysis(null);
-      return;
-    }
-
-    let cancelled = false;
-    analyzeImports(filePath, root)
-      .then((next) => {
-        if (!cancelled) setAnalysis(next);
-      })
-      .catch(() => {
-        if (!cancelled) setAnalysis(null);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    return analyzeImports(filePath, root);
   }, [root, filePath]);
 
-  return analysis;
+  const state = useAsyncLoad<ImportAnalysis>(
+    enabled ? `${root}|${filePath}` : null,
+    enabled ? load : null
+  );
+
+  return state.status === "ready" ? state.value : null;
 }
