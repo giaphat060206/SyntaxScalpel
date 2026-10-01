@@ -94,6 +94,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
   const [layoutRun, setLayoutRun] = useState(0);
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const [showLines, setShowLines] = useState(true);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
@@ -180,6 +181,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       if (!result) {
         setSections({});
         setNodes((current) => reflowLayout(current));
+        setLayoutVersion((value) => value + 1);
         return;
       }
       const key = `${layoutKey}|${layoutRun}|${sizeSignature}`;
@@ -198,6 +200,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
           return { ...node, position, ...(size ? { style: { ...(node.style ?? {}), ...size } } : {}) };
         })
       );
+      setLayoutVersion((value) => value + 1);
     }, 160);
     timers.current.add(timer);
     return () => {
@@ -226,8 +229,9 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     [getInternalNode, setCenter]
   );
 
+  const fitKey = `${fit.token}|${layoutVersion}`;
   useEffect(() => {
-    if (lastFit.current === fit.token || nodes.length === 0) {
+    if (lastFit.current === fitKey || nodes.length === 0) {
       return;
     }
     let attempts = 0;
@@ -235,7 +239,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       attempts += 1;
       const focused = fit.target && attempts >= 2 ? centerOn(fit.target, 1.1, 0) : false;
       if (focused || attempts >= 40) {
-        lastFit.current = fit.token;
+        lastFit.current = fitKey;
         if (!focused) {
           fitView({ padding: fit.padding ?? 0.2, duration: 0 });
         }
@@ -243,7 +247,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       }
     }, 150);
     return () => window.clearInterval(timer);
-  }, [fit.token, fit.target, fit.padding, sizeSignature, nodes.length, centerOn, fitView]);
+  }, [fitKey, fit.target, fit.padding, sizeSignature, nodes.length, centerOn, fitView]);
 
   const closeMenu = useCallback(() => {
     setMenu(null);
