@@ -48,17 +48,6 @@ describe("buildFunctionNodes", () => {
     const nodes = buildFunctionNodes(result, null);
     expect(nodes.find((n) => n.id === "Cls")?.style).toEqual({ width: 240, height: 150 });
   });
-
-  it("uses saved positions when present", () => {
-    const saved: ParseResult = {
-      ...result,
-      nodes: result.nodes.map((node) =>
-        node.id === "f" ? { ...node, position: { x: 500, y: 42 } } : node
-      ),
-    };
-    const nodes = buildFunctionNodes(saved, null);
-    expect(nodes.find((n) => n.id === "f")?.position).toEqual({ x: 500, y: 42 });
-  });
 });
 
 describe("decorateFunctionNodes", () => {

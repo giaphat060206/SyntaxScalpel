@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use tree_sitter::{Node, Parser};
 
-use crate::models::{NodeKind, ParseResult, Position};
+use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 fn grammar_for(file_path: &str) -> tree_sitter::Language {
@@ -15,11 +13,7 @@ fn grammar_for(file_path: &str) -> tree_sitter::Language {
     }
 }
 
-pub fn parse_source(
-    source: &str,
-    file_path: &str,
-    layout: &HashMap<String, Position>,
-) -> Result<ParseResult, String> {
+pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&grammar_for(file_path))
@@ -30,7 +24,7 @@ pub fn parse_source(
 
     let imported = imported_names(source, file_path);
     let defs = collect_defs(tree.root_node(), source, &imported);
-    Ok(function_graph::assemble(defs, source, file_path, layout, calls_in))
+    Ok(function_graph::assemble(defs, source, file_path, calls_in))
 }
 
 pub fn calls_in(node: Node, source: &str) -> Vec<String> {
@@ -446,7 +440,7 @@ function run() {
 ";
 
     fn parse(source: &str) -> ParseResult {
-        parse_source(source, "src/app.js", &HashMap::new()).unwrap()
+        parse_source(source, "src/app.js").unwrap()
     }
 
     #[test]
@@ -517,7 +511,7 @@ function run() {
     fn keeps_long_constant_values_untruncated() {
         let long = "b".repeat(150);
         let source = format!("const LONG_VALUE = \"{long}\";\n");
-        let result = parse_source(&source, "src/app.js", &HashMap::new()).unwrap();
+        let result = parse_source(&source, "src/app.js").unwrap();
         let node = result
             .nodes
             .iter()
@@ -547,7 +541,7 @@ function magnitude(p: Point): number {
   return p.x;
 }
 ";
-        let result = parse_source(TS, "src/math.ts", &HashMap::new()).unwrap();
+        let result = parse_source(TS, "src/math.ts").unwrap();
         let names: Vec<&str> = result.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, vec!["magnitude"]);
     }
@@ -556,7 +550,7 @@ function magnitude(p: Point): number {
     fn parses_tsx_with_jsx() {
         let source =
             "function Greeting({ name }: { name: string }) {\n  return <div>{name}</div>;\n}\n";
-        let result = parse_source(source, "src/app.tsx", &HashMap::new()).unwrap();
+        let result = parse_source(source, "src/app.tsx").unwrap();
         assert!(result.nodes.iter().any(|n| n.name == "Greeting"));
     }
 

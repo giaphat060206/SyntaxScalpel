@@ -65,7 +65,7 @@ function flowNodes(result: ParseResult): FlowNode[] {
     nodes.push({
       id: node.id,
       type: "scalpel",
-      position: node.position ?? autoPosition,
+      position: autoPosition,
       data: { node },
       ...(node.kind === "class"
         ? { style: { width: CLASS_WIDTH, height: 60 + METHOD_ROW * children.length } }
@@ -79,7 +79,7 @@ function flowNodes(result: ParseResult): FlowNode[] {
         type: "scalpel",
         parentId: node.id,
         extent: "parent",
-        position: child.position ?? { x: 20, y: 76 + METHOD_ROW * index },
+        position: { x: 20, y: 76 + METHOD_ROW * index },
         data: { node: child },
       });
     });
@@ -171,7 +171,6 @@ function toFlowNode(node: FlowNode, endpointParents: Set<string>): Node {
       node: node.data.node,
       color: colorForNode(node.id),
       transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
-      pinned: node.data.node.position != null,
       highlighted: false,
       dimmed: false,
     } satisfies CodeNodeData,

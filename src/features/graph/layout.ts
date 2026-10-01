@@ -74,7 +74,7 @@ export function arrangeGrid(
 
 /**
  * Stack a class node's methods by their real heights and give the class the
- * matching height, then stack top-level nodes that the user has not pinned.
+ * matching height, then grid the top-level nodes.
  * Converges: returns the same array reference when nothing needs to change.
  */
 export function reflowLayout(current: Node[]): Node[] {
@@ -166,30 +166,14 @@ export function reflowLayout(current: Node[]): Node[] {
   }
   topOffset += TOP_GAP;
 
-  const anyPinned = topLevel.some(
-    (node) => (node.data as CodeNodeData).pinned === true
-  );
-  if (anyPinned) {
-    let cursor = topOffset;
-    for (const node of topLevel) {
-      const pinned = (node.data as CodeNodeData).pinned === true;
-      const desiredY = pinned ? Math.max(node.position.y, topOffset) : cursor;
-      if (!pinned && (node.position.x !== 0 || node.position.y !== desiredY)) {
-        node.position = { x: 0, y: desiredY };
-        changed = true;
-      }
-      cursor = Math.max(cursor, desiredY) + nodeHeight(node) + TOP_GAP;
+  const grid = arrangeGrid(topLevel, 0, topOffset, TOP_GAP, TOP_GAP);
+  topLevel.forEach((node, index) => {
+    const desired = grid.positions[index];
+    if (node.position.x !== desired.x || node.position.y !== desired.y) {
+      node.position = desired;
+      changed = true;
     }
-  } else {
-    const grid = arrangeGrid(topLevel, 0, topOffset, TOP_GAP, TOP_GAP);
-    topLevel.forEach((node, index) => {
-      const desired = grid.positions[index];
-      if (node.position.x !== desired.x || node.position.y !== desired.y) {
-        node.position = desired;
-        changed = true;
-      }
-    });
-  }
+  });
 
   return changed ? next : current;
 }

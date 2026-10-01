@@ -36,7 +36,6 @@ export interface CodeNodeData extends Record<string, unknown> {
   transparent?: boolean;
   highlighted: boolean;
   dimmed: boolean;
-  pinned?: boolean;
 }
 
 const handleClass =

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tree_sitter::Node;
 
-use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult, Position};
+use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult};
 
 pub struct Def<'a> {
     pub id: String,
@@ -30,7 +30,7 @@ pub fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-pub fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
+pub fn to_node(def: &Def) -> GraphNode {
     GraphNode {
         id: def.id.clone(),
         kind: def.kind.clone(),
@@ -42,7 +42,6 @@ pub fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
         end_line: def.end_line,
         value: def.value.clone(),
         parent: def.parent.clone(),
-        position: layout.get(&def.id).cloned(),
     }
 }
 
@@ -89,10 +88,9 @@ pub fn assemble(
     defs: Vec<Def>,
     source: &str,
     file_path: &str,
-    layout: &HashMap<String, Position>,
     calls_in: fn(Node, &str) -> Vec<String>,
 ) -> ParseResult {
-    let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
+    let nodes = defs.iter().map(to_node).collect();
     let edges = collect_edges(&defs, source, calls_in);
     ParseResult {
         nodes,

@@ -1,15 +1,9 @@
-use std::collections::HashMap;
-
 use tree_sitter::{Node, Parser};
 
-use crate::models::{NodeKind, ParseResult, Position};
+use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
-pub fn parse_source(
-    source: &str,
-    file_path: &str,
-    layout: &HashMap<String, Position>,
-) -> Result<ParseResult, String> {
+pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_python::LANGUAGE.into())
@@ -20,7 +14,7 @@ pub fn parse_source(
 
     let imported = imported_names(source, file_path);
     let defs = collect_defs(tree.root_node(), source, &imported);
-    Ok(function_graph::assemble(defs, source, file_path, layout, calls_in))
+    Ok(function_graph::assemble(defs, source, file_path, calls_in))
 }
 
 /// Decorated definitions (`@staticmethod`, `@app.route`) wrap the real
@@ -332,7 +326,7 @@ def main():
 ";
 
     fn parse(source: &str) -> ParseResult {
-        parse_source(source, "src/main.py", &HashMap::new()).unwrap()
+        parse_source(source, "src/main.py").unwrap()
     }
 
     #[test]
@@ -564,21 +558,5 @@ def show(x):
 ";
         let result = parse(source);
         assert!(result.edges.is_empty());
-    }
-
-    #[test]
-    fn applies_saved_positions_by_node_id() {
-        let mut layout = HashMap::new();
-        layout.insert("helper".to_string(), Position { x: 12.0, y: 34.0 });
-        let result =
-            parse_source("def helper():\n    return 1\n", "src/a.py", &layout).unwrap();
-        assert_eq!(result.nodes[0].position, Some(Position { x: 12.0, y: 34.0 }));
-    }
-
-    #[test]
-    fn leaves_position_none_when_not_in_layout() {
-        let result = parse_source("def helper():\n    return 1\n", "src/a.py", &HashMap::new())
-            .unwrap();
-        assert_eq!(result.nodes[0].position, None);
     }
 }

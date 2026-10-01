@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -7,12 +7,6 @@ pub enum NodeKind {
     Class,
     Method,
     Variable,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Position {
-    pub x: f64,
-    pub y: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -31,8 +25,6 @@ pub struct GraphNode {
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub position: Option<Position>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -65,7 +57,6 @@ mod tests {
             end_line: 12,
             value: None,
             parent: Some("Greeter".into()),
-            position: None,
         }
     }
 
@@ -77,7 +68,6 @@ mod tests {
         assert_eq!(json["params"][0], "self");
         assert_eq!(json["uses"][0], "imported_thing");
         assert_eq!(json["parent"], "Greeter");
-        assert!(json.get("position").is_none());
     }
 
     #[test]
@@ -86,15 +76,6 @@ mod tests {
         node.value = Some("42".into());
         let json = serde_json::to_value(node).unwrap();
         assert_eq!(json["value"], "42");
-    }
-
-    #[test]
-    fn graph_node_includes_position_when_set() {
-        let mut node = sample_node();
-        node.position = Some(Position { x: 10.0, y: 20.0 });
-        let json = serde_json::to_value(node).unwrap();
-        assert_eq!(json["position"]["x"], 10.0);
-        assert_eq!(json["position"]["y"], 20.0);
     }
 
     #[test]

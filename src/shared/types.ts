@@ -17,7 +17,6 @@ export interface GraphNode {
   endLine?: number;
   value?: string;
   parent?: string;
-  position?: Position;
 }
 
 export interface GraphEdge {

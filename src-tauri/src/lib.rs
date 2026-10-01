@@ -22,8 +22,6 @@ pub fn run() {
             commands::parse::parse_js_ts,
             commands::parse::analyze_imports,
             commands::parse::project_graph,
-            commands::layout::load_layout,
-            commands::layout::save_layout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
