@@ -1,4 +1,5 @@
 import type { ProjectGraph } from "../../shared/types";
+import { folderChain } from "./nodes";
 
 /** Ids hidden because they sit inside a collapsed folder (transitively). */
 export function hiddenIds(
@@ -52,11 +53,8 @@ export function selectionInfo(
   const focus = new Set<string>();
   const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
   const addFolderChain = (folderId: string) => {
-    highlight.add(folderId);
-    let parent = folderById.get(folderId)?.parentId;
-    while (parent) {
-      highlight.add(parent);
-      parent = folderById.get(parent)?.parentId;
+    for (const id of folderChain(folderId, folderById)) {
+      highlight.add(id);
     }
   };
 

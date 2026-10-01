@@ -15,10 +15,9 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { ProjectGraph as ProjectGraphData } from "../../shared/types";
 import { projectGraph } from "../../shared/ipc";
-import { colorForNode } from "../graph/colors";
-import { hiddenIds, selectionInfo } from "./selection";
-import { CodeNode, type CodeNodeData } from "../graph/CodeNode";
-import { CLASS_WIDTH } from "../graph/layout";
+import { selectionInfo } from "./selection";
+import { buildProjectNodes, decorateProjectNodes } from "./nodes";
+import { CodeNode } from "../graph/CodeNode";
 import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
 import {
@@ -39,100 +38,6 @@ interface Props {
   root: string;
   scope: string;
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
-}
-
-function toNodes(
-  data: ProjectGraphData,
-  collapsed: Set<string>,
-  onToggleCollapse: (id: string) => void
-): Node[] {
-  const hidden = hiddenIds(data, collapsed);
-
-  // Folders that contain at least one edge endpoint stay transparent so their
-  // lines remain visible; folders merely passed by stay opaque. The scope root
-  // itself is NOT rendered as a container: it encloses the whole canvas, so it
-  // would either hide every line or show every line through it. Its children
-  // become top-level nodes and the breadcrumb shows the location instead.
-  const transparentFolders = new Set<string>();
-  const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
-  for (const edge of data.edges) {
-    for (const id of [edge.source, edge.target]) {
-      const file = data.files.find((entry) => entry.id === id);
-      let folder = file?.folderId;
-      while (folder) {
-        transparentFolders.add(folder);
-        folder = folderById.get(folder)?.parentId;
-      }
-    }
-  }
-
-  const folderNodes: Node[] = data.folders
-    .filter((folder) => folder.id !== data.root)
-    .map((folder) => ({
-      id: folder.id,
-      type: "scalpel",
-      position: { x: 0, y: 0 },
-      parentId: folder.parentId === data.root ? undefined : folder.parentId,
-      extent: folder.parentId && folder.parentId !== data.root ? ("parent" as const) : undefined,
-      draggable: false,
-      zIndex: 1,
-      hidden: hidden.has(folder.id),
-      style: { width: folder.parentId ? undefined : CLASS_WIDTH },
-      data: {
-        project: {
-          kind: "folder",
-          name: folder.name,
-          collapsed: collapsed.has(folder.id),
-          transparent: transparentFolders.has(folder.id),
-        },
-        color: colorForNode(folder.id),
-        onToggleCollapse,
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    }));
-
-  const entryList = data?.entries?.length
-    ? data.entries
-    : data?.entry
-      ? [data.entry]
-      : [];
-
-  const fileNodes: Node[] = data.files.map((file) => {
-    const isTopLevel = file.folderId === data.root;
-    return {
-      id: file.id,
-      type: "scalpel",
-      position: { x: 0, y: 0 },
-      parentId: isTopLevel ? undefined : file.folderId,
-      extent: isTopLevel ? undefined : ("parent" as const),
-      draggable: false,
-      zIndex: 4,
-      hidden: hidden.has(file.id),
-      style: { width: 180 },
-      data: {
-        project: {
-          kind: "file",
-          name: file.name,
-          imports: file.imports,
-          fileKind: file.kind,
-          entry: entryList.includes(file.id),
-          external: file.external === true,
-        },
-        // Docs/config get a muted colour; entry files get the mint accent;
-        // out-of-scope targets stay grey so they read as external.
-        color: entryList.includes(file.id)
-          ? "#3DF0A8"
-          : file.kind === "doc" || file.external
-            ? "#8A93A0"
-            : colorForNode(file.id),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    };
-  });
-
-  return [...folderNodes, ...fileNodes];
 }
 
 export function ProjectGraph({ root, scope, onNavigate }: Props) {
@@ -199,15 +104,12 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     if (!data) {
       return [];
     }
-    const highlight = selectionInfo(data, activeSelectedId)?.highlight ?? null;
-    return toNodes(data, collapsed, toggleCollapse).map((node) => ({
-      ...node,
-      data: {
-        ...node.data,
-        dimmed: highlight ? !highlight.has(node.id) : false,
-        highlighted: highlight ? node.id === activeSelectedId : false,
-      },
-    }));
+    return decorateProjectNodes(
+      buildProjectNodes(data, collapsed, toggleCollapse),
+      data,
+      collapsed,
+      activeSelectedId
+    );
   }, [data, collapsed, activeSelectedId, toggleCollapse]);
 
   // Project edges carry no id; the canvas speaks in `DomainEdge`s.
