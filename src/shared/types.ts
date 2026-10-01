@@ -31,8 +31,6 @@ export interface ParseResult {
   filePath: string;
 }
 
-export type LayoutMap = Record<string, Position>;
-
 export interface ImportEntry {
   specifier: string;
   names: string[];

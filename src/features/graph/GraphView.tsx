@@ -539,11 +539,6 @@ function GraphViewInner({
         {showLines ? "Hide lines" : "Show lines"}
       </button>
 
-      {/* Temporary diagnostic: shows what the graph actually received. */}
-      <div className="pointer-events-none absolute bottom-1 left-1 z-10 rounded bg-panel/80 px-2 py-0.5 font-mono text-[10px] text-dimmed">
-        nodes {nodes.length} · edges {edges.length} · pts {Object.keys(sections).length}
-      </div>
-
       <GraphSearch
         items={searchItems}
         onPick={handleSearchPick}
