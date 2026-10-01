@@ -2,9 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::parser::imports::{
-    extract_imports, resolve_import_targets_with_aliases, stem_index, AliasMap,
-};
+use crate::parser::imports::{extract_imports, AliasMap, Resolver};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
@@ -231,8 +229,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         .filter(|file| file.kind == "code")
         .map(|file| root_path.join(&file.id))
         .collect();
-    let index = stem_index(&code_paths);
-    let aliases = AliasMap::load(root_path);
+    let resolver = Resolver::new(root_path, &code_paths, AliasMap::load(root_path));
     let ids: std::collections::HashSet<String> =
         graph.files.iter().map(|file| file.id.clone()).collect();
     let mut external_files: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -254,15 +251,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         let mut imports = Vec::new();
         let mut edges = Vec::new();
         for entry in extract_imports(&source, &id) {
-            let targets =
-                resolve_import_targets_with_aliases(
-                    &entry.specifier,
-                    &entry.names,
-                    &id,
-                    root_path,
-                    &index,
-                    &aliases,
-                );
+            let targets = resolver.resolve(&entry, &id);
             if targets.is_empty() {
                 imports.push(FileImport {
                     target_id: String::new(),
@@ -271,21 +260,22 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
                 });
                 continue;
             }
-            for (target_path, specifier, names) in targets {
-                let target_id = id_of(root_path, &target_path, &graph.root);
+            for resolved in targets {
+                let target_id = id_of(root_path, &resolved.target, &graph.root);
                 if target_id != id {
                     if !ids.contains(&target_id) {
                         // A file outside the scope: surface it as an external node
                         // so the import still draws as an edge.
                         if external_files.insert(target_id.clone()) {
-                            let external_kind = if code_extension(&target_path) {
+                            let external_kind = if code_extension(&resolved.target) {
                                 "code"
                             } else {
                                 "doc"
                             };
                             graph.files.push(ProjectFile {
                                 id: target_id.clone(),
-                                name: target_path
+                                name: resolved
+                                    .target
                                     .file_name()
                                     .map(|name| name.to_string_lossy().to_string())
                                     .unwrap_or_else(|| target_id.clone()),
@@ -303,8 +293,8 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
                 }
                 imports.push(FileImport {
                     target_id,
-                    specifier,
-                    names,
+                    specifier: resolved.specifier,
+                    names: resolved.names,
                 });
             }
         }
