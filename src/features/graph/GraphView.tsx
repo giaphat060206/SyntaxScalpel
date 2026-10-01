@@ -291,9 +291,6 @@ function GraphViewInner({
     layoutKey,
     fit: { token: layoutKey },
     edgeVisibility: handleEdgeVisibility,
-    onNodeClick: (id) => onSelect(id),
-    onHover: setHoveredId,
-    onPaneClick: () => onSelect(null),
   });
 
   const searchItems = useMemo<SearchItem[]>(

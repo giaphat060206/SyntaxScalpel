@@ -21,7 +21,6 @@ import type { ElkLayoutResult } from "../elk/result";
 
 export interface DomainEdge { id: string; source: string; target: string; }
 export type EdgeVisibility = "active" | "dim" | "hidden";
-export interface CanvasMenuItem { label: string; onSelect: () => void; tone?: "mint"; }
 
 type LayoutFn = (nodes: Node[], edges: Edge[]) => Promise<ElkLayoutResult | null>;
 
@@ -32,11 +31,6 @@ export interface GraphCanvasConfig {
   layoutKey: string;
   fit: { token: string; target?: string; padding?: number };
   edgeVisibility: (edge: DomainEdge, selection: unknown) => EdgeVisibility;
-  menuItems?: CanvasMenuItem[];
-  onNodeClick?: (id: string) => void;
-  onNodeDoubleClick?: (id: string) => void;
-  onHover?: (id: string | null) => void;
-  onPaneClick?: () => void;
   layout?: LayoutFn;
 }
 
