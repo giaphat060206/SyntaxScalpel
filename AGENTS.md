@@ -87,3 +87,17 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Do not add code comments unless requested.
 - Do not reintroduce layout persistence or the removed `useLayoutAutosave` hook.
 - Do not change the `main` branch history; work on a feature branch.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as GitHub Issues on `giaphat060206/SyntaxScalper`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` + `docs/adr/`. See `docs/agents/domain.md`.
