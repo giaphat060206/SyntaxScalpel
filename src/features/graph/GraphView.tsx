@@ -88,7 +88,9 @@ function GraphViewInner({
     []
   );
 
-  const layoutKey = `${result.filePath}|${imports ? imports.imports.length : "none"}`;
+  const layoutKey = `${result.filePath}|${
+    imports ? `${imports.imports.length}|${imports.importedBy.length}` : "none"
+  }`;
 
   const canvas = useGraphCanvas({
     nodes: decoratedNodes,

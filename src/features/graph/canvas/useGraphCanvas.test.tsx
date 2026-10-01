@@ -80,6 +80,23 @@ describe("useGraphCanvas", () => {
     expect(result.current.edges[0].zIndex).toBe(0);
   });
 
+  it("drops edges whose endpoints are hidden", () => {
+    const { result } = renderHook(
+      () =>
+        useGraphCanvas({
+          nodes: [node("a"), { ...node("b"), hidden: true }],
+          edges: [edge],
+          selection: null,
+          layoutKey: "file",
+          fit: { token: "file" },
+          edgeVisibility: () => "active",
+          layout: async () => null,
+        }),
+      { wrapper }
+    );
+    expect(result.current.edges).toHaveLength(0);
+  });
+
   it("ignores a stale layout result after the layoutKey changes", async () => {
     let release: () => void = () => {};
     const first = new Promise<void>((resolve) => (release = resolve));

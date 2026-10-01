@@ -10,15 +10,15 @@ export { folderChain };
 
 export function buildProjectNodes(
   data: ProjectGraph,
-  _collapsed: Set<string>,
   onToggleCollapse: (id: string) => void
 ): Node[] {
   const folderById = new Map(data.folders.map((folder) => [folder.id, folder]));
+  const fileById = new Map(data.files.map((file) => [file.id, file]));
 
   const transparentFolders = new Set<string>();
   for (const edge of data.edges) {
     for (const id of [edge.source, edge.target]) {
-      const file = data.files.find((entry) => entry.id === id);
+      const file = fileById.get(id);
       if (!file) {
         continue;
       }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type LoadState<T> =
   | { status: "idle" }
@@ -11,15 +11,18 @@ export function useAsyncLoad<T>(
   load: (() => Promise<T>) | null
 ): LoadState<T> {
   const [state, setState] = useState<LoadState<T>>({ status: "idle" });
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   useEffect(() => {
-    if (key === null || load === null) {
+    const run = loadRef.current;
+    if (key === null || run === null) {
       setState({ status: "idle" });
       return;
     }
     let cancelled = false;
     setState({ status: "loading" });
-    load()
+    run()
       .then((value) => {
         if (!cancelled) {
           setState({ status: "ready", value });

@@ -100,17 +100,18 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   // Build the nodes once per loaded graph, then decorate with collapse and
   // selection state in one stable array. Positions and measurements are merged
   // by the canvas, so a collapse only flips `hidden`/glyph and never jumps.
-  const decoratedNodes = useMemo<Node[]>(() => {
-    if (!data) {
-      return [];
-    }
-    return decorateProjectNodes(
-      buildProjectNodes(data, collapsed, toggleCollapse),
-      data,
-      collapsed,
-      activeSelectedId
-    );
-  }, [data, collapsed, activeSelectedId, toggleCollapse]);
+  const builtNodes = useMemo<Node[]>(
+    () => (data ? buildProjectNodes(data, toggleCollapse) : []),
+    [data, toggleCollapse]
+  );
+
+  const decoratedNodes = useMemo<Node[]>(
+    () =>
+      data
+        ? decorateProjectNodes(builtNodes, data, collapsed, activeSelectedId)
+        : [],
+    [builtNodes, data, collapsed, activeSelectedId]
+  );
 
   // Project edges carry no id; the canvas speaks in `DomainEdge`s.
   const domainEdges = useMemo<DomainEdge[]>(
@@ -210,15 +211,20 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 
   // Picking from the explorer's search navigates straight to that folder's or
   // file's graph.
-  useSearchRegistration(searchItems, (id) => {
-    if (id === data?.root) {
-      return;
-    }
-    const kind = data?.folders.some((folder) => folder.id === id)
-      ? "folder"
-      : "code";
-    onNavigate({ kind, path: id });
-  });
+  const handleSearchNavigate = useCallback(
+    (id: string) => {
+      if (id === data?.root) {
+        return;
+      }
+      const kind = data?.folders.some((folder) => folder.id === id)
+        ? "folder"
+        : "code";
+      onNavigate({ kind, path: id });
+    },
+    [data, onNavigate]
+  );
+
+  useSearchRegistration(searchItems, handleSearchNavigate);
 
   // Picking from the panel's own search box centres the view on the block.
   const handlePanelSearchPick = useCallback(

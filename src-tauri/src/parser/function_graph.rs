@@ -121,22 +121,6 @@ mod tests {
     }
 
     #[test]
-    fn collect_edges_dedups_and_skips_self_edges() {
-        let mut caller = def("caller", NodeKind::Function);
-        caller.body = None;
-        let defs = vec![caller, def("callee", NodeKind::Function)];
-        let edges = collect_edges(&defs, "", |_, _| vec!["callee".into(), "callee".into()]);
-        assert_eq!(edges, vec![]); // no body => no edges
-    }
-
-    #[test]
-    fn class_ids_are_never_edge_targets() {
-        let defs = vec![def("C", NodeKind::Class)];
-        let edges = collect_edges(&defs, "", |_, _| vec!["C".into()]);
-        assert!(edges.is_empty());
-    }
-
-    #[test]
     fn collect_edges_maps_names_dedups_and_skips_self_edges() {
         let mut parser = tree_sitter::Parser::new();
         parser
@@ -149,9 +133,13 @@ mod tests {
         caller.body = Some(body);
         let mut self_ref = def("self_ref", NodeKind::Function);
         self_ref.body = Some(body);
+        let mut aliased = def("aliased_id", NodeKind::Function);
+        aliased.name = "public_name".into();
+        aliased.body = Some(body);
         let defs = vec![
             caller,
             self_ref,
+            aliased,
             def("callee", NodeKind::Function),
             def("C", NodeKind::Class),
         ];
@@ -162,6 +150,7 @@ mod tests {
                 "callee".into(),
                 "C".into(),
                 "self_ref".into(),
+                "public_name".into(),
             ]
         });
 
@@ -177,8 +166,24 @@ mod tests {
                     target: "self_ref".into(),
                 },
                 GraphEdge {
+                    source: "caller".into(),
+                    target: "aliased_id".into(),
+                },
+                GraphEdge {
                     source: "self_ref".into(),
                     target: "callee".into(),
+                },
+                GraphEdge {
+                    source: "self_ref".into(),
+                    target: "aliased_id".into(),
+                },
+                GraphEdge {
+                    source: "aliased_id".into(),
+                    target: "callee".into(),
+                },
+                GraphEdge {
+                    source: "aliased_id".into(),
+                    target: "self_ref".into(),
                 },
             ]
         );

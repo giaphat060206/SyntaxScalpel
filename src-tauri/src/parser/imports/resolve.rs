@@ -80,8 +80,6 @@ pub fn resolve_specifier(
     }
 
     if specifier.starts_with('.') {
-        // Relative import. Each leading dot is a directory level: `.` is the
-        // importing file's own directory, `..` its parent, `...` the grandparent.
         let dots = specifier.chars().take_while(|c| *c == '.').count();
         let rest = specifier[dots..].trim_start_matches('/');
         let mut base_dir = Path::new(importer_rel)
@@ -111,8 +109,6 @@ pub fn resolve_specifier(
     stem_index.get(last).cloned()
 }
 
-/// Path aliases from `tsconfig.json` / `jsconfig.json` (`baseUrl` + `paths`),
-/// so imports like `@shared/utils` or `~/lib/x` can resolve to real files.
 #[derive(Debug, Default, Clone)]
 pub struct AliasMap {
     base_url: String,
@@ -120,7 +116,6 @@ pub struct AliasMap {
 }
 
 impl AliasMap {
-    /// Build an alias map from a parsed `tsconfig.json` / `jsconfig.json`.
     pub fn from_json(json: &serde_json::Value) -> AliasMap {
         let options = json.get("compilerOptions");
         let base_url = options
@@ -151,8 +146,6 @@ impl AliasMap {
         AliasMap { base_url, paths }
     }
 
-    /// Read `tsconfig.json` or `jsconfig.json` from `root`. Unreadable or
-    /// malformed files yield an empty map (no aliases), never an error.
     pub fn load(root: &Path) -> AliasMap {
         for name in ["tsconfig.json", "jsconfig.json"] {
             let Ok(text) = std::fs::read_to_string(root.join(name)) else {
@@ -169,8 +162,6 @@ impl AliasMap {
         AliasMap::default()
     }
 
-    /// Candidate paths a specifier could map to through the alias patterns, in
-    /// priority order. Pure: touches no disk.
     pub fn candidates(&self, specifier: &str) -> Vec<PathBuf> {
         let mut candidates = Vec::new();
         for (pattern, targets) in &self.paths {
@@ -197,7 +188,6 @@ impl AliasMap {
         candidates
     }
 
-    /// Resolve a non-relative specifier through the alias patterns.
     pub fn resolve(&self, specifier: &str, root: &Path) -> Option<PathBuf> {
         for candidate in self.candidates(specifier) {
             if let Some(found) = try_candidates(root, &candidate) {
@@ -208,7 +198,6 @@ impl AliasMap {
     }
 }
 
-/// One import specifier resolved to an on-disk target file.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedImport {
@@ -217,7 +206,6 @@ pub struct ResolvedImport {
     pub names: Vec<String>,
 }
 
-/// Resolves import specifiers against a project's files and path aliases.
 pub struct Resolver {
     root: PathBuf,
     index: HashMap<String, PathBuf>,
@@ -233,21 +221,13 @@ impl Resolver {
         }
     }
 
-    /// Scan `root` for code files and its `tsconfig.json` / `jsconfig.json`.
-    pub fn load(root: &Path) -> Resolver {
-        let files = project_files(root, 0);
-        let aliases = AliasMap::load(root);
-        Resolver::new(root, &files, aliases)
-    }
-
     /// Resolve one import entry to target files, excluding the importing file.
     ///
-    /// Package-relative imports like `from . import constants` carry the
-    /// specifier `"."` plus imported names, so resolving the specifier alone
-    /// would point at the package's own `__init__.py`. When the plain specifier
-    /// resolves to the importer itself, each imported name is tried as a
-    /// submodule (`".constants"`), which yields the real target files. Aliases
-    /// are tried for non-relative specifiers before the package-relative fallback.
+    /// Package-relative imports like `from . import constants` carry the specifier
+    /// `"."` plus imported names, so resolving the specifier alone would point at the
+    /// package's own `__init__.py`. When the plain specifier resolves to the importer
+    /// itself, each imported name is tried as a submodule (`".constants"`), which
+    /// yields the real target files.
     pub fn resolve(&self, entry: &ImportEntry, importer_rel: &str) -> Vec<ResolvedImport> {
         let specifier = entry.specifier.as_str();
         let names = entry.names.as_slice();
@@ -359,7 +339,7 @@ pub fn analyze(path: &str, root: &str) -> Result<ImportAnalysis, String> {
     let imports = extract_imports(&source, &current_rel);
 
     let files = project_files(root_path, 0);
-    let resolver = Resolver::load(root_path);
+    let resolver = Resolver::new(root_path, &files, AliasMap::load(root_path));
 
     let mut imported_by = Vec::new();
     for file in &files {

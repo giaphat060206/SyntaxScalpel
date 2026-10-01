@@ -126,7 +126,13 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
 
   const edges: Edge[] = useMemo(() => {
     const byId = new Map(nodes.map((node) => [node.id, node]));
-    return domainEdges.map((edge) => {
+    return domainEdges
+      .filter((edge) => {
+        const source = byId.get(edge.source);
+        const target = byId.get(edge.target);
+        return Boolean(source && target && !source.hidden && !target.hidden);
+      })
+      .map((edge) => {
       const visibility = edgeVisibility(edge, selection);
       const source = byId.get(edge.source);
       const stroke = (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
