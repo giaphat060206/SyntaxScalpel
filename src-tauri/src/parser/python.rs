@@ -2,25 +2,8 @@ use std::collections::HashMap;
 
 use tree_sitter::{Node, Parser};
 
-use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult, Position};
-
-struct Def<'a> {
-    id: String,
-    kind: NodeKind,
-    name: String,
-    params: Vec<String>,
-    returns: Vec<String>,
-    uses: Vec<String>,
-    value: Option<String>,
-    parent: Option<String>,
-    start_line: usize,
-    end_line: usize,
-    body: Option<Node<'a>>,
-}
-
-fn line_range(node: Node) -> (usize, usize) {
-    (node.start_position().row + 1, node.end_position().row + 1)
-}
+use crate::models::{NodeKind, ParseResult, Position};
+use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 pub fn parse_source(
     source: &str,
@@ -37,14 +20,7 @@ pub fn parse_source(
 
     let imported = imported_names(source, file_path);
     let defs = collect_defs(tree.root_node(), source, &imported);
-    let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
-    let edges = collect_edges(&defs, source);
-
-    Ok(ParseResult {
-        nodes,
-        edges,
-        file_path: file_path.to_string(),
-    })
+    Ok(function_graph::assemble(defs, source, file_path, layout, calls_in))
 }
 
 /// Decorated definitions (`@staticmethod`, `@app.route`) wrap the real
@@ -238,14 +214,6 @@ fn uses_in_text(text: &str, imported: &[String]) -> Vec<String> {
     out
 }
 
-fn node_text(node: Node, source: &str) -> String {
-    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn parameter_names(node: Node, source: &str) -> Vec<String> {
     let Some(list) = node.child_by_field_name("parameters") else {
         return Vec::new();
@@ -314,37 +282,10 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
-    let mut targets: HashMap<&str, &str> = HashMap::new();
-    for def in defs {
-        if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
-            targets.insert(def.id.as_str(), def.id.as_str());
-            targets.insert(def.name.as_str(), def.id.as_str());
-        }
-    }
-
-    let mut edges: Vec<GraphEdge> = Vec::new();
-    for def in defs {
-        let Some(body) = def.body else { continue };
-        let mut calls = Vec::new();
-        collect_calls(body, source, &mut calls);
-        for name in calls {
-            let Some(target) = targets.get(name.as_str()) else {
-                continue;
-            };
-            if *target == def.id.as_str() {
-                continue;
-            }
-            let edge = GraphEdge {
-                source: def.id.clone(),
-                target: target.to_string(),
-            };
-            if !edges.iter().any(|e| e.source == edge.source && e.target == edge.target) {
-                edges.push(edge);
-            }
-        }
-    }
-    edges
+pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+    let mut calls = Vec::new();
+    collect_calls(node, source, &mut calls);
+    calls
 }
 
 fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
@@ -376,25 +317,10 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
-    GraphNode {
-        id: def.id.clone(),
-        kind: def.kind.clone(),
-        name: def.name.clone(),
-        params: def.params.clone(),
-        returns: def.returns.clone(),
-        uses: def.uses.clone(),
-        start_line: def.start_line,
-        end_line: def.end_line,
-        value: def.value.clone(),
-        parent: def.parent.clone(),
-        position: layout.get(&def.id).cloned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::GraphEdge;
 
     const SOURCE: &str = "\
 def add(a, b):

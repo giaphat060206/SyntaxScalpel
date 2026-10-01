@@ -2,25 +2,8 @@ use std::collections::HashMap;
 
 use tree_sitter::{Node, Parser};
 
-use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult, Position};
-
-struct Def<'a> {
-    id: String,
-    kind: NodeKind,
-    name: String,
-    params: Vec<String>,
-    returns: Vec<String>,
-    uses: Vec<String>,
-    value: Option<String>,
-    parent: Option<String>,
-    start_line: usize,
-    end_line: usize,
-    body: Option<Node<'a>>,
-}
-
-fn line_range(node: Node) -> (usize, usize) {
-    (node.start_position().row + 1, node.end_position().row + 1)
-}
+use crate::models::{NodeKind, ParseResult, Position};
+use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 fn grammar_for(file_path: &str) -> tree_sitter::Language {
     if file_path.ends_with(".tsx") {
@@ -47,50 +30,13 @@ pub fn parse_source(
 
     let imported = imported_names(source, file_path);
     let defs = collect_defs(tree.root_node(), source, &imported);
-    let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
-    let edges = collect_edges(&defs, source);
-
-    Ok(ParseResult {
-        nodes,
-        edges,
-        file_path: file_path.to_string(),
-    })
+    Ok(function_graph::assemble(defs, source, file_path, layout, calls_in))
 }
 
-fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
-    let mut targets: HashMap<&str, &str> = HashMap::new();
-    for def in defs {
-        if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
-            targets.insert(def.id.as_str(), def.id.as_str());
-            targets.insert(def.name.as_str(), def.id.as_str());
-        }
-    }
-
-    let mut edges: Vec<GraphEdge> = Vec::new();
-    for def in defs {
-        let Some(body) = def.body else { continue };
-        let mut calls = Vec::new();
-        collect_calls(body, source, &mut calls);
-        for name in calls {
-            let Some(target) = targets.get(name.as_str()) else {
-                continue;
-            };
-            if *target == def.id.as_str() {
-                continue;
-            }
-            let edge = GraphEdge {
-                source: def.id.clone(),
-                target: target.to_string(),
-            };
-            if !edges
-                .iter()
-                .any(|e| e.source == edge.source && e.target == edge.target)
-            {
-                edges.push(edge);
-            }
-        }
-    }
-    edges
+pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+    let mut calls = Vec::new();
+    collect_calls(node, source, &mut calls);
+    calls
 }
 
 fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
@@ -101,14 +47,14 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
         {
             match callee.kind() {
                 "identifier" => {
-                    let text = node_text(Some(callee), source);
+                    let text = node_text(callee, source);
                     if !text.is_empty() {
                         out.push(text);
                     }
                 }
                 "member_expression" => {
                     if let Some(prop) = callee.child_by_field_name("property") {
-                        let text = node_text(Some(prop), source);
+                        let text = node_text(prop, source);
                         if !text.is_empty() {
                             out.push(text);
                         }
@@ -144,7 +90,10 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
                 collect_declarators(child, source, None, &mut defs, imported);
             }
             "class_declaration" => {
-                let class_name = node_text(child.child_by_field_name("name"), source);
+                let class_name = child
+                    .child_by_field_name("name")
+                    .map(|n| node_text(n, source))
+                    .unwrap_or_default();
                 let mut class_uses = Vec::new();
                 if let Some(body) = child.child_by_field_name("body") {
                     class_uses = uses_in(body, source, imported);
@@ -197,7 +146,10 @@ fn collect_declarators<'a>(
         if declarator.kind() != "variable_declarator" {
             continue;
         }
-        let name = node_text(declarator.child_by_field_name("name"), source);
+        let name = declarator
+            .child_by_field_name("name")
+            .map(|n| node_text(n, source))
+            .unwrap_or_default();
         let Some(value) = declarator.child_by_field_name("value") else {
             continue;
         };
@@ -233,8 +185,8 @@ fn collect_declarators<'a>(
                     name,
                     params: Vec::new(),
                     returns: Vec::new(),
-                    uses: uses_in_text(&node_text(Some(value), source), imported),
-                    value: Some(collapse_whitespace(&node_text(Some(value), source))),
+                    uses: uses_in_text(&node_text(value, source), imported),
+                    value: Some(collapse_whitespace(&node_text(value, source))),
                     parent: None,
                     start_line: line_range(declarator).0,
                     end_line: line_range(declarator).1,
@@ -296,7 +248,10 @@ fn ancestor_variable_name(node: Node, source: &str) -> Option<String> {
     let mut current = node.parent();
     while let Some(parent) = current {
         if parent.kind() == "variable_declarator" {
-            let name = node_text(parent.child_by_field_name("name"), source);
+            let name = parent
+                .child_by_field_name("name")
+                .map(|n| node_text(n, source))
+                .unwrap_or_default();
             if !name.is_empty() {
                 return Some(name);
             }
@@ -312,7 +267,10 @@ fn declared_function<'a>(
     parent: Option<String>,
     imported: &[String],
 ) -> Option<Def<'a>> {
-    let name = node_text(node.child_by_field_name("name"), source);
+    let name = node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source))
+        .unwrap_or_default();
     if name.is_empty() && node.kind() != "arrow_function" && node.kind() != "function_expression" {
         return None;
     }
@@ -329,12 +287,12 @@ fn declared_function<'a>(
     let body = node.child_by_field_name("body");
     let returns = match body {
         Some(b) if b.kind() == "statement_block" => return_names(b, source),
-        Some(b) => vec![node_text(Some(b), source)],
+        Some(b) => vec![node_text(b, source)],
         None => Vec::new(),
     };
     let uses = match body {
         Some(b) if b.kind() == "statement_block" => uses_in(b, source, imported),
-        Some(b) => uses_in_text(&node_text(Some(b), source), imported),
+        Some(b) => uses_in_text(&node_text(b, source), imported),
         None => Vec::new(),
     };
 
@@ -371,7 +329,7 @@ fn collect_uses(node: Node, source: &str, imported: &[String], out: &mut Vec<Str
     for child in node.children(&mut cursor) {
         match child.kind() {
             "identifier" | "type_identifier" | "property_identifier" => {
-                let text = node_text(Some(child), source);
+                let text = node_text(child, source);
                 if imported.iter().any(|name| name == &text) && !out.contains(&text) {
                     out.push(text);
                 }
@@ -403,7 +361,7 @@ fn parameter_names(node: Node, source: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut cursor = list.walk();
     for param in list.named_children(&mut cursor) {
-        let text = node_text(Some(param), source).trim().to_string();
+        let text = node_text(param, source).trim().to_string();
         if !text.is_empty() {
             names.push(text);
         }
@@ -449,41 +407,16 @@ fn collect_expr_names(node: Node, source: &str, out: &mut Vec<String>) {
 }
 
 fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
-    let text = node_text(Some(node), source);
+    let text = node_text(node, source);
     if !text.is_empty() && !out.iter().any(|existing| existing == &text) {
         out.push(text);
-    }
-}
-
-fn node_text(node: Option<Node>, source: &str) -> String {
-    node.and_then(|n| n.utf8_text(source.as_bytes()).ok())
-        .unwrap_or("")
-        .to_string()
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
-    GraphNode {
-        id: def.id.clone(),
-        kind: def.kind.clone(),
-        name: def.name.clone(),
-        params: def.params.clone(),
-        returns: def.returns.clone(),
-        uses: def.uses.clone(),
-        start_line: def.start_line,
-        end_line: def.end_line,
-        value: def.value.clone(),
-        parent: def.parent.clone(),
-        position: layout.get(&def.id).cloned(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::GraphEdge;
 
     const SOURCE: &str = "\
 function add(a, b) {
