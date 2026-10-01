@@ -1,22 +1,14 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   Background,
   Controls,
-  MarkerType,
   ReactFlow,
   ReactFlowProvider,
-  useNodesState,
-  useReactFlow,
-  type Edge,
   type Node,
-  type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type {
@@ -36,11 +28,14 @@ import {
   IMPORTED_BY_NODE_ID,
   IMPORTS_NODE_ID,
   CLASS_WIDTH,
-  reflowLayout,
 } from "./layout";
-import { runElkLayout } from "./elk/layout";
 import { ElkEdge } from "./elk/ElkEdge";
 import { EmptyState } from "../../shared/StateViews";
+import {
+  useGraphCanvas,
+  type DomainEdge,
+  type EdgeVisibility,
+} from "./canvas/useGraphCanvas";
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
@@ -180,29 +175,10 @@ function GraphViewInner({
   selectedId,
   onSelect,
 }: Props) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [showLines, setShowLines] = useState(true);
-  const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
-  const [layoutRun, setLayoutRun] = useState(0);
-  const { fitView, getInternalNode, setCenter } = useReactFlow();
-  const lastFit = useRef<string>("");
-  const lastLayoutKey = useRef<string>("");
-
-  // A selection that does not match any node on the canvas (stale id from a
-  // previous file) must not dim the whole graph.
-  const activeSelectedId = useMemo(
-    () =>
-      selectedId !== null && nodes.some((node) => node.id === selectedId)
-        ? selectedId
-        : null,
-    [selectedId, nodes]
-  );
 
   // Rebuild the flow whenever a different file (or its import analysis) changes.
-  useEffect(() => {
-    setSections({});
+  const builtNodes = useMemo<Node[]>(() => {
     const flow = buildFlow(result);
     const variables = flow.nodes.filter(
       (node) => node.data.node.kind === "variable"
@@ -219,19 +195,19 @@ function GraphViewInner({
               style: { width: CLASS_WIDTH },
               draggable: false,
               zIndex: 1,
-                data: {
-                  node: {
-                    id: CONSTANTS_NODE_ID,
-                    kind: "class",
-                    name: `CONSTANTS (${variables.length})`,
-                    params: [],
-                    returns: [],
-                    uses: [],
-                  },
-                  color: colorForNode(CONSTANTS_NODE_ID),
-                  highlighted: false,
-                  dimmed: false,
-                } satisfies CodeNodeData,
+              data: {
+                node: {
+                  id: CONSTANTS_NODE_ID,
+                  kind: "class",
+                  name: `CONSTANTS (${variables.length})`,
+                  params: [],
+                  returns: [],
+                  uses: [],
+                },
+                color: colorForNode(CONSTANTS_NODE_ID),
+                highlighted: false,
+                dimmed: false,
+              } satisfies CodeNodeData,
             },
           ]
         : [];
@@ -254,176 +230,75 @@ function GraphViewInner({
       }
     }
 
-    setNodes([
+    return [
       ...specialFlowNodes(imports),
       ...constantsContainer,
       ...constantChildren,
       ...others.map((node) => toFlowNode(node, null, result.edges, endpointParents)),
-    ]);
-  }, [result, imports, setNodes]);
+    ];
+  }, [result, imports]);
+
+  // A selection that does not match any node on the canvas (stale id from a
+  // previous file) must not dim the whole graph.
+  const activeSelectedId = useMemo(
+    () =>
+      selectedId !== null && builtNodes.some((node) => node.id === selectedId)
+        ? selectedId
+        : null,
+    [selectedId, builtNodes]
+  );
 
   // Re-decorate for trace highlighting without touching positions the user
   // dragged. Class transparency comes from the rebuild (endpoint-based), so it
   // is preserved here.
-  useEffect(() => {
-    setNodes((current) =>
-      current.map((node) => ({
+  const decoratedNodes = useMemo<Node[]>(
+    () =>
+      builtNodes.map((node) => ({
         ...node,
-        data: { ...node.data, ...visibilityOf(node.id, result.edges, activeSelectedId) },
-      }))
-    );
-  }, [activeSelectedId, result.edges, setNodes]);
-
-  // Edges are routed by ELK from the section points it computed, falling back to
-  // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
-  const edges: Edge[] = useMemo(() => {
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    return result.edges.map((edge) => {
-      const id = `${edge.source}->${edge.target}`;
-      const source = byId.get(edge.source);
-      const active =
-        activeSelectedId !== null &&
-        (edge.source === activeSelectedId || edge.target === activeSelectedId);
-      const unrelated = activeSelectedId !== null && !active;
-      const sourceColor =
-        (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
-      const stroke = sourceColor;
-      return {
-        id,
-        source: edge.source,
-        target: edge.target,
-        type: "elk",
-        data: { points: sections[id] },
-        zIndex: 0,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: stroke,
-          width: 16,
-          height: 16,
+        data: {
+          ...node.data,
+          ...visibilityOf(node.id, result.edges, activeSelectedId),
         },
-        style: {
-          stroke,
-          strokeWidth: 2,
-          opacity: unrelated ? 0.12 : active ? 1 : showLines ? 0.7 : 0,
-        },
-      };
-    });
-  }, [nodes, result.edges, activeSelectedId, sections, showLines]);
+      })),
+    [builtNodes, result.edges, activeSelectedId]
+  );
 
-  const edgesForLayout = edges;
+  const domainEdges = useMemo<DomainEdge[]>(
+    () =>
+      result.edges.map((edge) => ({
+        ...edge,
+        id: `${edge.source}->${edge.target}`,
+      })),
+    [result.edges]
+  );
 
-  // ELK owns placement: run it once the measured sizes settle, and again after a
-  // Re-align. On any failure (or above the node cap) fall back to the old grid.
-  const sizeSignature = nodes
-    .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}`)
-    .join("|");
-  useEffect(() => {
-    if (nodes.length === 0) {
-      return;
-    }
-    let cancelled = false;
-    const filePath = result.filePath;
-    const timer = window.setTimeout(async () => {
-      const result = await runElkLayout(nodes, edgesForLayout);
-      if (cancelled) {
-        return;
-      }
-      if (!result) {
-        setSections({});
-        setNodes((current) => reflowLayout(current));
-        return;
-      }
-      const key = `${filePath}|${layoutRun}|${sizeSignature}|${showLines}`;
-      if (lastLayoutKey.current === key) {
-        return;
-      }
-      lastLayoutKey.current = key;
-      setSections(result.sections);
-      setNodes((current) =>
-        current.map((node) => {
-          const position = result.positions[node.id];
-          const size = result.sizes[node.id];
-          if (!position) {
-            return node;
-          }
-          return {
-            ...node,
-            position,
-            ...(size
-              ? { style: { ...(node.style ?? {}), ...size } }
-              : {}),
-          };
-        })
-      );
-    }, 160);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [sizeSignature, layoutRun, result.filePath, setNodes]);
-
-  // Fit the view once per file (and once more when import blocks arrive), after
-  // React Flow has measured the nodes.
-  const fitToken = `${result.filePath}|${imports ? imports.imports.length : "none"}|${
-    imports ? imports.importedBy.length : "none"
-  }`;
-  useEffect(() => {
-    if (lastFit.current === fitToken) {
-      return;
-    }
-    const id = window.setTimeout(() => {
-      lastFit.current = fitToken;
-      fitView({ padding: 0.2 });
-    }, 120);
-    return () => window.clearTimeout(id);
-  }, [fitToken, sizeSignature, fitView]);
-
-  const closeMenu = useCallback(() => setMenu(null), []);
-
-  const openMenu = useCallback(
-    (event: ReactMouseEvent | globalThis.MouseEvent) => {
-      event.preventDefault();
-      setMenu({ x: event.clientX, y: event.clientY });
+  const handleEdgeVisibility = useCallback(
+    (edge: DomainEdge, selected: unknown): EdgeVisibility => {
+      if (typeof selected !== "string") return "active";
+      return edge.source === selected || edge.target === selected
+        ? "active"
+        : "dim";
     },
     []
   );
 
-  const handleRealign = useCallback(() => {
-    setMenu(null);
-    setSections({});
-    setLayoutRun((value) => value + 1);
-  }, []);
+  const layoutKey = `${result.filePath}|${imports ? imports.imports.length : "none"}`;
 
-  const handleFitView = useCallback(() => {
-    setMenu(null);
-    fitView({ padding: 0.2 });
-  }, [fitView]);
-
-  // Centre the viewport on one node at a given zoom (used by search picks).
-  const centerOn = useCallback(
-    (id: string, zoom: number, duration: number) => {
-      const internals = getInternalNode(id);
-      if (!internals) {
-        return;
-      }
-      const { positionAbsolute, userNode } = internals.internals;
-      const width = userNode.measured?.width ?? 0;
-      const height = userNode.measured?.height ?? 0;
-      if (width === 0 || height === 0) {
-        return;
-      }
-      setCenter(
-        positionAbsolute.x + width / 2,
-        positionAbsolute.y + height / 2,
-        { zoom, duration }
-      );
-    },
-    [getInternalNode, setCenter]
-  );
+  const canvas = useGraphCanvas({
+    nodes: decoratedNodes,
+    edges: domainEdges,
+    selection: activeSelectedId,
+    layoutKey,
+    fit: { token: layoutKey },
+    edgeVisibility: handleEdgeVisibility,
+    onNodeClick: (id) => onSelect(id),
+    onHover: setHoveredId,
+    onPaneClick: () => onSelect(null),
+  });
 
   const searchItems = useMemo<SearchItem[]>(
     () =>
-      nodes
+      canvas.nodes
         .map((node) => (node.data as CodeNodeData).node)
         .filter((graph): graph is NonNullable<typeof graph> => Boolean(graph))
         .map((graph) => ({
@@ -431,48 +306,19 @@ function GraphViewInner({
           label: graph.name,
           hint: graph.kind,
         })),
-    [nodes]
+    [canvas.nodes]
   );
 
   const handleSearchPick = useCallback(
     (id: string) => {
       onSelect(id);
-      centerOn(id, 1.2, 400);
+      canvas.centerOn(id, 1.2, 400);
     },
-    [onSelect, centerOn]
+    [onSelect, canvas.centerOn]
   );
 
   // The explorer's search picks the same way (a function cannot be "opened").
   useSearchRegistration(searchItems, handleSearchPick);
-
-  const handleNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => onSelect(node.id),
-    [onSelect]
-  );
-
-  const handleNodeMouseEnter: NodeMouseHandler = useCallback(
-    (_event, node) => setHoveredId(node.id),
-    []
-  );
-
-  const handleNodeMouseLeave: NodeMouseHandler = useCallback(
-    () => setHoveredId(null),
-    []
-  );
-
-  // Close the context menu on Escape.
-  useEffect(() => {
-    if (!menu) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenu(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [menu]);
 
   if (result.nodes.length === 0) {
     return <EmptyState message="No functions detected" />;
@@ -480,7 +326,7 @@ function GraphViewInner({
 
   const activeId = activeSelectedId ?? hoveredId;
   const activeNode = activeId
-    ? nodes.find((node) => node.id === activeId)
+    ? canvas.nodes.find((node) => node.id === activeId)
     : undefined;
   const activeGraph = activeNode
     ? (activeNode.data as CodeNodeData).node
@@ -508,21 +354,20 @@ function GraphViewInner({
         </div>
       )}
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
+        nodes={canvas.nodes}
+        edges={canvas.edges}
+        onNodesChange={canvas.onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={handleNodeClick}
-        onNodeMouseEnter={handleNodeMouseEnter}
-        onNodeMouseLeave={handleNodeMouseLeave}
+        onNodeClick={(_event, node) => onSelect(node.id)}
+        onNodeMouseEnter={(_event, node) => setHoveredId(node.id)}
+        onNodeMouseLeave={() => setHoveredId(null)}
         onPaneClick={() => {
-          closeMenu();
+          canvas.closeMenu();
           onSelect(null);
         }}
-        onPaneContextMenu={openMenu}
-        onNodeContextMenu={openMenu}
-        fitView
+        onPaneContextMenu={(event) => canvas.openMenu(event)}
+        onNodeContextMenu={(event, node) => canvas.openMenu(event, node.id)}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
@@ -533,10 +378,10 @@ function GraphViewInner({
 
       <button
         type="button"
-        onClick={() => setShowLines((value) => !value)}
+        onClick={canvas.toggleLines}
         className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
       >
-        {showLines ? "Hide lines" : "Show lines"}
+        {canvas.showLines ? "Hide lines" : "Show lines"}
       </button>
 
       <GraphSearch
@@ -583,30 +428,30 @@ function GraphViewInner({
         </div>
       )}
 
-      {menu && (
+      {canvas.menu && (
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={closeMenu}
+            onClick={canvas.closeMenu}
             onContextMenu={(event) => {
               event.preventDefault();
-              closeMenu();
+              canvas.closeMenu();
             }}
           />
           <div
             className="fixed z-50 min-w-[160px] rounded border border-white/10 bg-panel py-1 shadow-lg"
-            style={{ left: menu.x, top: menu.y }}
+            style={{ left: canvas.menu.x, top: canvas.menu.y }}
           >
             <button
               type="button"
-              onClick={handleRealign}
+              onClick={canvas.realign}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Re-align nodes
             </button>
             <button
               type="button"
-              onClick={handleFitView}
+              onClick={canvas.fitView}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Fit view
