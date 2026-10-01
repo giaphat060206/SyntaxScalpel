@@ -31,11 +31,11 @@ export function TopBar({
   };
 
   return (
-    <div className="relative z-40 flex items-center gap-2 border-b border-white/10 bg-panel px-3 py-1 text-xs">
+    <div className="relative z-40 flex items-center gap-2 border-b border-white/10 bg-panel pl-1 pr-3 py-1 text-xs">
       <button
         type="button"
         onClick={() => setMenuOpen((value) => !value)}
-        className="rounded px-2 py-0.5 text-white/85 hover:bg-white/10"
+        className="rounded pl-1 pr-2 py-0.5 text-white/85 hover:bg-white/10"
       >
         File
       </button>
@@ -43,7 +43,7 @@ export function TopBar({
       {menuOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={closeAll} />
-          <div className="absolute left-3 top-full z-50 w-56 rounded border border-white/10 bg-panel py-1 shadow-lg">
+          <div className="absolute left-0 top-full z-50 w-56 rounded border border-white/10 bg-panel py-1 shadow-lg">
             <button
               type="button"
               onClick={() => {
