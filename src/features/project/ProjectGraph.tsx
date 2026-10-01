@@ -2,19 +2,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   Background,
   Controls,
-  MarkerType,
   ReactFlow,
   ReactFlowProvider,
-  useNodesState,
-  useReactFlow,
-  type Edge,
   type Node,
   type NodeMouseHandler,
 } from "@xyflow/react";
@@ -24,8 +18,7 @@ import { projectGraph } from "../../shared/ipc";
 import { colorForNode } from "../graph/colors";
 import { hiddenIds, selectionInfo } from "./selection";
 import { CodeNode, type CodeNodeData } from "../graph/CodeNode";
-import { CLASS_WIDTH, reflowLayout } from "../graph/layout";
-import { runElkLayout } from "../graph/elk/layout";
+import { CLASS_WIDTH } from "../graph/layout";
 import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
 import {
@@ -33,6 +26,11 @@ import {
   type SearchItem,
 } from "../shell/SearchContext";
 import { GraphSearch } from "../graph/GraphSearch";
+import {
+  useGraphCanvas,
+  type DomainEdge,
+  type EdgeVisibility,
+} from "../graph/canvas/useGraphCanvas";
 
 const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
@@ -150,27 +148,7 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Ignore a selection that is not on the canvas (stale id) so the graph does
-  // not dim entirely.
-  const activeSelectedId = useMemo(() => {
-    if (!selectedId || !data) {
-      return null;
-    }
-    return data.folders.some((folder) => folder.id === selectedId) ||
-      data.files.some((file) => file.id === selectedId)
-      ? selectedId
-      : null;
-  }, [selectedId, data]);
-  const [showLines, setShowLines] = useState(true);
   const [startsOpen, setStartsOpen] = useState(true);
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [sections, setSections] = useState<Record<string, { x: number; y: number }[]>>({});
-  const [layoutRun, setLayoutRun] = useState(0);
-  const [layoutVersion, setLayoutVersion] = useState(0);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const { fitView, getInternalNode, setCenter } = useReactFlow();
-  const lastFit = useRef<string>("");
-  const lastLayoutKey = useRef<string>("");
 
   useEffect(() => {
     let cancelled = false;
@@ -178,7 +156,6 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     setError(null);
     setCollapsed(new Set());
     setSelectedId(null);
-    setSections({});
     projectGraph(root, scope)
       .then((next) => {
         if (!cancelled) setData(next);
@@ -203,282 +180,80 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     });
   }, []);
 
-  const [menuNode, setMenuNode] = useState<string | null>(null);
-
-  const closeMenu = useCallback(() => {
-    setMenu(null);
-    setMenuNode(null);
-  }, []);
-
-  const openMenu = useCallback(
-    (event: ReactMouseEvent | globalThis.MouseEvent) => {
-      event.preventDefault();
-      setMenuNode(null);
-      setMenu({ x: event.clientX, y: event.clientY });
-    },
-    []
-  );
-
-  const openNodeMenu = useCallback(
-    (event: ReactMouseEvent | globalThis.MouseEvent, nodeId: string) => {
-      event.preventDefault();
-      setMenuNode(nodeId);
-      setMenu({ x: event.clientX, y: event.clientY });
-    },
-    []
-  );
-
-  const handleOpenFromMenu = useCallback(() => {
-    if (!menuNode || menuNode === data?.root) {
-      closeMenu();
-      return;
+  // Ignore a selection that is not on the canvas (stale id) so the graph does
+  // not dim entirely.
+  const activeSelectedId = useMemo(() => {
+    if (!selectedId || !data) {
+      return null;
     }
-    const kind = data?.folders.some((folder) => folder.id === menuNode)
-      ? "folder"
-      : "code";
-    onNavigate({ kind, path: menuNode });
-    closeMenu();
-  }, [menuNode, data, onNavigate, closeMenu]);
+    return data.folders.some((folder) => folder.id === selectedId) ||
+      data.files.some((file) => file.id === selectedId)
+      ? selectedId
+      : null;
+  }, [selectedId, data]);
 
-  const handleRealign = useCallback(() => {
-    setMenu(null);
-    setSections({});
-    setLayoutRun((value) => value + 1);
-  }, []);
-
-  const handleFitView = useCallback(() => {
-    setMenu(null);
-    fitView({ padding: 0.2 });
-  }, [fitView]);
-
-  // Close the context menu on Escape.
-  useEffect(() => {
-    if (!menu) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenu(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [menu]);
-
-  // Build the nodes once per loaded graph.
-  useEffect(() => {
-    if (!data) {
-      return;
-    }
-    setSections({});
-    setNodes(toNodes(data, new Set(), toggleCollapse));
-  }, [data, toggleCollapse, setNodes]);
-
-  // Collapse only flips `hidden` flags (and the folder glyph) on the existing
-  // nodes, preserving positions and measurements so the graph does not jump or
-  // fully re-layout on every toggle.
-  useEffect(() => {
-    if (!data) {
-      return;
-    }
-    const hidden = hiddenIds(data, collapsed);
-    const highlight = selectionInfo(data, activeSelectedId)?.highlight ?? null;
-    setNodes((current) =>
-      current.map((node) => {
-        const shouldHide = hidden.has(node.id);
-        const isFolder = Boolean((node.data as CodeNodeData).project?.kind === "folder");
-        const collapsedFlag = collapsed.has(node.id);
-        const currentFlag = (node.data as CodeNodeData).project?.collapsed;
-        const dimmed = highlight ? !highlight.has(node.id) : false;
-        const highlighted = highlight ? node.id === activeSelectedId : false;
-        const data_ = node.data as CodeNodeData;
-        if (
-          node.hidden === shouldHide &&
-          data_.dimmed === dimmed &&
-          data_.highlighted === highlighted &&
-          (!isFolder || currentFlag === collapsedFlag)
-        ) {
-          return node;
-        }
-        return {
-          ...node,
-          hidden: shouldHide,
-          data: {
-            ...node.data,
-            dimmed,
-            highlighted,
-            project: isFolder
-              ? {
-                  ...(node.data as CodeNodeData).project,
-                  collapsed: collapsedFlag,
-                }
-              : (node.data as CodeNodeData).project,
-          },
-        };
-      })
-    );
-  }, [data, collapsed, activeSelectedId, setNodes]);
-
-  // Edges are routed by ELK from the section points it computed, falling back to
-  // a smooth step in `ElkEdge` until a section exists. Idle edges are faded.
-  const edges: Edge[] = useMemo(() => {
+  // Build the nodes once per loaded graph, then decorate with collapse and
+  // selection state in one stable array. Positions and measurements are merged
+  // by the canvas, so a collapse only flips `hidden`/glyph and never jumps.
+  const decoratedNodes = useMemo<Node[]>(() => {
     if (!data) {
       return [];
     }
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const selection = selectionInfo(data, activeSelectedId);
-    const focus = selection?.focus ?? null;
-    return data.edges
-      .filter((edge) => {
-        const source = byId.get(edge.source);
-        const target = byId.get(edge.target);
-        return source && target && !source.hidden && !target.hidden;
-      })
-      .map((edge) => {
-        const id = `${edge.source}->${edge.target}`;
-        const source = byId.get(edge.source)!;
-        // Only edges that touch the focused files stay bright; an edge between
-        // two merely-highlighted files (e.g. two imports of the selection) dims.
-        const focused = focus
-          ? focus.has(edge.source) || focus.has(edge.target)
-          : false;
-        const unrelated = focus !== null && !focused;
-        const stroke = (source.data as CodeNodeData).color ?? "#00F0FF";
-        return {
-          id,
-          source: edge.source,
-          target: edge.target,
-          type: "elk",
-          data: { points: sections[id] },
-          zIndex: 0,
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: stroke,
-            width: 16,
-            height: 16,
-          },
-          style: {
-            stroke,
-            strokeWidth: 2,
-            opacity: unrelated ? 0.12 : focused ? 1 : showLines ? 0.7 : 0,
-          },
-        };
-      });
-  }, [data, nodes, activeSelectedId, showLines, sections]);
+    const highlight = selectionInfo(data, activeSelectedId)?.highlight ?? null;
+    return toNodes(data, collapsed, toggleCollapse).map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        dimmed: highlight ? !highlight.has(node.id) : false,
+        highlighted: highlight ? node.id === activeSelectedId : false,
+      },
+    }));
+  }, [data, collapsed, activeSelectedId, toggleCollapse]);
 
-  const edgesForLayout = edges;
-
-  // ELK owns placement: run it once the measured sizes settle, and again after a
-  // Re-align or a collapse/scope change. On any failure (or above the node cap)
-  // fall back to the old grid.
-  const sizeSignature = nodes
-    .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}:${node.hidden ? 1 : 0}`)
-    .join("|");
-  useEffect(() => {
-    if (nodes.length === 0) {
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      const result = await runElkLayout(nodes, edgesForLayout);
-      if (cancelled) {
-        return;
-      }
-      if (!result) {
-        setSections({});
-        setNodes((current) => reflowLayout(current));
-        return;
-      }
-      const key = `${scope}|${layoutRun}|${sizeSignature}|${collapsed.size}`;
-      if (lastLayoutKey.current === key) {
-        return;
-      }
-      lastLayoutKey.current = key;
-      setSections(result.sections);
-      setLayoutVersion((value) => value + 1);
-      setNodes((current) =>
-        current.map((node) => {
-          const position = result.positions[node.id];
-          const size = result.sizes[node.id];
-          if (!position) {
-            return node;
-          }
-          return {
-            ...node,
-            position,
-            ...(size ? { style: { ...(node.style ?? {}), ...size } } : {}),
-          };
-        })
-      );
-    }, 160);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [sizeSignature, layoutRun, collapsed, data, setNodes]);
-
-  // Centre the viewport on one block at a given zoom. Uses React Flow's computed
-  // absolute position + measured size (handles nested folders), and reports
-  // false until the block has actually been measured.
-  const centerOn = useCallback(
-    (id: string, zoom: number, duration: number) => {
-      const internals = getInternalNode(id);
-      if (!internals) {
-        return false;
-      }
-      const { positionAbsolute, userNode } = internals.internals;
-      const width = userNode.measured?.width ?? 0;
-      const height = userNode.measured?.height ?? 0;
-      if (width === 0 || height === 0) {
-        return false;
-      }
-      setCenter(
-        positionAbsolute.x + width / 2,
-        positionAbsolute.y + height / 2,
-        { zoom, duration }
-      );
-      return true;
-    },
-    [getInternalNode, setCenter]
+  // Project edges carry no id; the canvas speaks in `DomainEdge`s.
+  const domainEdges = useMemo<DomainEdge[]>(
+    () =>
+      (data?.edges ?? []).map((edge) => ({
+        ...edge,
+        id: `${edge.source}->${edge.target}`,
+      })),
+    [data]
   );
 
-  // First view of a scope: snap the viewport onto the start file once its block
-  // has been measured. No animation here, and no `fitView` prop, so nothing
-  // competes with the reflow that is still settling.
-  const fitToken = `${root}|${scope}|${layoutVersion}`;
-  useEffect(() => {
-    if (!data || nodes.length === 0 || lastFit.current === fitToken) {
-      return;
-    }
-    let attempts = 0;
-    const timer = window.setInterval(() => {
-      attempts += 1;
-      // Wait a beat so the first coalesced reflow has settled the positions.
-      const focused =
-        data.entry && attempts >= 2 ? centerOn(data.entry, 1.1, 0) : false;
-      if (focused) {
-        lastFit.current = fitToken;
-        window.clearInterval(timer);
-      } else if (attempts >= 40) {
-        lastFit.current = fitToken;
-        fitView({ padding: 0.2, duration: 0 });
-        window.clearInterval(timer);
+  // Only edges that touch the focused files stay bright; an edge between two
+  // merely-highlighted files (e.g. two imports of the selection) dims.
+  const handleEdgeVisibility = useCallback(
+    (edge: DomainEdge, selected: unknown): EdgeVisibility => {
+      if (typeof selected !== "string" || !data) {
+        return "active";
       }
-    }, 150);
-    return () => window.clearInterval(timer);
-  }, [fitToken, sizeSignature, data, nodes.length, centerOn, fitView]);;
+      const focus = selectionInfo(data, selected)?.focus ?? null;
+      if (!focus) {
+        return "active";
+      }
+      return focus.has(edge.source) || focus.has(edge.target)
+        ? "active"
+        : "dim";
+    },
+    [data]
+  );
 
-  const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
-    setSelectedId(node.id);
-  }, []);
+  const canvas = useGraphCanvas({
+    nodes: decoratedNodes,
+    edges: domainEdges,
+    selection: activeSelectedId,
+    layoutKey: `${scope}|${collapsed.size}`,
+    fit: { token: `${root}|${scope}`, target: data?.entry ?? undefined },
+    edgeVisibility: handleEdgeVisibility,
+  });
 
   // Centre the viewport on an entry-point block (used by the Start chip).
   const focusEntry = useCallback(
     (id: string) => {
       setSelectedId(id);
-      centerOn(id, 1.2, 400);
+      canvas.centerOn(id, 1.2, 400);
     },
-    [centerOn]
+    [canvas.centerOn]
   );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -547,10 +322,23 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
   const handlePanelSearchPick = useCallback(
     (id: string) => {
       setSelectedId(id);
-      centerOn(id, 1.2, 400);
+      canvas.centerOn(id, 1.2, 400);
     },
-    [centerOn]
+    [canvas.centerOn]
   );
+
+  const handleOpenFromMenu = useCallback(() => {
+    const nodeId = canvas.menuNodeId;
+    if (!nodeId || nodeId === data?.root) {
+      canvas.closeMenu();
+      return;
+    }
+    const kind = data?.folders.some((folder) => folder.id === nodeId)
+      ? "folder"
+      : "code";
+    onNavigate({ kind, path: nodeId });
+    canvas.closeMenu();
+  }, [canvas.menuNodeId, canvas.closeMenu, data, onNavigate]);
 
   const selectedFile =
     data && activeSelectedId
@@ -628,16 +416,19 @@ className="relative h-full bg-bg"
         </div>
       )}
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
+        nodes={canvas.nodes}
+        edges={canvas.edges}
+        onNodesChange={canvas.onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={handleNodeClick}
+        onNodeClick={(_event, node) => setSelectedId(node.id)}
         onNodeDoubleClick={handleNodeDoubleClick}
-        onPaneClick={() => setSelectedId(null)}
-        onPaneContextMenu={openMenu}
-        onNodeContextMenu={(event, node) => openNodeMenu(event, node.id)}
+        onPaneClick={() => {
+          canvas.closeMenu();
+          setSelectedId(null);
+        }}
+        onPaneContextMenu={(event) => canvas.openMenu(event)}
+        onNodeContextMenu={(event, node) => canvas.openMenu(event, node.id)}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
@@ -649,10 +440,10 @@ className="relative h-full bg-bg"
 
         <button
           type="button"
-          onClick={() => setShowLines((value) => !value)}
+          onClick={canvas.toggleLines}
           className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
         >
-          {showLines ? "Hide lines" : "Show lines"}
+          {canvas.showLines ? "Hide lines" : "Show lines"}
         </button>
 
       {selectedFile && (
@@ -701,41 +492,41 @@ className="relative h-full bg-bg"
         </div>
       )}
 
-      {menu && (
+      {canvas.menu && (
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={closeMenu}
+            onClick={canvas.closeMenu}
             onContextMenu={(event) => {
               event.preventDefault();
-              closeMenu();
+              canvas.closeMenu();
             }}
           />
           <div
             className="fixed z-50 min-w-[160px] rounded border border-white/10 bg-panel py-1 shadow-lg"
-            style={{ left: menu.x, top: menu.y }}
+            style={{ left: canvas.menu.x, top: canvas.menu.y }}
           >
-            {menuNode && menuNode !== data?.root && (
+            {canvas.menuNodeId && canvas.menuNodeId !== data.root && (
               <button
                 type="button"
                 onClick={handleOpenFromMenu}
                 className="block w-full px-3 py-1.5 text-left text-xs text-mint hover:bg-mint/10"
               >
-                {data?.folders.some((folder) => folder.id === menuNode)
+                {data.folders.some((folder) => folder.id === canvas.menuNodeId)
                   ? "Open folder graph"
                   : "Open file graph"}
               </button>
             )}
             <button
               type="button"
-              onClick={handleRealign}
+              onClick={canvas.realign}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Re-align nodes
             </button>
             <button
               type="button"
-              onClick={handleFitView}
+              onClick={canvas.fitView}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Fit view
