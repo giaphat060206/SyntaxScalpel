@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { listDirectory, type FileEntry } from "../../shared/ipc";
 import { useSearch, type SearchItem } from "../shell/SearchContext";
 
 interface Props {
   root: string | null;
-  onOpenFolder: (root: string) => void;
   onSelectFile: (relPath: string) => void;
   onSelectFolder: (relPath: string) => void;
   selectedFile: string | null;
@@ -13,7 +11,6 @@ interface Props {
 
 export function FileExplorer({
   root,
-  onOpenFolder,
   onSelectFile,
   onSelectFolder,
   selectedFile,
@@ -86,14 +83,6 @@ export function FileExplorer({
     };
   }, [root]);
 
-  const pickFolder = useCallback(async () => {
-    const picked = await open({ directory: true, multiple: false });
-    if (typeof picked === "string") {
-      setError(null);
-      onOpenFolder(picked);
-    }
-  }, [onOpenFolder]);
-
   const renderEntries = (items: FileEntry[], depth: number) => (
     <ul className="list-none m-0 p-0">
       {items.map((entry) => {
@@ -144,13 +133,6 @@ export function FileExplorer({
 
   return (
     <div className="h-full bg-panel p-3 overflow-auto">
-      <button
-        type="button"
-        onClick={pickFolder}
-        className="mb-2 w-full rounded border border-accent/40 px-3 py-2 text-sm text-accent hover:bg-accent/10"
-      >
-        Open Folder
-      </button>
       <input
         ref={searchRef}
         value={query}

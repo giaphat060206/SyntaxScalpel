@@ -170,44 +170,38 @@ export default function App() {
             >
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 px-2 py-1">
-                  <span className="text-[10px] uppercase tracking-wider text-dimmed">
-                    Files
-                  </span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      title="Close folder (back to Welcome)"
-                      onClick={handleCloseFolder}
-                      className={iconButton}
+                  <button
+                    type="button"
+                    title="Close folder (back to Welcome)"
+                    onClick={handleCloseFolder}
+                    className={iconButton}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
                     >
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-3.5 w-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M3 10.5 12 3l9 7.5" />
-                        <path d="M5 9.5V21h14V9.5" />
-                      </svg>
-                    </button>
-                    <button
-                      type="button"
-                      title="Hide files"
-                      onClick={() => setExplorerCollapsed(true)}
-                      className={iconButton}
-                    >
-                      <Chevron direction="left" />
-                    </button>
-                  </div>
+                      <path d="M3 10.5 12 3l9 7.5" />
+                      <path d="M5 9.5V21h14V9.5" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Hide files"
+                    onClick={() => setExplorerCollapsed(true)}
+                    className={iconButton}
+                  >
+                    <Chevron direction="left" />
+                  </button>
                 </div>
                 <div className="min-h-0 flex-1">
                   <FileExplorer
                     root={root}
-                    onOpenFolder={handleOpenFolder}
                     onSelectFile={handleSelectFile}
                     onSelectFolder={handleSelectFolder}
                     selectedFile={

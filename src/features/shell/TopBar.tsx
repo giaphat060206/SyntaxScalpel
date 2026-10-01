@@ -1,5 +1,4 @@
 import { useState } from "react";
-import logo from "../../assets/SyntaxScalpel-darkTheme.png";
 
 interface Props {
   hasFolder: boolean;
@@ -33,8 +32,6 @@ export function TopBar({
 
   return (
     <div className="relative z-40 flex items-center gap-2 border-b border-white/10 bg-panel px-3 py-1 text-xs">
-      <img src={logo} alt="SyntaxScalpel" className="h-5 w-5 object-contain" />
-      <span className="font-mono text-accent">SyntaxScalpel</span>
       <button
         type="button"
         onClick={() => setMenuOpen((value) => !value)}
@@ -46,7 +43,7 @@ export function TopBar({
       {menuOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={closeAll} />
-          <div className="absolute left-24 top-full z-50 w-56 rounded border border-white/10 bg-panel py-1 shadow-lg">
+          <div className="absolute left-3 top-full z-50 w-56 rounded border border-white/10 bg-panel py-1 shadow-lg">
             <button
               type="button"
               onClick={() => {
