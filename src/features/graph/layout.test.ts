@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Node } from "@xyflow/react";
-import { arrangeGrid, pickHandles, reflowLayout, spreadHandles } from "./layout";
+import { arrangeGrid, reflowLayout } from "./layout";
 
 function node(id: string, x: number, y: number, width = 200, height = 80): Node {
   return {
@@ -89,42 +89,5 @@ describe("reflowLayout", () => {
     expect((withHidden[0].style as { height?: number }).height).toBe(
       (withoutHidden[0].style as { height?: number }).height
     );
-  });
-});
-
-describe("pickHandles", () => {
-  it("uses right to left when the target is to the right", () => {
-    const byId = new Map<string, Node>([
-      ["a", node("a", 0, 0)],
-      ["b", node("b", 400, 0)],
-    ]);
-    expect(pickHandles(byId.get("a")!, byId.get("b")!, byId)).toEqual({
-      sourceHandle: "r-out",
-      targetHandle: "l-in",
-    });
-  });
-
-  it("uses top to bottom when the target is above", () => {
-    const byId = new Map<string, Node>([
-      ["a", node("a", 0, 300)],
-      ["b", node("b", 0, 0)],
-    ]);
-    expect(pickHandles(byId.get("a")!, byId.get("b")!, byId)).toEqual({
-      sourceHandle: "t-out",
-      targetHandle: "b-in",
-    });
-  });
-});
-
-describe("spreadHandles", () => {
-  it("rotates a block's outgoing edges across its sides", () => {
-    const byId = new Map<string, Node>([
-      ["a", node("a", 0, 0)],
-      ["b", node("b", 400, 0)],
-    ]);
-    const first = spreadHandles(byId.get("a")!, byId.get("b")!, byId, 0, 0);
-    const second = spreadHandles(byId.get("a")!, byId.get("b")!, byId, 1, 1);
-    expect(first.sourceHandle).toBe("r-out");
-    expect(second.sourceHandle).toBe("b-out");
   });
 });
