@@ -24,13 +24,18 @@ pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut Api
         let Ok(text) = std::fs::read_to_string(path) else {
             continue;
         };
+        let file = relative_id(root, path);
         let Some(document) = parse_document(&text, &extension) else {
+            if looks_like_spec_source(&text) {
+                inventory
+                    .warnings
+                    .push(format!("{file}: could not parse OpenAPI document"));
+            }
             continue;
         };
         if !is_spec(&document) {
             continue;
         }
-        let file = relative_id(root, path);
         inventory.sources.push(ApiSource {
             kind: SOURCE_OPENAPI.to_string(),
             file: file.clone(),
@@ -39,6 +44,10 @@ pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut Api
             .endpoints
             .extend(extract_endpoints(&document, &file));
     }
+}
+
+fn looks_like_spec_source(text: &str) -> bool {
+    text.contains("openapi") || text.contains("swagger")
 }
 
 fn relative_id(root: &Path, path: &Path) -> String {

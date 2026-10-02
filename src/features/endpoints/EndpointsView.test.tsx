@@ -216,6 +216,33 @@ describe("EndpointsView", () => {
     expect(screen.getByText(/No endpoints match/)).toBeTruthy();
   });
 
+  it("lists the contributing API sources", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    expect(screen.getByText("Sources")).toBeTruthy();
+    expect(screen.getByText("openapi")).toBeTruthy();
+    expect(screen.getByText("openapi.yaml")).toBeTruthy();
+  });
+
+  it("shows warnings from sources that failed to parse while listing the rest", () => {
+    const warned: ApiInventory = {
+      ...inventory,
+      sources: [
+        { kind: "openapi", file: "openapi.yaml" },
+        { kind: "next-app-router", file: "app/api/users/route.ts" },
+      ],
+      warnings: ["broken.yaml: could not parse OpenAPI document"],
+    };
+    render(
+      <EndpointsView root="my-project" inventory={warned} onOpenHandler={vi.fn()} />
+    );
+    expect(screen.getByText("Warnings")).toBeTruthy();
+    expect(screen.getByText(/could not parse OpenAPI document/)).toBeTruthy();
+    expect(screen.getByText("app/api/users/route.ts")).toBeTruthy();
+    expect(screen.getAllByText("/pets").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("names the searched root when no API sources are found", () => {
     render(
       <EndpointsView

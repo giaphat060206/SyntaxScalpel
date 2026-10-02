@@ -83,6 +83,42 @@ export function EndpointsView({ root, inventory }: Props) {
             className="w-full rounded border border-white/10 bg-panel px-2 py-1 text-xs text-white/90 outline-none focus:border-accent/50"
           />
         </div>
+        {inventory.sources.length > 0 && (
+          <div className="border-b border-white/10 px-3 py-2">
+            <h3 className="m-0 mb-1 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+              Sources
+            </h3>
+            <ul className="m-0 list-none space-y-0.5 p-0">
+              {inventory.sources.map((source) => (
+                <li
+                  key={`${source.kind}:${source.file}`}
+                  className="flex items-center gap-2"
+                >
+                  <span className="rounded bg-white/10 px-1 font-mono text-[10px] text-accent">
+                    {source.kind}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-dimmed">
+                    {source.file}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {inventory.warnings.length > 0 && (
+          <div className="border-b border-white/10 bg-yellow-500/10 px-3 py-2">
+            <h3 className="m-0 mb-1 text-[10px] font-semibold uppercase tracking-wider text-yellow-300">
+              Warnings
+            </h3>
+            <ul className="m-0 list-none space-y-0.5 p-0">
+              {inventory.warnings.map((warning) => (
+                <li key={warning} className="text-yellow-300">
+                  {warning}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           {groups.length === 0 ? (
             <div className="p-3 text-dimmed">No endpoints match “{query}”.</div>
