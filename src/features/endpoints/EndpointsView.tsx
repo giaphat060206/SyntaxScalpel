@@ -40,7 +40,7 @@ function matches(endpoint: ApiEndpoint, query: string): boolean {
   );
 }
 
-export function EndpointsView({ root, inventory }: Props) {
+export function EndpointsView({ root, inventory, onOpenHandler }: Props) {
   const [query, setQuery] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
@@ -170,7 +170,7 @@ export function EndpointsView({ root, inventory }: Props) {
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {selected ? (
-          <EndpointDetail endpoint={selected} />
+          <EndpointDetail endpoint={selected} onOpenHandler={onOpenHandler} />
         ) : (
           <p className="text-dimmed">Select an endpoint to see its schemas.</p>
         )}
@@ -179,7 +179,14 @@ export function EndpointsView({ root, inventory }: Props) {
   );
 }
 
-function EndpointDetail({ endpoint }: { endpoint: ApiEndpoint }) {
+function EndpointDetail({
+  endpoint,
+  onOpenHandler,
+}: {
+  endpoint: ApiEndpoint;
+  onOpenHandler: (file: string, handler: string) => void;
+}) {
+  const handler = endpoint.handler;
   return (
     <div className="mx-auto max-w-3xl">
       <div className="flex items-center gap-2">
@@ -197,6 +204,16 @@ function EndpointDetail({ endpoint }: { endpoint: ApiEndpoint }) {
           {endpoint.fidelity}
         </span>
       </div>
+
+      {handler && (
+        <button
+          type="button"
+          onClick={() => onOpenHandler(endpoint.file, handler)}
+          className="mt-2 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        >
+          Open handler
+        </button>
+      )}
 
       {endpoint.summary && <p className="mt-2 text-white/85">{endpoint.summary}</p>}
       {endpoint.description && (

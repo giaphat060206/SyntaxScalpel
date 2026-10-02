@@ -15,7 +15,7 @@ import { EndpointsPane } from "../endpoints/EndpointsPane";
 type Location =
   | { kind: "empty" }
   | { kind: "folder"; path: string }
-  | { kind: "code"; path: string }
+  | { kind: "code"; path: string; select?: string }
   | { kind: "endpoints" };
 
 const iconButton =
@@ -76,7 +76,10 @@ export default function App() {
     setLocationState({ kind: "endpoints" });
   }, []);
 
-  const handleOpenHandler = useCallback(() => {}, []);
+  const handleOpenHandler = useCallback((file: string, handler: string) => {
+    setSelectedFile(file);
+    setLocationState({ kind: "code", path: file, select: handler });
+  }, []);
 
   const pickFolder = useCallback(async () => {
     const picked = await open({ directory: true, multiple: false });
@@ -255,7 +258,13 @@ export default function App() {
                 />
               </ErrorBoundary>
             ) : (
-              <ContentPane root={root} filePath={mainFile} />
+              <ContentPane
+                root={root}
+                filePath={mainFile}
+                initialSelectedId={
+                  location.kind === "code" ? location.select ?? null : null
+                }
+              />
             )}
           </div>
           {codeFile && docFile && docsCollapsed && (
