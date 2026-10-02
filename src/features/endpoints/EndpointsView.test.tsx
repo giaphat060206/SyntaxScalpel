@@ -42,16 +42,45 @@ const inventory: ApiInventory = {
       path: "/pets",
       tags: ["pets"],
       summary: "Create pet",
-      parameters: [],
+      parameters: [
+        {
+          name: "x-request-id",
+          in: "header",
+          required: true,
+          schema: { type: "string" },
+        },
+        {
+          name: "dryRun",
+          in: "query",
+          required: false,
+          schema: { type: "boolean" },
+        },
+      ],
       requestBody: {
         type: "object",
         required: ["name"],
-        properties: { name: { type: "string" } },
+        properties: {
+          name: { type: "string" },
+          status: { type: "string", enum: ["available", "pending", "sold"] },
+          tags: { type: "array", items: { type: "string" } },
+          owner: { oneOf: [{ type: "string" }, { type: "integer" }] },
+          meta: { nullable: true, properties: { created: { type: "string" } } },
+          category: { ref: "Category" },
+        },
       },
       responses: [
         {
           status: "201",
           schema: { type: "object", properties: { id: { type: "integer" } } },
+        },
+        {
+          status: "400",
+          schema: {
+            anyOf: [
+              { type: "string" },
+              { type: "object", properties: { message: { type: "string" } } },
+            ],
+          },
         },
       ],
       file: "api/openapi.yaml",
@@ -100,6 +129,61 @@ describe("EndpointsView", () => {
     expect(screen.getByText("full")).toBeTruthy();
   });
 
+  it("renders the request-body schema as a tree with properties and required markers", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText("Create pet"));
+    expect(screen.getByText("name").parentElement?.textContent).toContain("*");
+    expect(screen.getByText("status")).toBeTruthy();
+    expect(screen.getByText("tags")).toBeTruthy();
+    expect(screen.getByText("owner")).toBeTruthy();
+  });
+
+  it("renders enum values, array items, refs, and oneOf/anyOf alternatives", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText("Create pet"));
+    expect(screen.getByText(/available, pending, sold/)).toBeTruthy();
+    expect(screen.getByText("items")).toBeTruthy();
+    expect(screen.getByText("one of")).toBeTruthy();
+    expect(screen.getByText("any of")).toBeTruthy();
+    expect(screen.getByText("Category")).toBeTruthy();
+  });
+
+  it("renders nullable schemas", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText("Create pet"));
+    expect(screen.getByText(/object \| null/)).toBeTruthy();
+  });
+
+  it("renders parameters as a table with location and required flag", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText("Create pet"));
+    expect(screen.getByText("Name")).toBeTruthy();
+    expect(screen.getByText("In")).toBeTruthy();
+    expect(screen.getByText("Required")).toBeTruthy();
+    expect(screen.getByText("x-request-id")).toBeTruthy();
+    expect(screen.getByText("header")).toBeTruthy();
+    expect(screen.getByText("dryRun")).toBeTruthy();
+    expect(screen.getByText("yes")).toBeTruthy();
+    expect(screen.getByText("no")).toBeTruthy();
+  });
+
+  it("keys responses by status code with their schemas", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    fireEvent.click(screen.getByText("Create pet"));
+    expect(screen.getByText("201")).toBeTruthy();
+    expect(screen.getByText("400")).toBeTruthy();
+  });
+
   it("switches the detail pane when another endpoint is selected", () => {
     const { container } = render(
       <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
@@ -111,15 +195,25 @@ describe("EndpointsView", () => {
     expect(text).toContain("201");
   });
 
-  it("filters the list by method, path, or summary", () => {
+  it("filters the list by path, method, or summary and shows an empty message", () => {
     render(
       <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
     );
-    fireEvent.change(screen.getByPlaceholderText(/filter/i), {
-      target: { value: "health" },
-    });
+    const filter = screen.getByPlaceholderText(/filter/i);
+    fireEvent.change(filter, { target: { value: "health" } });
     expect(screen.queryByText("List pets")).toBeNull();
     expect(screen.getAllByText("Health check").length).toBeGreaterThan(0);
+
+    fireEvent.change(filter, { target: { value: "POST" } });
+    expect(screen.queryByText("Health check")).toBeNull();
+    expect(screen.getAllByText("Create pet").length).toBeGreaterThan(0);
+
+    fireEvent.change(filter, { target: { value: "/health" } });
+    expect(screen.getAllByText("Health check").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Create pet")).toBeNull();
+
+    fireEvent.change(filter, { target: { value: "nope" } });
+    expect(screen.getByText(/No endpoints match/)).toBeTruthy();
   });
 
   it("names the searched root when no API sources are found", () => {
