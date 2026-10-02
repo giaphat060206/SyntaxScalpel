@@ -22,9 +22,18 @@ pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut Api
             continue;
         };
         let Ok(source) = std::fs::read_to_string(path) else {
+            inventory
+                .warnings
+                .push(format!("{file}: could not read Next.js route handler"));
             continue;
         };
-        let endpoints = extract_endpoints(&source, &file, &api_path);
+        let Some(tree) = parse(&source, &file) else {
+            inventory
+                .warnings
+                .push(format!("{file}: could not parse Next.js route handler"));
+            continue;
+        };
+        let endpoints = extract_endpoints(&tree, &source, &file, &api_path);
         if endpoints.is_empty() {
             continue;
         }
@@ -81,10 +90,7 @@ fn render_segment(segment: &str) -> Option<String> {
     Some(segment.to_string())
 }
 
-fn extract_endpoints(source: &str, file: &str, api_path: &str) -> Vec<ApiEndpoint> {
-    let Some(tree) = parse(source, file) else {
-        return Vec::new();
-    };
+fn extract_endpoints(tree: &Tree, source: &str, file: &str, api_path: &str) -> Vec<ApiEndpoint> {
     let mut endpoints = Vec::new();
     let mut cursor = tree.root_node().walk();
     for child in tree.root_node().children(&mut cursor) {

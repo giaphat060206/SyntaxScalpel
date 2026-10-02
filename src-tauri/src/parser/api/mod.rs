@@ -86,13 +86,36 @@ pub fn analyze_api(root: &str) -> Result<ApiInventory, String> {
     Ok(inventory)
 }
 
+fn source_rank(kind: &str) -> u8 {
+    match kind {
+        SOURCE_OPENAPI => 3,
+        SOURCE_SWAGGER_JSDOC => 2,
+        SOURCE_NEXT => 1,
+        _ => 0,
+    }
+}
+
 fn finalize(inventory: &mut ApiInventory) {
     inventory
         .sources
         .sort_by(|a, b| a.file.cmp(&b.file).then(a.kind.cmp(&b.kind)));
-    inventory
-        .endpoints
-        .sort_by(|a, b| a.path.cmp(&b.path).then(a.method.cmp(&b.method)));
+    inventory.sources.dedup();
+    let mut merged: Vec<ApiEndpoint> = Vec::new();
+    for endpoint in inventory.endpoints.drain(..) {
+        match merged
+            .iter_mut()
+            .find(|existing| existing.method == endpoint.method && existing.path == endpoint.path)
+        {
+            Some(existing) => {
+                if source_rank(&endpoint.source_kind) > source_rank(&existing.source_kind) {
+                    *existing = endpoint;
+                }
+            }
+            None => merged.push(endpoint),
+        }
+    }
+    merged.sort_by(|a, b| a.path.cmp(&b.path).then(a.method.cmp(&b.method)));
+    inventory.endpoints = merged;
 }
 
 #[cfg(test)]
@@ -708,6 +731,123 @@ mod tests {
         assert_eq!(inventory.endpoints.len(), 1);
         assert_eq!(inventory.endpoints[0].path, "/pets");
         assert!(inventory.warnings.iter().any(|warning| warning.contains("pets.js")));
+    }
+
+    #[test]
+    fn merges_duplicate_endpoints_preferring_the_spec_file() {
+        let root = temp_project("merge-openapi");
+        std::fs::write(
+            root.join("openapi.json"),
+            r##"{
+                "openapi": "3.0.0",
+                "paths": {
+                    "/pets": {
+                        "get": {
+                            "summary": "From the spec",
+                            "responses": { "200": { "description": "ok" } }
+                        }
+                    }
+                }
+            }"##,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     summary: From the comment\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.method, "GET");
+        assert_eq!(endpoint.path, "/pets");
+        assert_eq!(endpoint.source_kind, "openapi");
+        assert_eq!(endpoint.fidelity, "full");
+        assert_eq!(endpoint.summary.as_deref(), Some("From the spec"));
+        assert_eq!(inventory.sources.len(), 2);
+    }
+
+    #[test]
+    fn merges_duplicate_endpoints_preferring_the_comment_over_the_convention() {
+        let root = temp_project("merge-jsdoc");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /api/pets:\n\
+              *   get:\n\
+              *     summary: From the comment\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("app/api/pets")).unwrap();
+        std::fs::write(
+            root.join("app/api/pets/route.ts"),
+            "export async function GET() {\n  return NextResponse.json({ ok: true });\n}\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.path, "/api/pets");
+        assert_eq!(endpoint.source_kind, "swagger-jsdoc");
+        assert_eq!(endpoint.fidelity, "full");
+        assert_eq!(endpoint.summary.as_deref(), Some("From the comment"));
+        assert_eq!(inventory.sources.len(), 2);
+    }
+
+    #[test]
+    fn warns_when_one_source_fails_to_parse_and_keeps_the_others() {
+        let root = temp_project("partial-failure");
+        std::fs::write(
+            root.join("broken.yaml"),
+            "openapi: \"3.0.0\npaths:\n  /pets:\n    get:\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("openapi.json"),
+            r##"{
+                "openapi": "3.0.0",
+                "paths": {
+                    "/health": {
+                        "get": {
+                            "summary": "Health",
+                            "responses": { "200": { "description": "ok" } }
+                        }
+                    }
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        assert_eq!(inventory.endpoints[0].path, "/health");
+        assert!(inventory
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("broken.yaml")));
+        assert!(inventory
+            .sources
+            .iter()
+            .any(|source| source.file == "openapi.json"));
     }
 
     #[test]
