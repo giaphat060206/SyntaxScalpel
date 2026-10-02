@@ -2,12 +2,15 @@ use std::path::Path;
 
 use serde::Serialize;
 
+mod next_app;
 mod openapi;
 mod swagger_jsdoc;
 
 pub const SOURCE_OPENAPI: &str = "openapi";
 pub const SOURCE_SWAGGER_JSDOC: &str = "swagger-jsdoc";
+pub const SOURCE_NEXT: &str = "next-app-router";
 pub const FIDELITY_FULL: &str = "full";
+pub const FIDELITY_HEURISTIC: &str = "heuristic";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +81,7 @@ pub fn analyze_api(root: &str) -> Result<ApiInventory, String> {
     };
     openapi::collect(root_path, &tree.collected, &mut inventory);
     swagger_jsdoc::collect(root_path, &tree.collected, &mut inventory);
+    next_app::collect(root_path, &tree.collected, &mut inventory);
     finalize(&mut inventory);
     Ok(inventory)
 }

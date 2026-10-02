@@ -3,7 +3,7 @@ use tree_sitter::{Node, Parser};
 use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
-fn grammar_for(file_path: &str) -> tree_sitter::Language {
+pub(crate) fn grammar_for(file_path: &str) -> tree_sitter::Language {
     if file_path.ends_with(".tsx") {
         tree_sitter_typescript::LANGUAGE_TSX.into()
     } else if file_path.ends_with(".ts") {
