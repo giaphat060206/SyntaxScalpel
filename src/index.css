@@ -11,6 +11,36 @@ html, body, #root {
   color: #FFFFFF;
 }
 
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #39424B transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #39424B;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #4B565F;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* React Flow controls: default white buttons + white currentColor icons made
    them invisible against the dark theme. Force the panel palette. */
 .react-flow__controls {
