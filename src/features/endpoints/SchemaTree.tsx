@@ -8,10 +8,10 @@ function isObject(value: Json): value is SchemaObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function typeName(schema: SchemaObject): string {
+function baseTypeName(schema: SchemaObject): string {
   const type = schema.type;
   if (typeof type === "string") {
-    return schema.nullable === true ? `${type} | null` : type;
+    return type;
   }
   if (Array.isArray(type)) {
     const names = type.filter((entry): entry is string => typeof entry === "string");
@@ -23,6 +23,17 @@ function typeName(schema: SchemaObject): string {
   if (Array.isArray(schema.anyOf)) return "any of";
   if (Array.isArray(schema.allOf)) return "all of";
   return "any";
+}
+
+function typeName(schema: SchemaObject): string {
+  const name = baseTypeName(schema);
+  if (schema.nullable === true) {
+    const parts = name.split("|").map((part) => part.trim());
+    if (!parts.includes("null")) {
+      return `${name} | null`;
+    }
+  }
+  return name;
 }
 
 export function SchemaTree({ schema }: { schema: Json; depth?: number }) {
