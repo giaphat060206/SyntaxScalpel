@@ -10,6 +10,13 @@ import { Welcome } from "./Welcome";
 import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
+import { EndpointsPane } from "../endpoints/EndpointsPane";
+
+type Location =
+  | { kind: "empty" }
+  | { kind: "folder"; path: string }
+  | { kind: "code"; path: string }
+  | { kind: "endpoints" };
 
 const iconButton =
   "flex h-6 w-6 items-center justify-center rounded-full border border-accent/40 bg-panel text-accent hover:bg-accent/10";
@@ -37,9 +44,7 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
 
 export default function App() {
   const [root, setRoot] = useState<string | null>(null);
-  const [location, setLocationState] = useState<
-    { kind: "empty" } | { kind: "folder"; path: string } | { kind: "code"; path: string }
-  >({ kind: "empty" });
+  const [location, setLocationState] = useState<Location>({ kind: "empty" });
   const [docFile, setDocFile] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
@@ -66,6 +71,12 @@ export default function App() {
     setSelectedFile(null);
     setLocationState({ kind: "empty" });
   }, []);
+
+  const handleOpenEndpoints = useCallback(() => {
+    setLocationState({ kind: "endpoints" });
+  }, []);
+
+  const handleOpenHandler = useCallback(() => {}, []);
 
   const pickFolder = useCallback(async () => {
     const picked = await open({ directory: true, multiple: false });
@@ -118,6 +129,7 @@ export default function App() {
 
   const showDocs = Boolean(codeFile && docFile && !docsCollapsed);
   const mainFile = showDocs ? codeFile : (codeFile ?? docFile);
+  const isPathLocation = location.kind === "folder" || location.kind === "code";
 
   return (
     <SearchProvider>
@@ -129,6 +141,7 @@ export default function App() {
           onOpenFile={handleOpenFile}
           onOpenRecent={handleOpenFolder}
           onCloseFolder={handleCloseFolder}
+          onOpenEndpoints={handleOpenEndpoints}
         />
         <div className="min-h-0 flex-1">
       {!root ? (
@@ -204,9 +217,7 @@ export default function App() {
                     root={root}
                     onSelectFile={handleSelectFile}
                     onSelectFolder={handleSelectFolder}
-                    selectedFile={
-                      location.kind === "empty" ? selectedFile : location.path
-                    }
+                    selectedFile={isPathLocation ? location.path : selectedFile}
                   />
                 </div>
               </div>
@@ -218,8 +229,8 @@ export default function App() {
         <Panel minSize="20%" className="relative">
           {location.kind !== "empty" && (
             <Breadcrumb
-              path={location.path}
-              kind={location.kind}
+              path={isPathLocation ? location.path : ""}
+              kind={location.kind === "code" ? "code" : "folder"}
               onNavigate={setLocationState}
             />
           )}
@@ -234,6 +245,13 @@ export default function App() {
                   root={root ?? ""}
                   scope={location.path}
                   onNavigate={setLocationState}
+                />
+              </ErrorBoundary>
+            ) : location.kind === "endpoints" ? (
+              <ErrorBoundary>
+                <EndpointsPane
+                  root={root ?? ""}
+                  onOpenHandler={handleOpenHandler}
                 />
               </ErrorBoundary>
             ) : (

@@ -1,5 +1,6 @@
 use crate::models::ParseResult;
 use crate::parser::{self, Language};
+use crate::parser::api::ApiInventory;
 use crate::parser::imports::ImportAnalysis;
 use crate::parser::project::ProjectGraph;
 
@@ -21,6 +22,11 @@ pub fn analyze_imports(path: String, root: String) -> Result<ImportAnalysis, Str
 #[tauri::command(rename_all = "camelCase")]
 pub fn project_graph(root: String, scope: String) -> Result<ProjectGraph, String> {
     crate::parser::project::project_graph(&root, &scope)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn analyze_api(root: String) -> Result<ApiInventory, String> {
+    crate::parser::api::analyze_api(&root)
 }
 
 #[cfg(test)]
@@ -60,6 +66,22 @@ mod tests {
     #[test]
     fn parse_python_command_errors_on_missing_file() {
         assert!(parse_python("C:/missing/a.py".into(), "C:/missing".into()).is_err());
+    }
+
+    #[test]
+    fn analyze_api_command_returns_inventory_for_a_folder() {
+        let dir = std::env::temp_dir().join(format!("scalpel-api-cmd-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("openapi.json"),
+            "{\"openapi\":\"3.0.0\",\"paths\":{\"/ping\":{\"get\":{\"responses\":{\"200\":{\"description\":\"ok\"}}}}}}",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        assert_eq!(inventory.endpoints[0].path, "/ping");
     }
 
     #[test]

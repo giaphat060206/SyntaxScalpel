@@ -82,3 +82,51 @@ export interface ProjectGraph {
   entry?: string;
   entries?: string[];
 }
+
+export type Json =
+  | null
+  | boolean
+  | number
+  | string
+  | Json[]
+  | { [key: string]: Json };
+
+export interface ApiSource {
+  kind: string;
+  file: string;
+}
+
+export interface ApiParameter {
+  name: string;
+  in: string;
+  required?: boolean;
+  description?: string;
+  schema?: Json;
+}
+
+export interface ApiResponse {
+  status: string;
+  schema?: Json;
+}
+
+export interface ApiEndpoint {
+  method: string;
+  path: string;
+  tags: string[];
+  summary?: string;
+  description?: string;
+  parameters: ApiParameter[];
+  requestBody?: Json;
+  responses: ApiResponse[];
+  handler?: string;
+  file: string;
+  line: number;
+  sourceKind: string;
+  fidelity: "full" | "heuristic";
+}
+
+export interface ApiInventory {
+  sources: ApiSource[];
+  endpoints: ApiEndpoint[];
+  warnings: string[];
+}

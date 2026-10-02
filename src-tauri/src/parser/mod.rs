@@ -1,5 +1,6 @@
 use crate::models::ParseResult;
 
+pub mod api;
 pub mod function_graph;
 pub mod imports;
 pub mod jsts;

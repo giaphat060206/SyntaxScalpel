@@ -53,6 +53,22 @@ _Avoid_: entry, start (for an Entry Point)
 A Leaf in a Project Graph standing for an Import target outside the Scope; no file lies behind it.
 _Avoid_: external target, dependency
 
+### API
+
+**Endpoint**:
+An HTTP operation an API Source documents — a method and a path, with its parameters, request body, and
+responses.
+_Avoid_: route, API call
+
+**API Source**:
+A place SyntaxScalpel reads API definitions from: an OpenAPI/Swagger spec file, an `@openapi` comment block, or a
+framework route convention. An API Source yields Endpoints.
+_Avoid_: API doc, spec (unqualified)
+
+**Fidelity**:
+How far an Endpoint's input/output detail can be trusted: `full` when a published contract supplies field-level
+schemas, `heuristic` when it is inferred from framework conventions.
+
 ### Dependencies
 
 **Import**:
