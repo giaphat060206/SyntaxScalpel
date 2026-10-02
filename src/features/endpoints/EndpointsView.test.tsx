@@ -103,6 +103,26 @@ const inventory: ApiInventory = {
   ],
 };
 
+const handlerInventory: ApiInventory = {
+  sources: [{ kind: "next-app-router", file: "app/api/pets/route.ts" }],
+  warnings: [],
+  endpoints: [
+    {
+      method: "GET",
+      path: "/api/pets",
+      tags: ["pets"],
+      summary: "List pets",
+      parameters: [],
+      responses: [{ status: "200" }],
+      handler: "GET",
+      file: "app/api/pets/route.ts",
+      line: 3,
+      sourceKind: "next-app-router",
+      fidelity: "heuristic",
+    },
+  ],
+};
+
 afterEach(cleanup);
 
 describe("EndpointsView", () => {
@@ -214,6 +234,26 @@ describe("EndpointsView", () => {
 
     fireEvent.change(filter, { target: { value: "nope" } });
     expect(screen.getByText(/No endpoints match/)).toBeTruthy();
+  });
+
+  it("calls onOpenHandler with the endpoint file and handler when Open handler is clicked", () => {
+    const onOpenHandler = vi.fn();
+    render(
+      <EndpointsView
+        root="my-project"
+        inventory={handlerInventory}
+        onOpenHandler={onOpenHandler}
+      />
+    );
+    fireEvent.click(screen.getByText("Open handler"));
+    expect(onOpenHandler).toHaveBeenCalledWith("app/api/pets/route.ts", "GET");
+  });
+
+  it("hides the Open handler action for endpoints without a handler", () => {
+    render(
+      <EndpointsView root="my-project" inventory={inventory} onOpenHandler={vi.fn()} />
+    );
+    expect(screen.queryByText("Open handler")).toBeNull();
   });
 
   it("names the searched root when no API sources are found", () => {

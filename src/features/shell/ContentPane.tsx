@@ -11,18 +11,23 @@ import { ErrorBoundary } from "../../shared/ErrorBoundary";
 interface Props {
   root: string | null;
   filePath: string | null;
+  initialSelectedId?: string | null;
 }
 
-export function ContentPane({ root, filePath }: Props) {
+export function ContentPane({
+  root,
+  filePath,
+  initialSelectedId = null,
+}: Props) {
   const state = useFileContent(root, filePath);
   const imports = useImports(root, filePath);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [codePaneOpen, setCodePaneOpen] = useState(true);
 
   useEffect(() => {
-    setSelectedId(null);
+    setSelectedId(initialSelectedId);
     setCodePaneOpen(true);
-  }, [filePath]);
+  }, [filePath, initialSelectedId]);
 
   const isGraph = state.status === "graph";
   const source = useSource(root, filePath, isGraph);
