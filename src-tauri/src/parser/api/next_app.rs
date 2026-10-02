@@ -4,10 +4,9 @@ use serde_json::{json, Map, Value};
 use tree_sitter::{Node, Tree};
 
 use super::{
-    ApiEndpoint, ApiInventory, ApiParameter, ApiResponse, ApiSource, FIDELITY_HEURISTIC, SOURCE_NEXT,
+    node_text, relative_id, ApiEndpoint, ApiInventory, ApiParameter, ApiResponse, ApiSource,
+    FIDELITY_HEURISTIC, METHODS, SOURCE_NEXT,
 };
-
-const METHODS: [&str; 7] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut ApiInventory) {
     for (path, _folder) in collected {
@@ -45,17 +44,11 @@ pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut Api
     }
 }
 
-fn relative_id(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
-}
-
 fn is_route_file(file_name: &str) -> bool {
     let Some((stem, extension)) = file_name.rsplit_once('.') else {
         return false;
     };
-    stem == "route" && matches!(extension.to_lowercase().as_str(), "ts" | "js" | "tsx" | "jsx")
+    stem == "route" && matches!(extension.to_lowercase().as_str(), "ts" | "js")
 }
 
 fn derive_path(file: &str) -> Option<String> {
@@ -105,43 +98,78 @@ fn extract_endpoints(tree: &Tree, source: &str, file: &str, api_path: &str) -> V
 }
 
 fn exported_handlers<'a>(export: Node<'a>, source: &str) -> Vec<(String, Node<'a>)> {
-    let mut handlers = Vec::new();
-    let Some(declaration) = export.child_by_field_name("declaration") else {
-        return handlers;
-    };
-    match declaration.kind() {
-        "function_declaration" | "generator_function_declaration" => {
-            if let Some(name) = declaration.child_by_field_name("name") {
-                let name = node_text(name, source);
-                if is_method(&name) {
-                    handlers.push((name, declaration));
+    let mut handlers: Vec<(String, Node<'a>)> = Vec::new();
+    if let Some(declaration) = export.child_by_field_name("declaration") {
+        match declaration.kind() {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(name) = declaration.child_by_field_name("name") {
+                    let name = node_text(name, source);
+                    if is_method(&name) {
+                        handlers.push((name, declaration));
+                    }
                 }
             }
-        }
-        "lexical_declaration" | "variable_declaration" => {
-            let mut cursor = declaration.walk();
-            for child in declaration.named_children(&mut cursor) {
-                if child.kind() != "variable_declarator" {
-                    continue;
+            "lexical_declaration" | "variable_declaration" => {
+                let mut cursor = declaration.walk();
+                for child in declaration.named_children(&mut cursor) {
+                    if child.kind() != "variable_declarator" {
+                        continue;
+                    }
+                    let Some(name) = child.child_by_field_name("name") else {
+                        continue;
+                    };
+                    let name = node_text(name, source);
+                    if !is_method(&name) {
+                        continue;
+                    }
+                    let handler = child.child_by_field_name("value").unwrap_or(child);
+                    handlers.push((name, handler));
                 }
-                let Some(name) = child.child_by_field_name("name") else {
-                    continue;
-                };
-                let name = node_text(name, source);
-                if !is_method(&name) {
-                    continue;
-                }
-                let handler = child.child_by_field_name("value").unwrap_or(child);
-                handlers.push((name, handler));
             }
+            _ => {}
         }
-        _ => {}
     }
+    let mut cursor = export.walk();
+    for child in export.named_children(&mut cursor) {
+        match child.kind() {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(name) = child.child_by_field_name("name") {
+                    let name = node_text(name, source);
+                    if is_method(&name) {
+                        handlers.push((name, child));
+                    }
+                }
+            }
+            "export_clause" => {
+                let mut inner = child.walk();
+                for specifier in child.named_children(&mut inner) {
+                    if specifier.kind() != "export_specifier" {
+                        continue;
+                    }
+                    let exported = specifier
+                        .child_by_field_name("alias")
+                        .or_else(|| specifier.child_by_field_name("name"));
+                    let Some(exported) = exported else {
+                        continue;
+                    };
+                    let name = node_text(exported, source);
+                    if is_method(&name) {
+                        handlers.push((name, exported));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    handlers.retain(|(_, node)| seen.insert((node.start_byte(), node.end_byte())));
     handlers
 }
 
 fn is_method(name: &str) -> bool {
-    METHODS.contains(&name)
+    METHODS
+        .iter()
+        .any(|method| method.eq_ignore_ascii_case(name))
 }
 
 fn build_endpoint(
@@ -162,6 +190,7 @@ fn build_endpoint(
         request_body,
         responses: infer_responses(handler, source),
         handler: Some(method.to_string()),
+        handler_file: None,
         file: file.to_string(),
         line: handler.start_position().row + 1,
         source_kind: SOURCE_NEXT.to_string(),
@@ -600,13 +629,6 @@ fn collect_descendants<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
     }
 }
 
-fn node_text(node: Node, source: &str) -> String {
-    source
-        .get(node.byte_range())
-        .unwrap_or("")
-        .to_string()
-}
-
 fn parse(source: &str, file_path: &str) -> Option<Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -796,6 +818,29 @@ mod tests {
         let inventory = analyze_api(&root.to_string_lossy()).unwrap();
         assert_eq!(inventory.endpoints.len(), 1);
         assert_eq!(inventory.endpoints[0].method, "GET");
+    }
+
+    #[test]
+    fn detects_reexported_and_default_handlers() {
+        let root = temp_project("export-forms");
+        write_route(
+            &root,
+            "app/api/pets/route.ts",
+            "import { GET, POST } from './handlers';\n\
+             export { GET };\n\
+             export { POST as POST };\n\
+             export default function PUT() {\n  return NextResponse.json({ ok: true });\n}\n",
+        );
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let methods: Vec<&str> = inventory
+            .endpoints
+            .iter()
+            .map(|endpoint| endpoint.method.as_str())
+            .collect();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"POST"));
+        assert!(methods.contains(&"PUT"));
     }
 
     #[test]

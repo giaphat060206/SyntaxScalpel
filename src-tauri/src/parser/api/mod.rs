@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use serde::Serialize;
+use tree_sitter::Node;
 
 mod next_app;
 mod openapi;
@@ -11,6 +12,21 @@ pub const SOURCE_SWAGGER_JSDOC: &str = "swagger-jsdoc";
 pub const SOURCE_NEXT: &str = "next-app-router";
 pub const FIDELITY_FULL: &str = "full";
 pub const FIDELITY_HEURISTIC: &str = "heuristic";
+
+pub(super) const METHODS: [&str; 7] =
+    ["get", "post", "put", "patch", "delete", "head", "options"];
+
+pub(super) fn relative_id(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+}
+
+pub(super) fn node_text(node: Node, source: &str) -> String {
+    node.utf8_text(source.as_bytes())
+        .unwrap_or("")
+        .to_string()
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +73,8 @@ pub struct ApiEndpoint {
     pub responses: Vec<ApiResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handler: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handler_file: Option<String>,
     pub file: String,
     pub line: usize,
     pub source_kind: String,
@@ -69,6 +87,8 @@ pub struct ApiInventory {
     pub sources: Vec<ApiSource>,
     pub endpoints: Vec<ApiEndpoint>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
 }
 
 pub fn analyze_api(root: &str) -> Result<ApiInventory, String> {
@@ -78,6 +98,7 @@ pub fn analyze_api(root: &str) -> Result<ApiInventory, String> {
         sources: Vec::new(),
         endpoints: Vec::new(),
         warnings: Vec::new(),
+        base: None,
     };
     openapi::collect(root_path, &tree.collected, &mut inventory);
     swagger_jsdoc::collect(root_path, &tree.collected, &mut inventory);
@@ -851,6 +872,176 @@ mod tests {
     }
 
     #[test]
+    fn exposes_server_base_and_relativizes_paths() {
+        let root = temp_project("server-base");
+        std::fs::write(
+            root.join("openapi.json"),
+            r##"{
+                "openapi": "3.0.0",
+                "servers": [{ "url": "https://api.example.com/v1" }],
+                "paths": {
+                    "/v1/pets": {
+                        "get": { "responses": { "200": { "description": "ok" } } }
+                    }
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.base.as_deref(), Some("/v1"));
+        assert_eq!(inventory.endpoints[0].path, "/pets");
+    }
+
+    #[test]
+    fn exposes_swagger_base_path() {
+        let root = temp_project("base-path");
+        std::fs::write(
+            root.join("swagger.yaml"),
+            "swagger: \"2.0\"\nbasePath: /api\npaths:\n  /api/health:\n    get:\n      responses:\n        \"200\":\n          description: ok\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.base.as_deref(), Some("/api"));
+        assert_eq!(inventory.endpoints[0].path, "/health");
+    }
+
+    #[test]
+    fn leaves_paths_without_a_declared_base() {
+        let root = temp_project("no-base");
+        std::fs::write(
+            root.join("openapi.json"),
+            r##"{
+                "openapi": "3.0.0",
+                "paths": {
+                    "/pets": {
+                        "get": { "responses": { "200": { "description": "ok" } } }
+                    }
+                }
+            }"##,
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert!(inventory.base.is_none());
+        assert_eq!(inventory.endpoints[0].path, "/pets");
+    }
+
+    #[test]
+    fn resolves_openapi_handler_to_the_controller_file() {
+        let root = temp_project("jsdoc-handler-file");
+        std::fs::create_dir_all(root.join("routes")).unwrap();
+        std::fs::create_dir_all(root.join("controllers")).unwrap();
+        std::fs::write(
+            root.join("controllers/pets.js"),
+            "const petsController = {\n  list(req, res) { return res.json([]); }\n};\nmodule.exports = petsController;\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("routes/pets.js"),
+            "const router = require('express').Router();\n\
+             const petsController = require('../controllers/pets');\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.handler.as_deref(), Some("petsController.list"));
+        assert_eq!(
+            endpoint.handler_file.as_deref(),
+            Some("controllers/pets.js")
+        );
+    }
+
+    #[test]
+    fn falls_back_when_the_controller_import_is_unresolved() {
+        let root = temp_project("jsdoc-handler-unresolved");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', missingController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.handler.as_deref(), Some("missingController.list"));
+        assert!(endpoint.handler_file.is_none());
+    }
+
+    #[test]
+    fn resolves_namespace_imports_to_named_exports() {
+        let root = temp_project("jsdoc-namespace");
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(
+            root.join("schemas/pet.js"),
+            "export const Pet = {\n\
+             \x20 type: 'object',\n\
+             \x20 properties: { name: { type: 'string' } }\n\
+             };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("swagger.js"),
+            "import * as schemas from './schemas/pet';\n\
+             const options = {\n\
+             \x20 definition: {\n\
+             \x20   openapi: '3.0.0',\n\
+             \x20   components: { schemas: { ...schemas } }\n\
+             \x20 }\n\
+             };\n\
+             export default swaggerJsdoc(options);\n",
+        )
+        .unwrap();
+        write_pets_route(&root);
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let body = inventory.endpoints[0].request_body.as_ref().unwrap();
+        assert_eq!(body["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn pairs_each_block_with_its_following_handler() {
+        let root = temp_project("jsdoc-adjacency");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             router.get('/before', before.list); /** @openapi\n\
+             \x20* /after:\n\
+             \x20*   get:\n\
+             \x20*     responses:\n\
+             \x20*       200:\n\
+             \x20*         description: ok\n\
+             \x20*/\n\
+             router.get('/after', after.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.path, "/after");
+        assert_eq!(endpoint.handler.as_deref(), Some("after.list"));
+    }
+
+    #[test]
     fn serializes_payload_as_camel_case() {
         let inventory = ApiInventory {
             sources: vec![ApiSource {
@@ -867,16 +1058,20 @@ mod tests {
                 request_body: None,
                 responses: vec![],
                 handler: None,
+                handler_file: Some("controllers/pets.js".into()),
                 file: "openapi.yaml".into(),
                 line: 0,
                 source_kind: "openapi".into(),
                 fidelity: "full".into(),
             }],
             warnings: vec![],
+            base: Some("/v1".into()),
         };
         let json = serde_json::to_value(inventory).unwrap();
         assert_eq!(json["sources"][0]["kind"], "openapi");
         assert_eq!(json["endpoints"][0]["sourceKind"], "openapi");
+        assert_eq!(json["endpoints"][0]["handlerFile"], "controllers/pets.js");
+        assert_eq!(json["base"], "/v1");
         assert_eq!(json["endpoints"][0]["requestBody"], serde_json::Value::Null);
     }
 }

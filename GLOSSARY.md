@@ -130,7 +130,7 @@ _Avoid_: constants (as a kind)
 
 **Location**:
 What the content pane currently shows.
-See: Folder Location, Code Location.
+See: Folder Location, Code Location, Endpoints Location.
 _Avoid_: code (unqualified, for a file kind)
 
 **Folder Location**:
@@ -138,6 +138,13 @@ A Location showing a Scope's Project Graph.
 
 **Code Location**:
 A Location showing a Code File's Function Graph.
+
+**Endpoints Location**:
+A Location showing the Endpoints found across a Scope's API Sources.
+
+**API Base**:
+The path prefix an API Source declares (an OpenAPI `servers` URL path or Swagger `basePath`); Endpoint paths are
+shown relative to it. Absent when the source declares none.
 
 **Code File**:
 A file parsed by a language module.

@@ -1,6 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type { ApiEndpoint, ApiInventory } from "../../shared/types";
-import { EmptyState } from "../../shared/StateViews";
 import { SchemaTree } from "./SchemaTree";
 
 interface Props {
@@ -64,13 +63,7 @@ export function EndpointsView({ root, inventory, onOpenHandler }: Props) {
     return visible[0] ?? null;
   }, [visible, selectedKey]);
 
-  if (inventory.endpoints.length === 0) {
-    return (
-      <EmptyState
-        message={`No API sources found in ${root}. Searched for OpenAPI/Swagger JSON and YAML documents.`}
-      />
-    );
-  }
+  const emptyMessage = `No API sources found in ${root}. Searched OpenAPI/Swagger documents, @openapi comment blocks, and Next.js route handlers.`;
 
   return (
     <div className="flex h-full bg-bg text-xs">
@@ -105,6 +98,16 @@ export function EndpointsView({ root, inventory, onOpenHandler }: Props) {
             </ul>
           </div>
         )}
+        {inventory.base && (
+          <div className="border-b border-white/10 px-3 py-2">
+            <h3 className="m-0 mb-1 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+              Base path
+            </h3>
+            <div className="font-mono text-[10px] text-white/80">
+              {inventory.base}
+            </div>
+          </div>
+        )}
         {inventory.warnings.length > 0 && (
           <div className="border-b border-white/10 bg-yellow-500/10 px-3 py-2">
             <h3 className="m-0 mb-1 text-[10px] font-semibold uppercase tracking-wider text-yellow-300">
@@ -120,7 +123,9 @@ export function EndpointsView({ root, inventory, onOpenHandler }: Props) {
           </div>
         )}
         <div className="min-h-0 flex-1 overflow-auto">
-          {groups.length === 0 ? (
+          {inventory.endpoints.length === 0 ? (
+            <div className="p-3 text-dimmed">{emptyMessage}</div>
+          ) : groups.length === 0 ? (
             <div className="p-3 text-dimmed">No endpoints match “{query}”.</div>
           ) : (
             groups.map((group) => (
@@ -208,7 +213,7 @@ function EndpointDetail({
       {handler && (
         <button
           type="button"
-          onClick={() => onOpenHandler(endpoint.file, handler)}
+          onClick={() => onOpenHandler(endpoint.handlerFile ?? endpoint.file, handler)}
           className="mt-2 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
         >
           Open handler

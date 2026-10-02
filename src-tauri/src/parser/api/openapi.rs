@@ -4,10 +4,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 
 use super::{
-    ApiEndpoint, ApiInventory, ApiParameter, ApiResponse, ApiSource, FIDELITY_FULL, SOURCE_OPENAPI,
+    relative_id, ApiEndpoint, ApiInventory, ApiParameter, ApiResponse, ApiSource, FIDELITY_FULL,
+    METHODS, SOURCE_OPENAPI,
 };
-
-const METHODS: [&str; 7] = ["get", "post", "put", "patch", "delete", "head", "options"];
 
 pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut ApiInventory) {
     for (path, _folder) in collected {
@@ -40,9 +39,17 @@ pub fn collect(root: &Path, collected: &[(PathBuf, String)], inventory: &mut Api
             kind: SOURCE_OPENAPI.to_string(),
             file: file.clone(),
         });
-        inventory
-            .endpoints
-            .extend(extract_endpoints(&document, &file));
+        let base = document_base(&document);
+        if inventory.base.is_none() {
+            inventory.base = base.clone();
+        }
+        let mut endpoints = extract_endpoints(&document, &file);
+        if let Some(base) = &base {
+            for endpoint in &mut endpoints {
+                endpoint.path = relative_path(&endpoint.path, base);
+            }
+        }
+        inventory.endpoints.extend(endpoints);
     }
 }
 
@@ -50,10 +57,46 @@ fn looks_like_spec_source(text: &str) -> bool {
     text.contains("openapi") || text.contains("swagger")
 }
 
-fn relative_id(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
+fn document_base(document: &Value) -> Option<String> {
+    if let Some(server) = document
+        .get("servers")
+        .and_then(Value::as_array)
+        .and_then(|servers| servers.first())
+        .and_then(|server| server.get("url"))
+        .and_then(Value::as_str)
+    {
+        let path = server_path(server);
+        if !path.is_empty() {
+            return Some(path);
+        }
+    }
+    document
+        .get("basePath")
+        .and_then(Value::as_str)
+        .map(|path| path.trim_end_matches('/').to_string())
+        .filter(|path| !path.is_empty())
+}
+
+fn server_path(url: &str) -> String {
+    let rest = match url.split_once("://") {
+        Some((_, rest)) => rest,
+        None => url.strip_prefix("//").unwrap_or(url),
+    };
+    let path = match rest.find('/') {
+        Some(index) => &rest[index..],
+        None => "",
+    };
+    path.trim_end_matches('/').to_string()
+}
+
+fn relative_path(path: &str, base: &str) -> String {
+    if path == base {
+        return "/".to_string();
+    }
+    match path.strip_prefix(base) {
+        Some(rest) if rest.starts_with('/') => rest.to_string(),
+        _ => path.to_string(),
+    }
 }
 
 fn parse_document(text: &str, extension: &str) -> Option<Value> {
@@ -64,8 +107,6 @@ fn parse_document(text: &str, extension: &str) -> Option<Value> {
     }
 }
 
-/// A spec document is any JSON/YAML object carrying an `openapi` or `swagger`
-/// version key; other config files are ignored.
 fn is_spec(document: &Value) -> bool {
     document.is_object()
         && (document.get("openapi").is_some() || document.get("swagger").is_some())
@@ -133,6 +174,7 @@ fn build_endpoint(
             .and_then(|body| request_body_schema(document, body)),
         responses: collect_responses(document, operation.get("responses")),
         handler: None,
+        handler_file: None,
         file: file.to_string(),
         line: 0,
         source_kind: SOURCE_OPENAPI.to_string(),
@@ -221,7 +263,6 @@ fn collect_responses(document: &Value, responses: Option<&Value>) -> Vec<ApiResp
     collected
 }
 
-/// Dereference a single node when it is a `$ref`, otherwise return it as-is.
 fn resolve_reference(document: &Value, value: &Value) -> Value {
     if let Some(pointer) = value.get("$ref").and_then(Value::as_str) {
         if let Some(target) = resolve_pointer(document, pointer) {
@@ -231,8 +272,6 @@ fn resolve_reference(document: &Value, value: &Value) -> Value {
     value.clone()
 }
 
-/// Expand every local `$ref` in `value` against `document`; an unresolvable ref
-/// becomes a `{ "ref": "<name>" }` placeholder, and cycles stop the same way.
 pub fn expand(document: &Value, value: &Value) -> Value {
     let mut active = HashSet::new();
     expand_inner(document, value, &mut active)

@@ -91,8 +91,12 @@ export type Json =
   | Json[]
   | { [key: string]: Json };
 
+export type ApiSourceKind = "openapi" | "swagger-jsdoc" | "next-app-router";
+
+export type ApiFidelity = "full" | "heuristic";
+
 export interface ApiSource {
-  kind: string;
+  kind: ApiSourceKind;
   file: string;
 }
 
@@ -119,14 +123,16 @@ export interface ApiEndpoint {
   requestBody?: Json;
   responses: ApiResponse[];
   handler?: string;
+  handlerFile?: string;
   file: string;
   line: number;
-  sourceKind: string;
-  fidelity: "full" | "heuristic";
+  sourceKind: ApiSourceKind;
+  fidelity: ApiFidelity;
 }
 
 export interface ApiInventory {
   sources: ApiSource[];
   endpoints: ApiEndpoint[];
   warnings: string[];
+  base?: string;
 }

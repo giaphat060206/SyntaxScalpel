@@ -294,4 +294,71 @@ describe("EndpointsView", () => {
     expect(screen.getByText(/No API sources found/)).toBeTruthy();
     expect(screen.getByText(/my-project/)).toBeTruthy();
   });
+
+  it("names every searched source in the empty state", () => {
+    render(
+      <EndpointsView
+        root="my-project"
+        inventory={{ sources: [], endpoints: [], warnings: [] }}
+        onOpenHandler={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/OpenAPI\/Swagger documents/)).toBeTruthy();
+    expect(screen.getByText(/@openapi comment blocks/)).toBeTruthy();
+    expect(screen.getByText(/Next\.js route handlers/)).toBeTruthy();
+  });
+
+  it("shows warnings when no endpoints survive", () => {
+    render(
+      <EndpointsView
+        root="my-project"
+        inventory={{
+          sources: [],
+          endpoints: [],
+          warnings: ["pets.js: could not parse @openapi block at line 3"],
+        }}
+        onOpenHandler={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Warnings")).toBeTruthy();
+    expect(screen.getByText(/could not parse @openapi block/)).toBeTruthy();
+  });
+
+  it("shows the API base path when one is declared", () => {
+    render(
+      <EndpointsView
+        root="my-project"
+        inventory={{ ...inventory, base: "/v1" }}
+        onOpenHandler={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Base path")).toBeTruthy();
+    expect(screen.getByText("/v1")).toBeTruthy();
+  });
+
+  it("opens the resolved handler file when the backend recorded one", () => {
+    const onOpenHandler = vi.fn();
+    const withHandlerFile: ApiInventory = {
+      ...handlerInventory,
+      endpoints: [
+        {
+          ...handlerInventory.endpoints[0],
+          handler: "petsController.list",
+          handlerFile: "controllers/pets.js",
+        },
+      ],
+    };
+    render(
+      <EndpointsView
+        root="my-project"
+        inventory={withHandlerFile}
+        onOpenHandler={onOpenHandler}
+      />
+    );
+    fireEvent.click(screen.getByText("Open handler"));
+    expect(onOpenHandler).toHaveBeenCalledWith(
+      "controllers/pets.js",
+      "petsController.list"
+    );
+  });
 });
