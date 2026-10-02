@@ -3,8 +3,10 @@ use std::path::Path;
 use serde::Serialize;
 
 mod openapi;
+mod swagger_jsdoc;
 
 pub const SOURCE_OPENAPI: &str = "openapi";
+pub const SOURCE_SWAGGER_JSDOC: &str = "swagger-jsdoc";
 pub const FIDELITY_FULL: &str = "full";
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -75,6 +77,7 @@ pub fn analyze_api(root: &str) -> Result<ApiInventory, String> {
         warnings: Vec::new(),
     };
     openapi::collect(root_path, &tree.collected, &mut inventory);
+    swagger_jsdoc::collect(root_path, &tree.collected, &mut inventory);
     finalize(&mut inventory);
     Ok(inventory)
 }
@@ -362,6 +365,345 @@ mod tests {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].description.as_deref(), Some("pet id"));
         assert_eq!(params[0].schema.as_ref().unwrap()["type"], "integer");
+    }
+
+    #[test]
+    fn detects_openapi_comment_block() {
+        let root = temp_project("jsdoc-block");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     tags:\n\
+              *       - pets\n\
+              *     summary: List pets\n\
+              *     responses:\n\
+              *       '200':\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(
+            inventory.sources,
+            vec![ApiSource {
+                kind: "swagger-jsdoc".into(),
+                file: "pets.js".into(),
+            }]
+        );
+        assert_eq!(inventory.endpoints.len(), 1);
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.method, "GET");
+        assert_eq!(endpoint.path, "/pets");
+        assert_eq!(endpoint.tags, vec!["pets".to_string()]);
+        assert_eq!(endpoint.summary.as_deref(), Some("List pets"));
+        assert_eq!(endpoint.file, "pets.js");
+        assert_eq!(endpoint.source_kind, "swagger-jsdoc");
+        assert_eq!(endpoint.fidelity, "full");
+    }
+
+    #[test]
+    fn pairs_openapi_blocks_with_adjacent_router_handlers() {
+        let root = temp_project("jsdoc-handler");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     summary: List pets\n\
+              *     responses:\n\
+              *       '200':\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   post:\n\
+              *     summary: Create pet\n\
+              *     responses:\n\
+              *       '201':\n\
+              *         description: created\n\
+              */\n\
+             router.post('/', petsController.create);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 2);
+        let get = inventory
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.method == "GET")
+            .unwrap();
+        assert_eq!(get.handler.as_deref(), Some("petsController.list"));
+        let post = inventory
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.method == "POST")
+            .unwrap();
+        assert_eq!(post.handler.as_deref(), Some("petsController.create"));
+    }
+
+    #[test]
+    fn resolves_component_refs_from_the_swagger_config() {
+        let root = temp_project("jsdoc-components");
+        std::fs::write(
+            root.join("swagger.js"),
+            "const options = {\n\
+             \x20 definition: {\n\
+             \x20   openapi: '3.0.0',\n\
+             \x20   components: {\n\
+             \x20     schemas: {\n\
+             \x20       Pet: {\n\
+             \x20         type: 'object',\n\
+             \x20         required: ['name'],\n\
+             \x20         properties: {\n\
+             \x20           name: { type: 'string' },\n\
+             \x20           tag: { type: 'string' }\n\
+             \x20         }\n\
+             \x20       }\n\
+             \x20     }\n\
+             \x20   }\n\
+             \x20 }\n\
+             };\n\
+             module.exports = swaggerJsdoc(options);\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   post:\n\
+              *     summary: Create pet\n\
+              *     requestBody:\n\
+              *       content:\n\
+              *         application/json:\n\
+              *           schema:\n\
+              *             $ref: '#/components/schemas/Pet'\n\
+              *     responses:\n\
+              *       '201':\n\
+              *         content:\n\
+              *           application/json:\n\
+              *             schema:\n\
+              *               $ref: '#/components/schemas/Pet'\n\
+              */\n\
+             router.post('/', petsController.create);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let endpoint = &inventory.endpoints[0];
+        let body = endpoint.request_body.as_ref().unwrap();
+        assert_eq!(body["type"], "object");
+        assert_eq!(body["properties"]["name"]["type"], "string");
+        assert_eq!(body["properties"]["tag"]["type"], "string");
+        let response = endpoint.responses[0].schema.as_ref().unwrap();
+        assert_eq!(response["properties"]["name"]["type"], "string");
+    }
+
+    fn write_pets_route(root: &std::path::Path) {
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   post:\n\
+              *     summary: Create pet\n\
+              *     requestBody:\n\
+              *       content:\n\
+              *         application/json:\n\
+              *           schema:\n\
+              *             $ref: '#/components/schemas/Pet'\n\
+              *     responses:\n\
+              *       '201':\n\
+              *         content:\n\
+              *           application/json:\n\
+              *             schema:\n\
+              *               $ref: '#/components/schemas/Pet'\n\
+              */\n\
+             router.post('/', petsController.create);\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn resolves_component_refs_from_imported_commonjs_modules() {
+        let root = temp_project("jsdoc-cjs");
+        std::fs::write(
+            root.join("schemas.js"),
+            "const Pet = {\n\
+             \x20 type: 'object',\n\
+             \x20 required: ['name'],\n\
+             \x20 properties: {\n\
+             \x20   name: { type: 'string' },\n\
+             \x20   tag: { type: 'string' }\n\
+             \x20 }\n\
+             };\n\
+             module.exports = { Pet };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("swagger.js"),
+            "const schemas = require('./schemas');\n\
+             const options = {\n\
+             \x20 definition: {\n\
+             \x20   openapi: '3.0.0',\n\
+             \x20   components: { schemas: { ...schemas } }\n\
+             \x20 }\n\
+             };\n\
+             module.exports = swaggerJsdoc(options);\n",
+        )
+        .unwrap();
+        write_pets_route(&root);
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let body = inventory.endpoints[0].request_body.as_ref().unwrap();
+        assert_eq!(body["properties"]["name"]["type"], "string");
+        assert_eq!(body["properties"]["tag"]["type"], "string");
+        assert_eq!(body["required"][0], "name");
+    }
+
+    #[test]
+    fn resolves_component_refs_from_imported_esm_modules() {
+        let root = temp_project("jsdoc-esm");
+        std::fs::create_dir_all(root.join("schemas")).unwrap();
+        std::fs::write(
+            root.join("schemas/pet.js"),
+            "export const Pet = {\n\
+             \x20 type: 'object',\n\
+             \x20 properties: { name: { type: 'string' } }\n\
+             };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("swagger.js"),
+            "import { Pet } from './schemas/pet';\n\
+             const options = {\n\
+             \x20 definition: {\n\
+             \x20   openapi: '3.0.0',\n\
+             \x20   components: { schemas: { Pet } }\n\
+             \x20 }\n\
+             };\n\
+             export default swaggerJsdoc(options);\n",
+        )
+        .unwrap();
+        write_pets_route(&root);
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        let body = inventory.endpoints[0].request_body.as_ref().unwrap();
+        assert_eq!(body["properties"]["name"]["type"], "string");
+    }
+
+    #[test]
+    fn degrades_unresolved_jsdoc_component_refs_to_their_name() {
+        let root = temp_project("jsdoc-unresolved");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     summary: List pets\n\
+              *     responses:\n\
+              *       '200':\n\
+              *         content:\n\
+              *           application/json:\n\
+              *             schema:\n\
+              *               $ref: '#/components/schemas/Missing'\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        let endpoint = &inventory.endpoints[0];
+        assert_eq!(endpoint.path, "/pets");
+        let schema = endpoint.responses[0].schema.as_ref().unwrap();
+        assert_eq!(schema["ref"], "Missing");
+    }
+
+    #[test]
+    fn ignores_js_files_without_openapi_blocks() {
+        let root = temp_project("jsdoc-none");
+        std::fs::write(
+            root.join("app.js"),
+            "const express = require('express');\nconst app = express();\napp.get('/', (req, res) => res.send('ok'));\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert!(inventory.sources.is_empty());
+        assert!(inventory.endpoints.is_empty());
+    }
+
+    #[test]
+    fn detects_openapi_blocks_in_typescript_files() {
+        let root = temp_project("jsdoc-ts");
+        std::fs::write(
+            root.join("pets.ts"),
+            "import { Router } from 'express';\n\
+             const router = Router();\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     tags: [pets]\n\
+              *     summary: List pets\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.sources[0].file, "pets.ts");
+        assert_eq!(inventory.endpoints.len(), 1);
+        assert_eq!(inventory.endpoints[0].responses[0].status, "200");
+        assert_eq!(inventory.endpoints[0].handler.as_deref(), Some("petsController.list"));
+    }
+
+    #[test]
+    fn warns_about_blocks_without_a_path_without_dropping_endpoints() {
+        let root = temp_project("jsdoc-warn");
+        std::fs::write(
+            root.join("pets.js"),
+            "const router = require('express').Router();\n\
+             /**\n\
+              * @openapi\n\
+              * not a path object\n\
+              */\n\
+             /**\n\
+              * @openapi\n\
+              * /pets:\n\
+              *   get:\n\
+              *     summary: List pets\n\
+              *     responses:\n\
+              *       200:\n\
+              *         description: ok\n\
+              */\n\
+             router.get('/', petsController.list);\n",
+        )
+        .unwrap();
+
+        let inventory = analyze_api(&root.to_string_lossy()).unwrap();
+        assert_eq!(inventory.endpoints.len(), 1);
+        assert_eq!(inventory.endpoints[0].path, "/pets");
+        assert!(inventory.warnings.iter().any(|warning| warning.contains("pets.js")));
     }
 
     #[test]

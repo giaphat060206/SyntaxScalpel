@@ -62,7 +62,7 @@ fn is_spec(document: &Value) -> bool {
         && (document.get("openapi").is_some() || document.get("swagger").is_some())
 }
 
-fn extract_endpoints(document: &Value, file: &str) -> Vec<ApiEndpoint> {
+pub(super) fn extract_endpoints(document: &Value, file: &str) -> Vec<ApiEndpoint> {
     let mut endpoints = Vec::new();
     let Some(paths) = document.get("paths").and_then(Value::as_object) else {
         return endpoints;
