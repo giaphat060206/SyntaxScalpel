@@ -47,6 +47,8 @@ export interface GraphCanvas {
   realign: () => void;
   fitView: () => void;
   centerOn: (id: string, zoom: number, duration: number) => boolean;
+  focusNode: (id: string) => boolean;
+  zoomToNode: (id: string) => boolean;
   lastRun: number;
 }
 
@@ -98,7 +100,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
   const [showLines, setShowLines] = useState(true);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
-  const { fitView, getInternalNode, setCenter } = useReactFlow();
+  const { fitView, fitBounds, getInternalNode, setCenter, getZoom } = useReactFlow();
   const lastLayoutKey = useRef("");
   const lastFit = useRef("");
   const lastBuiltSignature = useRef<string | null>(null);
@@ -229,6 +231,32 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     [getInternalNode, setCenter]
   );
 
+  const focusNode = useCallback(
+    (id: string) => centerOn(id, getZoom(), 400),
+    [centerOn, getZoom]
+  );
+
+  const zoomToNode = useCallback(
+    (id: string) => {
+      const internals = getInternalNode(id);
+      if (!internals) {
+        return false;
+      }
+      const { positionAbsolute, userNode } = internals.internals;
+      const width = userNode.measured?.width ?? 0;
+      const height = userNode.measured?.height ?? 0;
+      if (width === 0 || height === 0) {
+        return false;
+      }
+      fitBounds(
+        { x: positionAbsolute.x, y: positionAbsolute.y, width, height },
+        { padding: 0.2, duration: 400 }
+      );
+      return true;
+    },
+    [fitBounds, getInternalNode]
+  );
+
   const fitKey = `${fit.token}|${layoutVersion}`;
   useEffect(() => {
     if (lastFit.current === fitKey || nodes.length === 0) {
@@ -298,6 +326,8 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     realign,
     fitView: fitAll,
     centerOn,
+    focusNode,
+    zoomToNode,
     lastRun: layoutRun,
   };
 }

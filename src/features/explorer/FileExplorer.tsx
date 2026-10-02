@@ -6,6 +6,7 @@ interface Props {
   root: string | null;
   onSelectFile: (relPath: string) => void;
   onSelectFolder: (relPath: string) => void;
+  onFocusFolder: (relPath: string) => void;
   selectedFile: string | null;
 }
 
@@ -13,6 +14,7 @@ export function FileExplorer({
   root,
   onSelectFile,
   onSelectFolder,
+  onFocusFolder,
   selectedFile,
 }: Props) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -22,6 +24,7 @@ export function FileExplorer({
   const { items: searchItems, pick: pickSearch } = useSearch();
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const trimmedQuery = query.trim().toLowerCase();
   const results = trimmedQuery
@@ -41,7 +44,6 @@ export function FileExplorer({
       } else {
         pickSearch(item.id);
       }
-      setQuery("");
     },
     [onSelectFolder, onSelectFile, pickSearch]
   );
@@ -49,6 +51,35 @@ export function FileExplorer({
   useEffect(() => {
     setExpanded(new Set());
   }, [root]);
+
+  useEffect(() => {
+    if (!selectedFile) {
+      return;
+    }
+    const parts = selectedFile.split("/");
+    parts.pop();
+    let acc = "";
+    const ancestors: string[] = [];
+    for (const part of parts) {
+      acc = acc ? `${acc}/${part}` : part;
+      ancestors.push(acc);
+    }
+    if (ancestors.length === 0) {
+      return;
+    }
+    setExpanded((current) => {
+      const next = new Set(current);
+      ancestors.forEach((path) => next.add(path));
+      return next;
+    });
+  }, [selectedFile]);
+
+  useEffect(() => {
+    const el = containerRef.current?.querySelector('[data-selected="true"]');
+    if (el && typeof el.scrollIntoView === "function") {
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedFile, entries, expanded]);
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((current) => {
@@ -90,6 +121,7 @@ export function FileExplorer({
         return (
           <li key={entry.path}>
             <div
+              data-selected={selectedFile === entry.path ? "true" : undefined}
               className={
                 "flex items-center gap-1 rounded " +
                 (selectedFile === entry.path
@@ -116,9 +148,14 @@ export function FileExplorer({
                 type="button"
                 onClick={() =>
                   entry.isDir
-                    ? onSelectFolder(entry.path)
+                    ? onFocusFolder(entry.path)
                     : onSelectFile(entry.path)
                 }
+                onDoubleClick={() => {
+                  if (entry.isDir) {
+                    onSelectFolder(entry.path);
+                  }
+                }}
                 className="min-w-0 flex-1 truncate py-1 pr-2 text-left text-sm"
               >
                 {entry.name}
@@ -132,7 +169,7 @@ export function FileExplorer({
   );
 
   return (
-    <div className="h-full bg-panel p-3 overflow-auto">
+    <div ref={containerRef} className="h-full bg-panel p-3 overflow-auto">
       <input
         ref={searchRef}
         value={query}

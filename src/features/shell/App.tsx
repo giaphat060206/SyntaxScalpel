@@ -49,6 +49,7 @@ export default function App() {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [docsCollapsed, setDocsCollapsed] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<{ id: string; nonce: number } | null>(null);
   const { recents, remember, clear } = useRecents();
 
   const codeFile = location.kind === "code" ? location.path : null;
@@ -127,8 +128,24 @@ export default function App() {
 
   const handleSelectFolder = useCallback((relPath: string) => {
     setSelectedFile(relPath);
+    setFocusRequest(null);
     setLocationState({ kind: "folder", path: relPath });
   }, []);
+
+  const handleFocusFolder = useCallback(
+    (relPath: string) => {
+      const scope = location.kind === "folder" ? location.path : null;
+      const inScope =
+        scope !== null &&
+        (scope === "" ? relPath !== "" : relPath.startsWith(`${scope}/`));
+      if (inScope) {
+        setFocusRequest((prev) => ({ id: relPath, nonce: (prev?.nonce ?? 0) + 1 }));
+      } else {
+        handleSelectFolder(relPath);
+      }
+    },
+    [location, handleSelectFolder]
+  );
 
   const showDocs = Boolean(codeFile && docFile && !docsCollapsed);
   const mainFile = showDocs ? codeFile : (codeFile ?? docFile);
@@ -220,6 +237,7 @@ export default function App() {
                     root={root}
                     onSelectFile={handleSelectFile}
                     onSelectFolder={handleSelectFolder}
+                    onFocusFolder={handleFocusFolder}
                     selectedFile={isPathLocation ? location.path : selectedFile}
                   />
                 </div>
@@ -248,6 +266,7 @@ export default function App() {
                   root={root ?? ""}
                   scope={location.path}
                   onNavigate={setLocationState}
+                  focus={focusRequest ?? undefined}
                 />
               </ErrorBoundary>
             ) : location.kind === "endpoints" ? (

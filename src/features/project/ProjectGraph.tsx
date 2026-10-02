@@ -38,17 +38,18 @@ interface Props {
   root: string;
   scope: string;
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
+  focus?: { id: string; nonce: number };
 }
 
-export function ProjectGraph({ root, scope, onNavigate }: Props) {
+export function ProjectGraph({ root, scope, onNavigate, focus }: Props) {
   return (
     <ReactFlowProvider>
-      <ProjectGraphInner root={root} scope={scope} onNavigate={onNavigate} />
+      <ProjectGraphInner root={root} scope={scope} onNavigate={onNavigate} focus={focus} />
     </ReactFlowProvider>
   );
 }
 
-function ProjectGraphInner({ root, scope, onNavigate }: Props) {
+function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
   const [data, setData] = useState<ProjectGraphData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -150,6 +151,14 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
     edgeVisibility: handleEdgeVisibility,
   });
 
+  useEffect(() => {
+    if (!data || !focus) {
+      return;
+    }
+    setSelectedId(focus.id);
+    canvas.focusNode(focus.id);
+  }, [focus, data, canvas.focusNode]);
+
   // Centre the viewport on an entry-point block (used by the Start chip).
   const focusEntry = useCallback(
     (id: string) => {
@@ -226,13 +235,15 @@ function ProjectGraphInner({ root, scope, onNavigate }: Props) {
 
   useSearchRegistration(searchItems, handleSearchNavigate);
 
-  // Picking from the panel's own search box centres the view on the block.
+  // Picking from the panel's own search box zooms to the block and selects it.
   const handlePanelSearchPick = useCallback(
     (id: string) => {
       setSelectedId(id);
-      canvas.centerOn(id, 1.2, 400);
+      if (!canvas.zoomToNode(id)) {
+        canvas.fitView();
+      }
     },
-    [canvas.centerOn]
+    [canvas.fitView, canvas.zoomToNode]
   );
 
   const handleOpenFromMenu = useCallback(() => {

@@ -51,8 +51,6 @@ export function GraphSearch({ items, onPick, placeholder }: Props) {
 
   const pick = (id: string) => {
     onPick(id);
-    setOpen(false);
-    setQuery("");
   };
 
   if (!open) {

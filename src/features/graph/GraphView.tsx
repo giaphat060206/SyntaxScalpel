@@ -117,9 +117,11 @@ function GraphViewInner({
   const handleSearchPick = useCallback(
     (id: string) => {
       onSelect(id);
-      canvas.centerOn(id, 1.2, 400);
+      if (!canvas.zoomToNode(id)) {
+        canvas.fitView();
+      }
     },
-    [onSelect, canvas.centerOn]
+    [onSelect, canvas.fitView, canvas.zoomToNode]
   );
 
   // The explorer's search picks the same way (a function cannot be "opened").
