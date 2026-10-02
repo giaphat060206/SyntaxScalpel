@@ -62,7 +62,7 @@ export function SchemaTree({ schema }: { schema: Json; depth?: number }) {
   const enumValues = Array.isArray(schema.enum) ? schema.enum : null;
 
   return (
-    <span className="block">
+    <span>
       <span className="font-mono text-mint">{typeName(schema)}</span>
       {enumValues && (
         <span className="ml-1 text-white/60">
