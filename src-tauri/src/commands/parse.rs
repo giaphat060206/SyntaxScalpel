@@ -15,6 +15,11 @@ pub fn parse_js_ts(path: String, root: String) -> Result<ParseResult, String> {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn parse_rust(path: String, root: String) -> Result<ParseResult, String> {
+    parser::parse_file(&root, &path, Language::Rust)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn analyze_imports(path: String, root: String) -> Result<ImportAnalysis, String> {
     parser::imports::analyze(&path, &root)
 }
@@ -66,6 +71,30 @@ mod tests {
     #[test]
     fn parse_python_command_errors_on_missing_file() {
         assert!(parse_python("C:/missing/a.py".into(), "C:/missing".into()).is_err());
+    }
+
+    #[test]
+    fn parse_rust_command_reads_file_and_returns_graph() {
+        let dir = std::env::temp_dir().join(format!("scalpel-parse-rs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("a.rs"),
+            "fn one() -> i32 {\n    1\n}\n\nfn two() -> i32 {\n    one()\n}\n",
+        )
+        .unwrap();
+
+        let result = parse_rust("a.rs".to_string(), dir.to_string_lossy().to_string()).unwrap();
+        assert_eq!(result.nodes.len(), 2);
+        assert_eq!(result.nodes[0].name, "one");
+        assert_eq!(result.file_path, "a.rs");
+        assert_eq!(
+            result.edges,
+            vec![crate::models::GraphEdge {
+                source: "two".into(),
+                target: "one".into(),
+            }]
+        );
     }
 
     #[test]
