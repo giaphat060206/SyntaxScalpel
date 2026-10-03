@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ApiInventory,
+  FunctionGraph,
   ImportAnalysis,
   ParseResult,
   ProjectGraph,
@@ -35,6 +36,12 @@ export function parseJsTs(path: string, root: string): Promise<ParseResult> {
 
 export function parseRust(path: string, root: string): Promise<ParseResult> {
   return invoke<ParseResult>("parse_rust", { path, root });
+}
+
+/** One file's Function Graph plus the cross-file Definitions it reaches, and the
+ *  Import Analysis, from a single project scan. */
+export function functionGraph(path: string, root: string): Promise<FunctionGraph> {
+  return invoke<FunctionGraph>("function_graph", { path, root });
 }
 
 export function analyzeImports(path: string, root: string): Promise<ImportAnalysis> {

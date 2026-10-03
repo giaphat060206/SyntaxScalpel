@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult};
 use crate::parser::function_graph::{assemble, to_node, Def};
-use crate::parser::imports::{self, ImportAnalysis, Resolver};
+use crate::parser::imports::{self, ImportAnalysis, ImportEntry, ImporterEntry, Resolver};
 
 /// Joins an external file path to a Definition id declared inside it.
 pub const EXTERNAL_SEPARATOR: &str = "::";
@@ -33,6 +33,12 @@ pub struct FunctionGraph {
     pub imports: ImportAnalysis,
     pub externals: Vec<ExternalFile>,
     pub cross_edges: Vec<GraphEdge>,
+    /// Imports no external block drew anything for, so the Function Graph still
+    /// has to list them as text: specifiers that resolved to no project file,
+    /// and resolved ones whose Definitions nothing calls.
+    pub residual_imports: Vec<ImportEntry>,
+    /// Files importing this one that produced no block, for the same reason.
+    pub residual_imported_by: Vec<ImporterEntry>,
     /// True when the neighbourhood caps dropped something.
     pub truncated: bool,
 }
@@ -75,12 +81,21 @@ fn reachable(def: &Def, call: &str, imported: &BTreeSet<String>, used: &BTreeSet
     }
 }
 
+/// A file this file imports, and the import entry that reaches it.
+struct ImportTarget {
+    entry: usize,
+    path: String,
+    names: BTreeSet<String>,
+}
+
 struct Neighborhood {
     root: PathBuf,
     resolver: Resolver,
     cache: BTreeMap<String, FileDefs>,
     externals: BTreeMap<String, Vec<GraphNode>>,
     edges: BTreeSet<(String, String)>,
+    /// Import entries that put at least one Definition in a block.
+    drawn: BTreeSet<usize>,
     truncated: bool,
 }
 
@@ -96,25 +111,32 @@ impl Neighborhood {
         self.cache.get(path)
     }
 
-    /// Specifiers this file imports, grouped by the file they resolve to.
-    fn import_targets(&self, analysis: &ImportAnalysis, rel: &str) -> Vec<(String, BTreeSet<String>)> {
-        let mut targets: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-        for entry in &analysis.imports {
-            if entry.names.is_empty() {
+    /// Specifiers this file imports, one target per import entry they resolve to.
+    fn import_targets(&self, analysis: &ImportAnalysis, rel: &str) -> Vec<ImportTarget> {
+        let mut targets: Vec<ImportTarget> = Vec::new();
+        for (entry, import) in analysis.imports.iter().enumerate() {
+            if import.names.is_empty() {
                 continue;
             }
-            for resolved in self.resolver.resolve(entry, rel) {
-                let target = imports::relative(&self.root, &resolved.target);
-                if target == rel {
+            for resolved in self.resolver.resolve(import, rel) {
+                let path = imports::relative(&self.root, &resolved.target);
+                if path == rel {
                     continue;
                 }
-                targets
-                    .entry(target)
-                    .or_default()
-                    .extend(resolved.names.iter().cloned());
+                match targets
+                    .iter_mut()
+                    .find(|target| target.entry == entry && target.path == path)
+                {
+                    Some(target) => target.names.extend(resolved.names.iter().cloned()),
+                    None => targets.push(ImportTarget {
+                        entry,
+                        path,
+                        names: resolved.names.iter().cloned().collect(),
+                    }),
+                }
             }
         }
-        targets.into_iter().collect()
+        targets
     }
 
     /// The Definition in `target` that `call` reaches, as a node for this graph.
@@ -167,14 +189,16 @@ impl Neighborhood {
                 continue;
             }
             let used: BTreeSet<&str> = def.uses.iter().map(String::as_str).collect();
-            for (target, imported) in &targets {
+            for target in &targets {
                 for call in &def.calls {
-                    let Some(node) = self.external_node(target, call, imported, &used) else {
+                    let path = target.path.clone();
+                    let Some(node) = self.external_node(&path, call, &target.names, &used) else {
                         continue;
                     };
                     let external = node.id.clone();
                     self.push_edge(&def.id, &external);
-                    self.add_external(target, node);
+                    self.add_external(&path, node);
+                    self.drawn.insert(target.entry);
                 }
             }
         }
@@ -243,12 +267,13 @@ pub fn function_graph(root: &str, path: &str) -> Result<FunctionGraph, String> {
         cache: BTreeMap::new(),
         externals: BTreeMap::new(),
         edges: BTreeSet::new(),
+        drawn: BTreeSet::new(),
         truncated: false,
     };
     builder.collect_outgoing(&analysis, &rel, &defs);
     builder.collect_incoming(&analysis, &defs, &local_by_name);
 
-    let externals = builder
+    let externals: Vec<ExternalFile> = builder
         .externals
         .into_iter()
         .map(|(path, mut nodes)| {
@@ -256,10 +281,24 @@ pub fn function_graph(root: &str, path: &str) -> Result<FunctionGraph, String> {
             ExternalFile { path, nodes }
         })
         .collect();
-    let cross_edges = builder
+    let cross_edges: Vec<GraphEdge> = builder
         .edges
         .into_iter()
         .map(|(source, target)| GraphEdge { source, target })
+        .collect();
+    let residual_imports = analysis
+        .imports
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !builder.drawn.contains(index))
+        .map(|(_, entry)| entry.clone())
+        .collect();
+    let drawn_files: BTreeSet<&str> = externals.iter().map(|file| file.path.as_str()).collect();
+    let residual_imported_by = analysis
+        .imported_by
+        .iter()
+        .filter(|importer| !drawn_files.contains(importer.path.as_str()))
+        .cloned()
         .collect();
 
     Ok(FunctionGraph {
@@ -267,6 +306,8 @@ pub fn function_graph(root: &str, path: &str) -> Result<FunctionGraph, String> {
         imports: analysis,
         externals,
         cross_edges,
+        residual_imports,
+        residual_imported_by,
         truncated: builder.truncated,
     })
 }
@@ -436,8 +477,77 @@ mod tests {
     }
 
     #[test]
-    fn a_file_never_lists_itself_as_external() {
-        let root = temp_project("self");
+    fn a_drawn_import_leaves_no_text_residue() {
+        let root = temp_project("residual-drawn");
+        std::fs::write(root.join("file2.py"), "def func2():\n    return 1\n").unwrap();
+        std::fs::write(
+            root.join("file1.py"),
+            "from file2 import func2\n\ndef func1():\n    return func2()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+        assert_eq!(graph.externals.len(), 1);
+        // The entry became a block, so the text list must not repeat it.
+        assert!(graph.residual_imports.is_empty());
+    }
+
+    #[test]
+    fn imports_no_block_can_show_stay_as_text() {
+        let root = temp_project("residual-text");
+        std::fs::write(
+            root.join("file2.py"),
+            "def func2():\n    return 1\n\ndef other():\n    return 2\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("file1.py"),
+            "import os\nimport file2\nfrom file2 import other\n\ndef func1():\n    print(os.getcwd())\n    return 1\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+
+        // Nothing was reached, so every import is still listed as text.
+        assert!(graph.externals.is_empty());
+        let specifiers: Vec<&str> = graph
+            .residual_imports
+            .iter()
+            .map(|entry| entry.specifier.as_str())
+            .collect();
+        assert_eq!(specifiers, vec!["os", "file2", "file2"]);
+    }
+
+    #[test]
+    fn an_importer_that_drew_nothing_stays_in_the_text_residue() {
+        let root = temp_project("residual-importer");
+        std::fs::write(root.join("file1.py"), "def func1():\n    return 1\n").unwrap();
+        std::fs::write(
+            root.join("file2.py"),
+            "from file1 import func1\n\ndef func2():\n    return func1()\n",
+        )
+        .unwrap();
+        // Imports func1 but never calls it, so it draws no block.
+        std::fs::write(
+            root.join("file3.py"),
+            "from file1 import func1\n\ndef other():\n    return 2\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+        assert_eq!(graph.externals.len(), 1);
+        assert_eq!(graph.externals[0].path, "file2.py");
+
+        let residual: Vec<&str> = graph
+            .residual_imported_by
+            .iter()
+            .map(|importer| importer.path.as_str())
+            .collect();
+        assert_eq!(residual, vec!["file3.py"]);
+    }
+
+    #[test]
+    fn a_file_never_lists_itself_as_external() {        let root = temp_project("self");
         std::fs::write(
             root.join("solo.py"),
             "def one():\n    return 1\n\ndef two():\n    return one()\n",
@@ -546,5 +656,32 @@ mod tests {
             edge.source == "value_def"
                 && edge.target == "src/parser/function_graph.rs::collapse_whitespace"
         }));
+    }
+
+    /// The frontend reads these names directly, so a rename here would silently
+    /// stop rendering. Pin the serialized shape.
+    #[test]
+    fn the_payload_serializes_with_the_frontend_field_names() {
+        let root = temp_project("payload-shape");
+        std::fs::write(root.join("file2.py"), "def func2():\n    return 1\n").unwrap();
+        std::fs::write(
+            root.join("file1.py"),
+            "from file2 import func2\n\ndef func1():\n    return func2()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+        let json = serde_json::to_value(&graph).unwrap();
+
+        assert_eq!(json["file"]["filePath"], "file1.py");
+        assert_eq!(json["imports"]["imports"][0]["specifier"], "file2");
+        assert_eq!(json["externals"][0]["path"], "file2.py");
+        assert_eq!(json["externals"][0]["nodes"][0]["id"], "file2.py::func2");
+        assert_eq!(json["externals"][0]["nodes"][0]["parent"], "file2.py");
+        assert_eq!(json["crossEdges"][0]["source"], "func1");
+        assert_eq!(json["crossEdges"][0]["target"], "file2.py::func2");
+        assert_eq!(json["residualImports"], serde_json::json!([]));
+        assert_eq!(json["residualImportedBy"], serde_json::json!([]));
+        assert_eq!(json["truncated"], false);
     }
 }

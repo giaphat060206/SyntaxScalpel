@@ -10,7 +10,7 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { ImportAnalysis, ParseResult } from "../../shared/types";
+import type { FunctionGraph } from "../../shared/types";
 import { buildFunctionNodes, decorateFunctionNodes } from "./nodes";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
@@ -27,8 +27,7 @@ const nodeTypes = { scalpel: CodeNode };
 const edgeTypes = { elk: ElkEdge };
 
 interface Props {
-  result: ParseResult;
-  imports?: ImportAnalysis | null;
+  graph: FunctionGraph;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }
@@ -41,18 +40,10 @@ export function GraphView(props: Props) {
   );
 }
 
-function GraphViewInner({
-  result,
-  imports,
-  selectedId,
-  onSelect,
-}: Props) {
+function GraphViewInner({ graph, selectedId, onSelect }: Props) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  const builtNodes = useMemo(
-    () => buildFunctionNodes(result, imports),
-    [result, imports]
-  );
+  const builtNodes = useMemo(() => buildFunctionNodes(graph), [graph]);
 
   // A selection that does not match any node on the canvas (stale id from a
   // previous file) must not dim the whole graph.
@@ -64,18 +55,23 @@ function GraphViewInner({
     [selectedId, builtNodes]
   );
 
+  const allEdges = useMemo(
+    () => [...graph.file.edges, ...graph.crossEdges],
+    [graph]
+  );
+
   const decoratedNodes = useMemo(
-    () => decorateFunctionNodes(builtNodes, result.edges, activeSelectedId),
-    [builtNodes, result.edges, activeSelectedId]
+    () => decorateFunctionNodes(builtNodes, allEdges, activeSelectedId),
+    [builtNodes, allEdges, activeSelectedId]
   );
 
   const domainEdges = useMemo<DomainEdge[]>(
     () =>
-      result.edges.map((edge) => ({
+      allEdges.map((edge) => ({
         ...edge,
         id: `${edge.source}->${edge.target}`,
       })),
-    [result.edges]
+    [allEdges]
   );
 
   const handleEdgeVisibility = useCallback(
@@ -88,9 +84,8 @@ function GraphViewInner({
     []
   );
 
-  const layoutKey = `${result.filePath}|${
-    imports ? `${imports.imports.length}|${imports.importedBy.length}` : "none"
-  }`;
+  // External blocks belong in the key: a new neighbourhood is a new graph.
+  const layoutKey = `${graph.file.filePath}|${graph.externals.length}|${graph.crossEdges.length}`;
 
   const canvas = useGraphCanvas({
     nodes: decoratedNodes,
@@ -127,7 +122,7 @@ function GraphViewInner({
   // The explorer's search picks the same way (a function cannot be "opened").
   useSearchRegistration(searchItems, handleSearchPick);
 
-  if (result.nodes.length === 0) {
+  if (graph.file.nodes.length === 0) {
     return <EmptyState message="No functions detected" />;
   }
 
@@ -139,14 +134,14 @@ function GraphViewInner({
     ? (activeNode.data as CodeNodeData).node
     : undefined;
   const activeUses = activeGraph?.uses ?? [];
-  const activeImporters =
-    imports && activeGraph
-      ? imports.importedBy.filter((entry) => entry.names.includes(activeGraph.name))
-      : [];
-  const moduleImporters =
-    imports && activeGraph
-      ? imports.importedBy.filter((entry) => entry.names.length === 0)
-      : [];
+  const activeImporters = activeGraph
+    ? graph.imports.importedBy.filter((entry) =>
+        entry.names.includes(activeGraph.name)
+      )
+    : [];
+  const moduleImporters = activeGraph
+    ? graph.imports.importedBy.filter((entry) => entry.names.length === 0)
+    : [];
 
   return (
     <div
@@ -155,9 +150,18 @@ function GraphViewInner({
       // on our own menu), so only the custom menu below ever shows.
       onContextMenu={(event) => event.preventDefault()}
     >
-      {result.nodes.length > 5000 && (
-        <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded border border-yellow-500/40 bg-panel px-3 py-1 text-xs text-yellow-300">
-          Large file: {result.nodes.length} nodes — performance may degrade
+      {(graph.file.nodes.length > 5000 || graph.truncated) && (
+        <div className="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 flex-col items-center gap-1">
+          {graph.file.nodes.length > 5000 && (
+            <div className="rounded border border-yellow-500/40 bg-panel px-3 py-1 text-xs text-yellow-300">
+              Large file: {graph.file.nodes.length} nodes — performance may degrade
+            </div>
+          )}
+          {graph.truncated && (
+            <div className="rounded border border-yellow-500/40 bg-panel px-3 py-1 text-xs text-yellow-300">
+              Some cross-file definitions were left out of this graph
+            </div>
+          )}
         </div>
       )}
       <ReactFlow

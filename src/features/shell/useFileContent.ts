@@ -1,18 +1,18 @@
 import { useCallback } from "react";
-import type { ParseResult } from "../../shared/types";
-import { routeForExtension } from "../../shared/extensions";
-import { parseJsTs, parsePython, parseRust, readMarkdown } from "../../shared/ipc";
+import type { FunctionGraph } from "../../shared/types";
+import { isCodeRoute, routeForExtension } from "../../shared/extensions";
+import { functionGraph, readMarkdown } from "../../shared/ipc";
 import { useAsyncLoad } from "./useAsyncLoad";
 
 export type FileState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "graph"; result: ParseResult }
+  | { status: "graph"; graph: FunctionGraph }
   | { status: "markdown"; content: string };
 
 type FileContent =
-  | { status: "graph"; result: ParseResult }
+  | { status: "graph"; graph: FunctionGraph }
   | { status: "markdown"; content: string };
 
 export function useFileContent(
@@ -26,18 +26,15 @@ export function useFileContent(
     if (!root || !filePath) {
       throw new Error("Unsupported file type");
     }
-    switch (route) {
-      case "python":
-        return { status: "graph", result: await parsePython(filePath, root) };
-      case "jsts":
-        return { status: "graph", result: await parseJsTs(filePath, root) };
-      case "rust":
-        return { status: "graph", result: await parseRust(filePath, root) };
-      case "markdown":
-        return { status: "markdown", content: await readMarkdown(filePath, root) };
-      default:
-        throw new Error("Unsupported file type");
+    if (route === "markdown") {
+      return { status: "markdown", content: await readMarkdown(filePath, root) };
     }
+    if (isCodeRoute(route)) {
+      // One command covers every parsed language, and brings the cross-file
+      // neighbourhood and the Import Analysis with it.
+      return { status: "graph", graph: await functionGraph(filePath, root) };
+    }
+    throw new Error("Unsupported file type");
   }, [root, filePath, route]);
 
   const state = useAsyncLoad<FileContent>(

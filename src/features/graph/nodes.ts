@@ -1,9 +1,9 @@
 import type { Node } from "@xyflow/react";
 import type {
+  ExternalFile,
+  FunctionGraph,
   GraphEdge,
   GraphNode,
-  ImportAnalysis,
-  ParseResult,
   Position,
 } from "../../shared/types";
 import { colorForNode } from "./colors";
@@ -22,7 +22,7 @@ interface FlowNode {
   position: Position;
   parentId?: string;
   extent?: "parent";
-  data: { node: GraphNode };
+  data: { node: GraphNode; external?: "file" | "definition" };
   style?: { width: number; height: number };
 }
 
@@ -46,7 +46,12 @@ function graphNodeLines(node: GraphNode): string[] {
   ];
 }
 
-function flowNodes(result: ParseResult): FlowNode[] {
+function fileName(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? path : path.slice(slash + 1);
+}
+
+function flowNodes(result: FunctionGraph["file"]): FlowNode[] {
   const childrenOf = new Map<string, GraphNode[]>();
   for (const node of result.nodes) {
     if (!node.parent) continue;
@@ -88,61 +93,91 @@ function flowNodes(result: ParseResult): FlowNode[] {
   return nodes;
 }
 
-function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
-  if (!imports) {
-    return [];
-  }
-  const importLines = imports.imports.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.specifier}: ${entry.names.join(", ")}`
-      : entry.specifier
-  );
-  const importerLines = imports.importedBy.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.path}: ${entry.names.join(", ")}`
-      : entry.path
-  );
-
-  return [
-    {
-      id: IMPORTS_NODE_ID,
+/**
+ * One dashed block per file a Call Edge reaches, holding only the Definitions
+ * it reaches. The block is the single Container for those Definitions, so the
+ * canvas never nests deeper than the layout can render.
+ */
+function externalFlowNodes(externals: ExternalFile[]): FlowNode[] {
+  const nodes: FlowNode[] = [];
+  for (const file of externals) {
+    nodes.push({
+      id: file.path,
       type: "scalpel",
       position: { x: 0, y: 0 },
-      style: {
-        width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
-      },
-      draggable: false,
-      zIndex: 4,
       data: {
-        special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
-        color: colorForNode(IMPORTS_NODE_ID),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    },
-    {
-      id: IMPORTED_BY_NODE_ID,
-      type: "scalpel",
-      position: { x: 0, y: 300 },
-      style: {
-        width: naturalWidth([
-          `IMPORTED BY (${imports.importedBy.length})`,
-          ...importerLines,
-        ]),
-      },
-      draggable: false,
-      zIndex: 4,
-      data: {
-        special: {
-          title: `IMPORTED BY (${imports.importedBy.length})`,
-          lines: importerLines,
+        node: {
+          id: file.path,
+          kind: "class",
+          name: fileName(file.path),
+          params: [],
+          returns: [],
+          uses: [],
         },
-        color: colorForNode(IMPORTED_BY_NODE_ID),
+        external: "file",
+      },
+      style: { width: CLASS_WIDTH, height: 60 + METHOD_ROW * file.nodes.length },
+    });
+    file.nodes.forEach((definition, index) => {
+      nodes.push({
+        id: definition.id,
+        type: "scalpel",
+        parentId: file.path,
+        extent: "parent",
+        position: { x: 20, y: 76 + METHOD_ROW * index },
+        data: { node: definition, external: "definition" },
+      });
+    });
+  }
+  return nodes;
+}
+
+/**
+ * Imports and importers no dashed block could draw, so they stay readable as
+ * text. Each block is omitted entirely when there is nothing left to show.
+ */
+function specialFlowNodes(graph: FunctionGraph): Node[] {
+  const blocks: Node[] = [];
+  const add = (id: string, title: string, lines: string[]) => {
+    if (lines.length === 0) {
+      return;
+    }
+    blocks.push({
+      id,
+      type: "scalpel",
+      position: { x: 0, y: 0 },
+      style: { width: naturalWidth([title, ...lines]) },
+      draggable: false,
+      zIndex: 4,
+      data: {
+        special: { title, lines },
+        color: colorForNode(id),
         highlighted: false,
         dimmed: false,
       } satisfies CodeNodeData,
-    },
-  ];
+    });
+  };
+
+  add(
+    IMPORTS_NODE_ID,
+    `IMPORTS NOT DRAWN (${graph.residualImports.length})`,
+    graph.residualImports.map((entry) =>
+      entry.names.length > 0
+        ? `${entry.specifier}: ${entry.names.join(", ")}`
+        : entry.specifier
+    )
+  );
+  add(
+    IMPORTED_BY_NODE_ID,
+    `IMPORTERS NOT DRAWN (${graph.residualImportedBy.length})`,
+    graph.residualImportedBy.map((entry) =>
+      entry.names.length > 0
+        ? `${entry.path}: ${entry.names.join(", ")}`
+        : entry.path
+    )
+  );
+
+  return blocks;
 }
 
 function visibilityOf(id: string, edges: GraphEdge[], selectedId: string | null) {
@@ -169,6 +204,7 @@ function toFlowNode(node: FlowNode, endpointParents: Set<string>): Node {
     zIndex: node.data.node.kind === "class" ? 1 : 4,
     data: {
       node: node.data.node,
+      external: node.data.external,
       color: colorForNode(node.id),
       transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
       highlighted: false,
@@ -177,11 +213,8 @@ function toFlowNode(node: FlowNode, endpointParents: Set<string>): Node {
   };
 }
 
-export function buildFunctionNodes(
-  result: ParseResult,
-  imports: ImportAnalysis | null | undefined
-): Node[] {
-  const flow = flowNodes(result);
+export function buildFunctionNodes(graph: FunctionGraph): Node[] {
+  const flow = [...flowNodes(graph.file), ...externalFlowNodes(graph.externals)];
   const variables = flow.filter((node) => node.data.node.kind === "variable");
   const others = flow.filter((node) => node.data.node.kind !== "variable");
 
@@ -218,18 +251,23 @@ export function buildFunctionNodes(
     extent: "parent" as const,
   }));
 
+  // A Container holding an edge endpoint stays transparent so the line shows
+  // through it. The owning Container is the child's parentId, which is the only
+  // thing that identifies it for both in-file `Class.method` ids and the
+  // `path::Container.method` ids of external Definitions.
+  const parentOf = new Map(flow.map((node) => [node.id, node.parentId]));
   const endpointParents = new Set<string>();
-  for (const edge of result.edges) {
+  for (const edge of [...graph.file.edges, ...graph.crossEdges]) {
     for (const id of [edge.source, edge.target]) {
-      const dot = id.lastIndexOf(".");
-      if (dot > 0) {
-        endpointParents.add(id.slice(0, dot));
+      const parent = parentOf.get(id);
+      if (parent) {
+        endpointParents.add(parent);
       }
     }
   }
 
   return [
-    ...specialFlowNodes(imports),
+    ...specialFlowNodes(graph),
     ...constantsContainer,
     ...constantChildren,
     ...others.map((node) => toFlowNode(node, endpointParents)),

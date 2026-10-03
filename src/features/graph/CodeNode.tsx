@@ -34,6 +34,9 @@ export interface CodeNodeData extends Record<string, unknown> {
   color?: string;
   /** Container whose edges must stay visible through it. */
   transparent?: boolean;
+  /** Set on blocks drawn from another file: `file` for the dashed block itself,
+   *  `definition` for the Definitions it holds. */
+  external?: "file" | "definition";
   highlighted: boolean;
   dimmed: boolean;
 }
@@ -228,6 +231,8 @@ export function CodeNode({ data, selected }: NodeProps) {
 
   const callable = node.kind === "function" || node.kind === "method";
   const container = node.kind === "class";
+  const external = (data as CodeNodeData).external;
+  const externalFile = external === "file";
 
   return (
     <>
@@ -244,7 +249,7 @@ export function CodeNode({ data, selected }: NodeProps) {
           container && (data as CodeNodeData).transparent
             ? "bg-transparent"
             : "bg-panel"
-        } ${opacity}`}
+        } ${external ? "border-dashed" : ""} ${opacity}`}
         style={{ borderColor, boxShadow }}
       >
         {callable && edgeHandles}
@@ -267,12 +272,23 @@ export function CodeNode({ data, selected }: NodeProps) {
           </>
         )}
         <div className="mb-1 border-b border-white/10 pb-1">
-          <span className="text-[10px] uppercase tracking-wider text-dimmed">
-            {node.kind}
+          <span className="flex items-center justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-dimmed">
+              {externalFile ? "external file" : node.kind}
+            </span>
+            {externalFile && (
+              <span
+                className="rounded bg-white/10 px-1 text-[9px] uppercase tracking-wider text-dimmed"
+                title="Definitions reached from another file"
+              >
+                ext
+              </span>
+            )}
           </span>
           <div
             className="break-words font-mono text-sm"
             style={{ color }}
+            title={externalFile ? node.id : undefined}
           >
             {node.name}
           </div>

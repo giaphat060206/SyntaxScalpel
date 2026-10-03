@@ -5,7 +5,27 @@ import {
   IMPORTED_BY_NODE_ID,
   IMPORTS_NODE_ID,
 } from "./layout";
-import type { ParseResult } from "../../shared/types";
+import type { ExternalFile, FunctionGraph, ParseResult } from "../../shared/types";
+
+function graph(
+  file: ParseResult,
+  options: {
+    externals?: ExternalFile[];
+    crossEdges?: FunctionGraph["crossEdges"];
+    residualImports?: FunctionGraph["residualImports"];
+    residualImportedBy?: FunctionGraph["residualImportedBy"];
+  } = {}
+): FunctionGraph {
+  return {
+    file,
+    imports: { imports: [], importedBy: [] },
+    externals: options.externals ?? [],
+    crossEdges: options.crossEdges ?? [],
+    residualImports: options.residualImports ?? [],
+    residualImportedBy: options.residualImportedBy ?? [],
+    truncated: false,
+  };
+}
 
 const result: ParseResult = {
   filePath: "a.py",
@@ -18,41 +38,116 @@ const result: ParseResult = {
   edges: [{ source: "f", target: "Cls.m" }],
 };
 
+const externalFile: ExternalFile = {
+  path: "pkg/file2.py",
+  nodes: [
+    {
+      id: "pkg/file2.py::Thing.run",
+      kind: "method",
+      name: "run",
+      params: [],
+      returns: [],
+      uses: [],
+      startLine: 3,
+      endLine: 5,
+      parent: "pkg/file2.py",
+    },
+  ],
+};
+
 describe("buildFunctionNodes", () => {
   it("groups variables under a CONSTANTS container", () => {
-    const nodes = buildFunctionNodes(result, null);
+    const nodes = buildFunctionNodes(graph(result));
     const constants = nodes.find((n) => n.id === CONSTANTS_NODE_ID);
     expect(constants).toBeDefined();
     expect(nodes.find((n) => n.id === "V")?.parentId).toBe(CONSTANTS_NODE_ID);
   });
 
   it("marks classes owning an edge endpoint as transparent", () => {
-    const nodes = buildFunctionNodes(result, null);
+    const nodes = buildFunctionNodes(graph(result));
     expect((nodes.find((n) => n.id === "Cls")?.data as { transparent?: boolean }).transparent).toBe(true);
   });
 
-  it("appends IMPORTS and IMPORTED BY special blocks when analysis is present", () => {
-    const nodes = buildFunctionNodes(result, { imports: [], importedBy: [] });
+  it("omits the text blocks when every import was drawn", () => {
+    const nodes = buildFunctionNodes(graph(result));
+    expect(nodes.map((n) => n.id)).not.toContain(IMPORTS_NODE_ID);
+    expect(nodes.map((n) => n.id)).not.toContain(IMPORTED_BY_NODE_ID);
+  });
+
+  it("lists imports and importers no block could draw", () => {
+    const nodes = buildFunctionNodes(
+      graph(result, {
+        residualImports: [{ specifier: "os", names: [] }],
+        residualImportedBy: [{ path: "b.py", names: ["f"] }],
+      })
+    );
     expect(nodes.map((n) => n.id)).toContain(IMPORTS_NODE_ID);
     expect(nodes.map((n) => n.id)).toContain(IMPORTED_BY_NODE_ID);
   });
 
   it("makes method nodes children of their class with parent extent", () => {
-    const nodes = buildFunctionNodes(result, null);
+    const nodes = buildFunctionNodes(graph(result));
     const method = nodes.find((n) => n.id === "Cls.m");
     expect(method?.parentId).toBe("Cls");
     expect(method?.extent).toBe("parent");
   });
 
   it("sizes a class node to fit its methods", () => {
-    const nodes = buildFunctionNodes(result, null);
+    const nodes = buildFunctionNodes(graph(result));
     expect(nodes.find((n) => n.id === "Cls")?.style).toEqual({ width: 240, height: 150 });
+  });
+});
+
+describe("buildFunctionNodes for external files", () => {
+  it("draws a dashed block per file, holding only the reached definitions", () => {
+    const nodes = buildFunctionNodes(graph(result, { externals: [externalFile] }));
+    const block = nodes.find((n) => n.id === "pkg/file2.py");
+    expect(block).toBeDefined();
+    expect((block?.data as { external?: string }).external).toBe("file");
+    expect((block?.data as { node?: { name: string } }).node?.name).toBe("file2.py");
+
+    const definition = nodes.find((n) => n.id === "pkg/file2.py::Thing.run");
+    expect(definition?.parentId).toBe("pkg/file2.py");
+    expect(definition?.extent).toBe("parent");
+    expect((definition?.data as { external?: string }).external).toBe("definition");
+  });
+
+  it("keeps every external definition attached to a block that exists", () => {
+    const nodes = buildFunctionNodes(graph(result, { externals: [externalFile] }));
+    const ids = new Set(nodes.map((n) => n.id));
+    for (const node of nodes) {
+      if (node.parentId) {
+        expect(ids.has(node.parentId)).toBe(true);
+      }
+    }
+  });
+
+  it("marks an external block holding an edge endpoint transparent", () => {
+    const nodes = buildFunctionNodes(
+      graph(result, {
+        externals: [externalFile],
+        crossEdges: [{ source: "f", target: "pkg/file2.py::Thing.run" }],
+      })
+    );
+    const block = nodes.find((n) => n.id === "pkg/file2.py");
+    expect((block?.data as { transparent?: boolean }).transparent).toBe(true);
+  });
+
+  it("traces a cross-file edge", () => {
+    const g = graph(result, {
+      externals: [externalFile],
+      crossEdges: [{ source: "f", target: "pkg/file2.py::Thing.run" }],
+    });
+    const edges = [...g.file.edges, ...g.crossEdges];
+    const nodes = decorateFunctionNodes(buildFunctionNodes(g), edges, "f");
+    expect((nodes.find((n) => n.id === "pkg/file2.py::Thing.run")?.data as { highlighted: boolean }).highlighted).toBe(true);
   });
 });
 
 describe("decorateFunctionNodes", () => {
   it("highlights the 1-hop trace and dims the rest", () => {
-    const nodes = decorateFunctionNodes(buildFunctionNodes(result, null), result.edges, "f");
+    const g = graph(result);
+    const nodes = decorateFunctionNodes(buildFunctionNodes(g), g.file.edges, "f");
     expect((nodes.find((n) => n.id === "f")?.data as { highlighted: boolean }).highlighted).toBe(true);
     expect((nodes.find((n) => n.id === "Cls.m")?.data as { highlighted: boolean }).highlighted).toBe(true);
     expect((nodes.find((n) => n.id === "V")?.data as { dimmed: boolean }).dimmed).toBe(true);
@@ -97,20 +192,20 @@ const rustResult: ParseResult = {
 
 describe("buildFunctionNodes for a Rust payload", () => {
   it("renders every definition the backend sent", () => {
-    const ids = buildFunctionNodes(rustResult, null).map((node) => node.id);
+    const ids = buildFunctionNodes(graph(rustResult)).map((node) => node.id);
     for (const node of rustResult.nodes) {
       expect(ids).toContain(node.id);
     }
   });
 
   it("nests impl and module methods inside their containers", () => {
-    const nodes = buildFunctionNodes(rustResult, null);
+    const nodes = buildFunctionNodes(graph(rustResult));
     expect(nodes.find((n) => n.id === "Point.new")?.parentId).toBe("Point");
     expect(nodes.find((n) => n.id === "tests.inside")?.parentId).toBe("tests");
   });
 
   it("still groups Rust constants under the CONSTANTS container", () => {
-    const nodes = buildFunctionNodes(rustResult, null);
+    const nodes = buildFunctionNodes(graph(rustResult));
     expect(nodes.find((n) => n.id === "SCALE")?.parentId).toBe(CONSTANTS_NODE_ID);
   });
 });

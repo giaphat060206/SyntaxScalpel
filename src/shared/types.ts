@@ -45,6 +45,28 @@ export interface ImportAnalysis {
   importedBy: ImporterEntry[];
 }
 
+/** Definitions of another file that this file's Function Graph shows, because
+ *  a Call Edge reaches them. */
+export interface ExternalFile {
+  /** Project-relative path; also the id its dashed block gets on the canvas. */
+  path: string;
+  nodes: GraphNode[];
+}
+
+/** One file's Function Graph plus the one-hop neighbourhood reaching into other
+ *  files, and the Import Analysis the graph needs. */
+export interface FunctionGraph {
+  file: ParseResult;
+  imports: ImportAnalysis;
+  externals: ExternalFile[];
+  crossEdges: GraphEdge[];
+  /** Imports no external block drew anything for, so they stay text. */
+  residualImports: ImportEntry[];
+  /** Files importing this one that produced no block, for the same reason. */
+  residualImportedBy: ImporterEntry[];
+  truncated: boolean;
+}
+
 export interface ProjectFolder {
   id: string;
   name: string;

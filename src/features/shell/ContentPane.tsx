@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { GraphNode } from "../../shared/types";
 import { useFileContent } from "./useFileContent";
-import { useImports } from "./useImports";
 import { useSource } from "./useSource";
 import { GraphView } from "../graph/GraphView";
 import { MarkdownView } from "../markdown/MarkdownView";
@@ -14,13 +14,18 @@ interface Props {
   initialSelectedId?: string | null;
 }
 
+/** A selected Definition and the file it was declared in. */
+interface Selection {
+  node: GraphNode;
+  path: string;
+}
+
 export function ContentPane({
   root,
   filePath,
   initialSelectedId = null,
 }: Props) {
   const state = useFileContent(root, filePath);
-  const imports = useImports(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [codePaneOpen, setCodePaneOpen] = useState(true);
 
@@ -29,15 +34,28 @@ export function ContentPane({
     setCodePaneOpen(true);
   }, [filePath, initialSelectedId]);
 
-  const isGraph = state.status === "graph";
-  const source = useSource(root, filePath, isGraph);
+  const graph = state.status === "graph" ? state.graph : null;
 
-  const selectedNode = useMemo(() => {
-    if (!isGraph || !selectedId) {
+  // A Definition reached from another file still has a real line range, in that
+  // file; the dashed block standing for the file selects nothing to read.
+  const selected: Selection | undefined = useMemo(() => {
+    if (!graph || !selectedId) {
       return undefined;
     }
-    return state.result.nodes.find((node) => node.id === selectedId);
-  }, [isGraph, state, selectedId]);
+    const own = graph.file.nodes.find((node) => node.id === selectedId);
+    if (own) {
+      return { node: own, path: graph.file.filePath };
+    }
+    for (const file of graph.externals) {
+      const external = file.nodes.find((node) => node.id === selectedId);
+      if (external) {
+        return { node: external, path: file.path };
+      }
+    }
+    return undefined;
+  }, [graph, selectedId]);
+
+  const source = useSource(root, selected?.path ?? null, graph !== null);
 
   const handleSelect = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -60,20 +78,11 @@ export function ContentPane({
     return <MarkdownView content={state.content} />;
   }
 
-  const graph = (
-    <GraphView
-      result={state.result}
-      imports={imports}
-      selectedId={selectedId}
-      onSelect={handleSelect}
-    />
-  );
+  const selectedNode = selected?.node;
 
   const hasSection = Boolean(
-    source !== null &&
-      filePath !== null &&
-      selectedNode !== undefined &&
-      selectedNode.startLine !== undefined &&
+    selected !== undefined &&
+      selectedNode?.startLine !== undefined &&
       selectedNode.endLine !== undefined
   );
 
@@ -90,7 +99,11 @@ export function ContentPane({
           className="absolute bottom-0 left-0 top-0"
           style={{ right: codeOpen ? "45%" : 0 }}
         >
-          {graph}
+          <GraphView
+            graph={state.graph}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+          />
         </div>
       {hasSection && !codePaneOpen && (
         <button
@@ -106,7 +119,7 @@ export function ContentPane({
         <div className="absolute right-0 top-0 z-20 h-full w-[45%] border-l border-white/10">
           <CodeView
             code={source ?? ""}
-            filePath={filePath ?? ""}
+            filePath={selected?.path ?? ""}
             startLine={selectedNode?.startLine}
             endLine={selectedNode?.endLine}
             title={selectedNode?.name}
