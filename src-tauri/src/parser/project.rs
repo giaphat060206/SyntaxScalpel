@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::parser::imports::{extract_imports, resolve_import_targets, stem_index};
+use crate::parser::imports::{extract_imports, AliasMap, Resolver};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
@@ -42,6 +42,10 @@ pub struct ProjectFile {
     /// `"code"` for parsed languages, `"doc"` for markdown/config/text files.
     pub kind: String,
     pub imports: Vec<FileImport>,
+    /// True for a file outside the scope that some in-scope file imports; shown
+    /// so the import can still be drawn as an edge.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub external: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -65,10 +69,20 @@ pub struct ProjectGraph {
     pub entries: Vec<String>,
 }
 
-pub fn build_tree(
-    root: &Path,
-    scope_rel: &str,
-) -> Result<(ProjectGraph, Vec<(PathBuf, String)>), String> {
+/// A project's folder/file/edge graph plus the on-disk files it was built from.
+pub struct ScopeTree {
+    pub graph: ProjectGraph,
+    pub collected: Vec<(PathBuf, String)>,
+}
+
+/// A code file eligible to be an Entry Point, paired with its owning folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntryFile {
+    pub id: String,
+    pub folder_id: String,
+}
+
+pub fn build_tree(root: &Path, scope_rel: &str) -> Result<ScopeTree, String> {
     let scope_path = root.join(scope_rel);
     if !scope_path.is_dir() {
         return Err(format!("not a folder: {scope_rel}"));
@@ -117,7 +131,7 @@ pub fn build_tree(
     );
     graph.folders.sort_by(|a, b| a.depth.cmp(&b.depth).then(a.id.cmp(&b.id)));
     graph.files.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok((graph, collected))
+    Ok(ScopeTree { graph, collected })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -177,10 +191,17 @@ fn collect(
                 folder_id: folder_id.to_string(),
                 kind: kind.to_string(),
                 imports: Vec::new(),
+                external: false,
             });
             collected.push((path, folder_id.to_string()));
         }
     }
+}
+
+fn code_extension(path: &Path) -> bool {
+    path.extension()
+        .map(|ext| CODE_EXTENSIONS.contains(&ext.to_string_lossy().to_lowercase().as_str()))
+        .unwrap_or(false)
 }
 
 fn id_of(root: &Path, path: &Path, scope_id: &str) -> String {
@@ -198,7 +219,7 @@ fn id_of(root: &Path, path: &Path, scope_id: &str) -> String {
 /// Project graph for `scope_rel` inside `root`, including resolved fileâ†’file edges.
 pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String> {
     let root_path = Path::new(root);
-    let (mut graph, collected) = build_tree(root_path, scope_rel)?;
+    let ScopeTree { mut graph, collected } = build_tree(root_path, scope_rel)?;
 
     // Only parsed languages contribute import relationships; docs/config files
     // are shown but never parsed for imports, and imports resolve to code.
@@ -208,9 +229,10 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         .filter(|file| file.kind == "code")
         .map(|file| root_path.join(&file.id))
         .collect();
-    let index = stem_index(&code_paths);
+    let resolver = Resolver::new(root_path, &code_paths, AliasMap::load(root_path));
     let ids: std::collections::HashSet<String> =
         graph.files.iter().map(|file| file.id.clone()).collect();
+    let mut external_files: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for (path, _) in &collected {
         let id = id_of(root_path, path, &graph.root);
@@ -229,8 +251,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
         let mut imports = Vec::new();
         let mut edges = Vec::new();
         for entry in extract_imports(&source, &id) {
-            let targets =
-                resolve_import_targets(&entry.specifier, &entry.names, &id, root_path, &index);
+            let targets = resolver.resolve(&entry, &id);
             if targets.is_empty() {
                 imports.push(FileImport {
                     target_id: String::new(),
@@ -239,9 +260,32 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
                 });
                 continue;
             }
-            for (target_path, specifier, names) in targets {
-                let target_id = id_of(root_path, &target_path, &graph.root);
-                if ids.contains(&target_id) && target_id != id {
+            for resolved in targets {
+                let target_id = id_of(root_path, &resolved.target, &graph.root);
+                if target_id != id {
+                    if !ids.contains(&target_id) {
+                        // A file outside the scope: surface it as an external node
+                        // so the import still draws as an edge.
+                        if external_files.insert(target_id.clone()) {
+                            let external_kind = if code_extension(&resolved.target) {
+                                "code"
+                            } else {
+                                "doc"
+                            };
+                            graph.files.push(ProjectFile {
+                                id: target_id.clone(),
+                                name: resolved
+                                    .target
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().to_string())
+                                    .unwrap_or_else(|| target_id.clone()),
+                                folder_id: graph.root.clone(),
+                                kind: external_kind.to_string(),
+                                imports: Vec::new(),
+                                external: true,
+                            });
+                        }
+                    }
                     edges.push(ProjectEdge {
                         source: id.clone(),
                         target: target_id.clone(),
@@ -249,8 +293,8 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
                 }
                 imports.push(FileImport {
                     target_id,
-                    specifier,
-                    names,
+                    specifier: resolved.specifier,
+                    names: resolved.names,
                 });
             }
         }
@@ -267,11 +311,239 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
     });
     graph.edges.dedup_by(|a, b| a.source == b.source && a.target == b.target);
 
-    let entries = detect_entries(root_path, scope_rel, &graph);
+    // External files were appended while scanning imports; restore id order.
+    graph.files.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let entry_files: Vec<EntryFile> = graph
+        .files
+        .iter()
+        .filter(|file| file.kind == "code" && !file.external)
+        .map(|file| EntryFile {
+            id: file.id.clone(),
+            folder_id: file.folder_id.clone(),
+        })
+        .collect();
+    let folders: Vec<&str> = graph
+        .folders
+        .iter()
+        .map(|folder| folder.id.as_str())
+        .collect();
+    let entries = detect_entries(&entry_files, &folders, &graph.edges, &|path| {
+        std::fs::read_to_string(root_path.join(path)).ok()
+    });
     graph.entry = entries.first().cloned();
     graph.entries = entries;
+    promote_primary_entry(&mut graph);
+    Ok(graph)
+}
 
-    // Show the primary entry file first inside its own folder so it is easy to spot.
+/// Project-relative path for `name` inside `folder`; a root folder `"."` adds no prefix.
+fn scoped_path(folder: &str, name: &str) -> String {
+    if folder == "." || folder.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", folder.replace('\\', "/"), name)
+    }
+}
+
+/// Prefix for file ids found inside `folder` (empty at the root).
+fn folder_prefix(folder: &str) -> String {
+    if folder == "." || folder.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", folder.replace('\\', "/"))
+    }
+}
+
+/// Entry files named by a folder's own `index.html`.
+fn entry_by_html(
+    files: &[EntryFile],
+    folders: &[&str],
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut found = Vec::new();
+    for folder in folders {
+        let Some(html) = read(&scoped_path(folder, "index.html")) else {
+            continue;
+        };
+        let prefix = folder_prefix(folder);
+        for chunk in html.split("src=") {
+            let rest = chunk.trim_start();
+            let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else {
+                continue;
+            };
+            let Some(end) = rest[1..].find(quote) else {
+                continue;
+            };
+            let raw = &rest[1..1 + end];
+            if !(raw.ends_with(".js")
+                || raw.ends_with(".jsx")
+                || raw.ends_with(".ts")
+                || raw.ends_with(".tsx"))
+            {
+                continue;
+            }
+            let cleaned = raw.trim_start_matches("./").trim_start_matches('/');
+            let id = format!("{prefix}{cleaned}");
+            if files.iter().any(|file| file.id == id) {
+                found.push(id);
+            }
+        }
+    }
+    found
+}
+
+/// Python `if __name__ == "__main__":` guard (may be several scripts).
+fn entry_by_main_guard(
+    files: &[EntryFile],
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut guarded = Vec::new();
+    for file in files {
+        if let Some(source) = read(&file.id) {
+            if source.contains("__name__") && source.contains("__main__") {
+                guarded.push(file.id.clone());
+            }
+        }
+    }
+    guarded
+}
+
+/// Conventional file names, per folder, highest priority group first.
+fn entry_by_name(files: &[EntryFile], folders: &[&str]) -> Vec<String> {
+    const NAMES: [&str; 16] = [
+        "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "__main__.py", "app.py",
+        "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
+        "server.ts", "server.js",
+    ];
+    let mut named = Vec::new();
+    for folder in folders {
+        for name in NAMES {
+            let matches: Vec<String> = files
+                .iter()
+                .filter(|file| {
+                    file.folder_id == *folder && file.id.rsplit('/').next() == Some(name)
+                })
+                .map(|file| file.id.clone())
+                .collect();
+            if !matches.is_empty() {
+                named.extend(matches);
+                break;
+            }
+        }
+    }
+    named
+}
+
+/// Each folder's own `package.json` pointers (`main`/`module`/`scripts.start`).
+fn entry_by_package(
+    files: &[EntryFile],
+    folders: &[&str],
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut found = Vec::new();
+    for folder in folders {
+        let Some(text) = read(&scoped_path(folder, "package.json")) else {
+            continue;
+        };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let mut pointers: Vec<String> = Vec::new();
+        for key in ["main", "module"] {
+            if let Some(value) = json.get(key).and_then(|v| v.as_str()) {
+                pointers.push(value.to_string());
+            }
+        }
+        if let Some(start) = json
+            .get("scripts")
+            .and_then(|scripts| scripts.get("start"))
+            .and_then(|value| value.as_str())
+        {
+            pointers.push(start.to_string());
+        }
+        let prefix = folder_prefix(folder);
+        for pointer in pointers {
+            let cleaned = pointer
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .trim_start_matches("./");
+            for candidate in [
+                format!("{prefix}{cleaned}"),
+                format!("{prefix}{cleaned}.js"),
+                format!("{prefix}{cleaned}.ts"),
+                format!("{prefix}{cleaned}.tsx"),
+            ] {
+                if let Some(file) = files.iter().find(|file| file.id == candidate) {
+                    found.push(file.id.clone());
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Graph roots: nothing imports them, but they import something.
+fn entry_by_graph_root(files: &[EntryFile], edges: &[ProjectEdge]) -> Vec<String> {
+    let mut imported = std::collections::HashSet::new();
+    for edge in edges {
+        imported.insert(edge.target.clone());
+    }
+    let mut candidates: Vec<String> = files
+        .iter()
+        .filter(|file| {
+            !imported.contains(&file.id) && edges.iter().any(|edge| edge.source == file.id)
+        })
+        .map(|file| file.id.clone())
+        .collect();
+    candidates.sort();
+    candidates.into_iter().take(1).collect()
+}
+
+/// Entry-point candidates: conventions first, then graph roots.
+///
+/// Detection is **per folder** so a monorepo marks each package's own entry
+/// (`backend/server.js` and `frontend/main.jsx` both count); the first candidate
+/// is treated as the primary entry point. `read` returns project-relative file
+/// contents and is only consulted by the HTML, guard, and package tiers.
+pub fn detect_entries(
+    files: &[EntryFile],
+    folders: &[&str],
+    edges: &[ProjectEdge],
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let finish = |mut found: Vec<String>| -> Vec<String> {
+        found.sort();
+        found.dedup();
+        found
+    };
+
+    let html = entry_by_html(files, folders, read);
+    if !html.is_empty() {
+        return finish(html);
+    }
+
+    let guarded = entry_by_main_guard(files, read);
+    if !guarded.is_empty() {
+        return finish(guarded);
+    }
+
+    let named = entry_by_name(files, folders);
+    if !named.is_empty() {
+        return finish(named);
+    }
+
+    let packaged = entry_by_package(files, folders, read);
+    if !packaged.is_empty() {
+        return finish(packaged);
+    }
+
+    entry_by_graph_root(files, edges)
+}
+
+/// Show the primary entry file first inside its own folder so it is easy to spot.
+pub fn promote_primary_entry(graph: &mut ProjectGraph) {
     if let Some(entry) = graph.entry.clone() {
         graph.files.sort_by(|a, b| a.id.cmp(&b.id));
         if let Some(index) = graph.files.iter().position(|file| file.id == entry) {
@@ -285,153 +557,6 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
             graph.files.insert(insert_at, file);
         }
     }
-    Ok(graph)
-}
-
-/// Modules referenced by a web entry HTML (`index.html`'s module scripts).
-fn html_entry_points(root: &Path, scope_rel: &str, code: &[&ProjectFile]) -> Vec<String> {
-    let Ok(html) = std::fs::read_to_string(root.join(scope_rel).join("index.html")) else {
-        return Vec::new();
-    };
-    let prefix = if scope_rel.is_empty() {
-        String::new()
-    } else {
-        format!("{}/", scope_rel.replace('\\', "/"))
-    };
-    let mut found = Vec::new();
-    for chunk in html.split("src=") {
-        let rest = chunk.trim_start();
-        let Some(quote) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') else {
-            continue;
-        };
-        let Some(end) = rest[1..].find(quote) else {
-            continue;
-        };
-        let raw = &rest[1..1 + end];
-        if !(raw.ends_with(".js")
-            || raw.ends_with(".jsx")
-            || raw.ends_with(".ts")
-            || raw.ends_with(".tsx"))
-        {
-            continue;
-        }
-        let cleaned = raw.trim_start_matches("./").trim_start_matches('/');
-        let id = format!("{prefix}{cleaned}");
-        if code.iter().any(|file| file.id == id) {
-            found.push(id);
-        }
-    }
-    found
-}
-
-/// Entry-point candidates: conventions first (every match), then graph roots.
-/// The first candidate is treated as the primary entry point.
-fn detect_entries(root: &Path, scope_rel: &str, graph: &ProjectGraph) -> Vec<String> {
-    let code: Vec<&ProjectFile> = graph.files.iter().filter(|f| f.kind == "code").collect();
-    let finish = |mut found: Vec<String>| -> Vec<String> {
-        found.sort();
-        found.dedup();
-        found
-    };
-
-    // 1. A web entry HTML (`index.html`) points at its real module, which beats
-    //    any file-name convention (`index.js` is often just a barrel file).
-    let html_entries = html_entry_points(root, scope_rel, &code);
-    if !html_entries.is_empty() {
-        return finish(html_entries);
-    }
-
-    // 2. Python `if __name__ == "__main__":` guard (may be several scripts).
-    let mut guarded = Vec::new();
-    for file in &code {
-        if let Ok(source) = std::fs::read_to_string(root.join(&file.id)) {
-            if source.contains("__name__") && source.contains("__main__") {
-                guarded.push(file.id.clone());
-            }
-        }
-    }
-    if !guarded.is_empty() {
-        return finish(guarded);
-    }
-
-    // 3. Conventional file names, highest priority group first.
-    const NAMES: [&str; 16] = [
-        "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "__main__.py", "app.py",
-        "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
-        "server.ts", "server.js",
-    ];
-    for name in NAMES {
-        let matches: Vec<String> = code
-            .iter()
-            .filter(|file| file.id.rsplit('/').next() == Some(name))
-            .map(|file| file.id.clone())
-            .collect();
-        if !matches.is_empty() {
-            return finish(matches);
-        }
-    }
-
-    // 4. package.json main / module / scripts.start.
-    let scope_dir = root.join(scope_rel);
-    if let Ok(text) = std::fs::read_to_string(scope_dir.join("package.json")) {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-            let mut pointers: Vec<String> = Vec::new();
-            for key in ["main", "module"] {
-                if let Some(value) = json.get(key).and_then(|v| v.as_str()) {
-                    pointers.push(value.to_string());
-                }
-            }
-            if let Some(start) = json
-                .get("scripts")
-                .and_then(|scripts| scripts.get("start"))
-                .and_then(|value| value.as_str())
-            {
-                pointers.push(start.to_string());
-            }
-            let prefix = if scope_rel.is_empty() {
-                String::new()
-            } else {
-                format!("{}/", scope_rel.replace('\\', "/"))
-            };
-            let mut found = Vec::new();
-            for pointer in pointers {
-                let cleaned = pointer
-                    .split_whitespace()
-                    .last()
-                    .unwrap_or("")
-                    .trim_start_matches("./");
-                for candidate in [
-                    format!("{prefix}{cleaned}"),
-                    format!("{prefix}{cleaned}.js"),
-                    format!("{prefix}{cleaned}.ts"),
-                    format!("{prefix}{cleaned}.tsx"),
-                ] {
-                    if let Some(file) = code.iter().find(|file| file.id == candidate) {
-                        found.push(file.id.clone());
-                    }
-                }
-            }
-            if !found.is_empty() {
-                return finish(found);
-            }
-        }
-    }
-
-    // 4. Graph roots: nothing imports them, but they import something.
-    let mut imported = std::collections::HashSet::new();
-    for edge in &graph.edges {
-        imported.insert(edge.target.clone());
-    }
-    let mut candidates: Vec<String> = code
-        .iter()
-        .filter(|file| {
-            !imported.contains(&file.id)
-                && graph.edges.iter().any(|edge| edge.source == file.id)
-        })
-        .map(|file| file.id.clone())
-        .collect();
-    candidates.sort();
-    candidates.into_iter().take(1).collect()
 }
 
 #[cfg(test)]
@@ -457,7 +582,7 @@ mod tests {
         std::fs::write(root.join("data/loaders/io.py"), "").unwrap();
         std::fs::write(root.join("data/notes.txt"), "").unwrap();
 
-        let (graph, _) = build_tree(&root, "").unwrap();
+        let ScopeTree { graph, .. } = build_tree(&root, "").unwrap();
         let ids: Vec<&str> = graph.folders.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(ids, vec![".", "data", "data/loaders"]);
 
@@ -487,7 +612,7 @@ mod tests {
         std::fs::write(root.join("pkg/a.py"), "").unwrap();
         std::fs::write(root.join("outside.py"), "").unwrap();
 
-        let (graph, _) = build_tree(&root, "pkg").unwrap();
+        let ScopeTree { graph, .. } = build_tree(&root, "pkg").unwrap();
         assert_eq!(graph.root, "pkg");
         assert_eq!(graph.folders.len(), 1);
         assert_eq!(graph.folders[0].id, "pkg");
@@ -524,17 +649,33 @@ mod tests {
     }
 
     #[test]
-    fn drops_edges_whose_target_is_outside_the_scope() {
+    fn keeps_edges_to_outside_scope_targets_as_external_nodes() {
         let root = temp_project("outside-edge");
         std::fs::create_dir_all(root.join("pkg")).unwrap();
         std::fs::write(root.join("shared.py"), "VALUE = 1\n").unwrap();
         std::fs::write(root.join("pkg/use.py"), "from shared import VALUE\n").unwrap();
 
         let graph = project_graph(&root.to_string_lossy(), "pkg").unwrap();
-        assert!(graph.files.iter().all(|f| f.id == "pkg/use.py"));
-        assert!(graph.edges.is_empty());
-        let use_file = &graph.files[0];
+        let external = graph
+            .files
+            .iter()
+            .find(|file| file.id == "shared.py")
+            .expect("outside-scope target is surfaced");
+        assert!(external.external);
+        let use_file = graph
+            .files
+            .iter()
+            .find(|file| file.id == "pkg/use.py")
+            .unwrap();
+        assert!(!use_file.external);
         assert_eq!(use_file.imports[0].target_id, "shared.py");
+        assert_eq!(
+            graph.edges,
+            vec![ProjectEdge {
+                source: "pkg/use.py".into(),
+                target: "shared.py".into(),
+            }]
+        );
     }
 
     #[test]
@@ -595,6 +736,29 @@ mod tests {
     }
 
     #[test]
+    fn resolves_parent_directory_imports_with_dotted_file_names() {
+        let root = temp_project("parent-dir");
+        std::fs::create_dir_all(root.join("pkg/lib")).unwrap();
+        std::fs::create_dir_all(root.join("pkg/app")).unwrap();
+        std::fs::write(
+            root.join("pkg/lib/util.helpers.js"),
+            "export const util = {};\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pkg/app/main.entry.js"),
+            "import { util } from '../lib/util.helpers.js';\nexport const entry = util;\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == "pkg/app/main.entry.js"
+                && edge.target == "pkg/lib/util.helpers.js"
+        }));
+    }
+
+    #[test]
     fn resolves_any_dotted_file_name_not_just_one_example() {
         let root = temp_project("dotted-generic");
         std::fs::write(root.join("theme.dark.css"), "body {}\n").unwrap();
@@ -619,6 +783,44 @@ mod tests {
         assert!(targets.contains(&"data.min.js"));
         // Ordinary names keep resolving by extension replacement.
         assert!(targets.contains(&"utils.js"));
+    }
+
+    #[test]
+    fn detects_one_entry_per_folder_in_a_monorepo() {
+        let root = temp_project("monorepo-entries");
+        std::fs::create_dir_all(root.join("backend")).unwrap();
+        std::fs::create_dir_all(root.join("frontend")).unwrap();
+        std::fs::write(root.join("backend/server.js"), "const x = 1;\n").unwrap();
+        std::fs::write(root.join("frontend/main.jsx"), "const y = 2;\n").unwrap();
+        std::fs::write(root.join("backend/util.js"), "export const u = 1;\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph.entries.contains(&"backend/server.js".to_string()));
+        assert!(graph.entries.contains(&"frontend/main.jsx".to_string()));
+        assert_eq!(graph.entry.as_deref(), Some("backend/server.js"));
+    }
+
+    #[test]
+    fn resolves_tsconfig_path_aliases() {
+        let root = temp_project("alias");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(
+            root.join("tsconfig.json"),
+            "{\n  \"compilerOptions\": {\n    \"baseUrl\": \".\",\n    \"paths\": { \"@/*\": [\"src/*\"] }\n  }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/util.js"), "export const u = 1;\n").unwrap();
+        std::fs::write(
+            root.join("app.js"),
+            "import { u } from '@/util';\nexport const v = u;\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "app.js" && edge.target == "src/util.js"));
     }
 
     #[test]
@@ -659,6 +861,33 @@ mod tests {
 
         let graph = project_graph(&root.to_string_lossy(), "").unwrap();
         assert_eq!(graph.entry.as_deref(), Some("app.py"));
+    }
+
+    #[test]
+    fn detects_entry_by_guard_from_injected_reader() {
+        let files = vec![
+            EntryFile { id: "helpers.py".into(), folder_id: ".".into() },
+            EntryFile { id: "main.py".into(), folder_id: ".".into() },
+        ];
+        let read = |path: &str| -> Option<String> {
+            match path {
+                "main.py" => Some("if __name__ == \"__main__\":\n    pass\n".to_string()),
+                _ => Some(String::new()),
+            }
+        };
+        let entries = detect_entries(&files, &["."], &[], &read);
+        assert_eq!(entries, vec!["main.py".to_string()]);
+    }
+
+    #[test]
+    fn detects_name_entry_without_reading_files() {
+        let files = vec![
+            EntryFile { id: "zeta.py".into(), folder_id: ".".into() },
+            EntryFile { id: "app.py".into(), folder_id: ".".into() },
+        ];
+        let read = |_: &str| -> Option<String> { None };
+        let entries = detect_entries(&files, &["."], &[], &read);
+        assert_eq!(entries, vec!["app.py".to_string()]);
     }
 
     #[test]

@@ -22,6 +22,8 @@ export interface ProjectBlock {
   fileKind?: "code" | "doc";
   entry?: boolean;
   transparent?: boolean;
+  /** A file outside the current scope, shown because something imports it. */
+  external?: boolean;
 }
 
 export interface CodeNodeData extends Record<string, unknown> {
@@ -34,7 +36,6 @@ export interface CodeNodeData extends Record<string, unknown> {
   transparent?: boolean;
   highlighted: boolean;
   dimmed: boolean;
-  pinned?: boolean;
 }
 
 const handleClass =
@@ -160,8 +161,11 @@ export function CodeNode({ data, selected }: NodeProps) {
             <div className="text-dimmed">none</div>
           ) : (
             special.lines.map((line, index) => (
-              <div key={index} className="whitespace-pre-wrap break-words">
-                {line}
+              <div key={index} className="flex items-start gap-1">
+                <span className="shrink-0 text-accent/60">•</span>
+                <span className="min-w-0 whitespace-pre-wrap break-words">
+                  {line}
+                </span>
               </div>
             ))
           )}
@@ -194,6 +198,11 @@ export function CodeNode({ data, selected }: NodeProps) {
           {project.entry && (
             <span className="rounded bg-mint/20 px-1 text-[9px] uppercase tracking-wider text-mint">
               start
+            </span>
+          )}
+          {project.external && (
+            <span className="rounded bg-white/10 px-1 text-[9px] uppercase tracking-wider text-dimmed">
+              ext
             </span>
           )}
           {isFolder && (

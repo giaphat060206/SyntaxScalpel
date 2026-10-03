@@ -17,12 +17,12 @@ pub fn run() {
             greet,
             commands::fs_cmds::list_directory,
             commands::fs_cmds::read_markdown,
+            commands::fs_cmds::read_file,
             commands::parse::parse_python,
             commands::parse::parse_js_ts,
             commands::parse::analyze_imports,
             commands::parse::project_graph,
-            commands::layout::load_layout,
-            commands::layout::save_layout,
+            commands::parse::analyze_api,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

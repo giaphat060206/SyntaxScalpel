@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ApiInventory,
   ImportAnalysis,
-  LayoutMap,
   ParseResult,
   ProjectGraph,
 } from "./types";
@@ -21,6 +21,10 @@ export function readMarkdown(path: string, root: string): Promise<string> {
   return invoke<string>("read_markdown", { path, root });
 }
 
+export function readFile(path: string, root: string): Promise<string> {
+  return invoke<string>("read_file", { path, root });
+}
+
 export function parsePython(path: string, root: string): Promise<ParseResult> {
   return invoke<ParseResult>("parse_python", { path, root });
 }
@@ -37,14 +41,6 @@ export function projectGraph(root: string, scope: string): Promise<ProjectGraph>
   return invoke<ProjectGraph>("project_graph", { root, scope });
 }
 
-export function loadLayout(root: string, relPath: string): Promise<LayoutMap | null> {
-  return invoke<LayoutMap | null>("load_layout", { root, relPath });
-}
-
-export function saveLayout(
-  root: string,
-  relPath: string,
-  layout: LayoutMap
-): Promise<void> {
-  return invoke<void>("save_layout", { root, relPath, layout });
+export function analyzeApi(root: string): Promise<ApiInventory> {
+  return invoke<ApiInventory>("analyze_api", { root });
 }

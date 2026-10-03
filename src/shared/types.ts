@@ -12,9 +12,11 @@ export interface GraphNode {
   params: string[];
   returns: string[];
   uses?: string[];
+  /** 1-based inclusive line range of the definition in its file. */
+  startLine?: number;
+  endLine?: number;
   value?: string;
   parent?: string;
-  position?: Position;
 }
 
 export interface GraphEdge {
@@ -27,8 +29,6 @@ export interface ParseResult {
   edges: GraphEdge[];
   filePath: string;
 }
-
-export type LayoutMap = Record<string, Position>;
 
 export interface ImportEntry {
   specifier: string;
@@ -64,6 +64,8 @@ export interface ProjectFile {
   folderId: string;
   kind: "code" | "doc";
   imports: FileImport[];
+  /** True for a file outside the scope that an in-scope file imports. */
+  external?: boolean;
 }
 
 export interface ProjectEdge {
@@ -79,4 +81,58 @@ export interface ProjectGraph {
   truncated: boolean;
   entry?: string;
   entries?: string[];
+}
+
+export type Json =
+  | null
+  | boolean
+  | number
+  | string
+  | Json[]
+  | { [key: string]: Json };
+
+export type ApiSourceKind = "openapi" | "swagger-jsdoc" | "next-app-router";
+
+export type ApiFidelity = "full" | "heuristic";
+
+export interface ApiSource {
+  kind: ApiSourceKind;
+  file: string;
+}
+
+export interface ApiParameter {
+  name: string;
+  in: string;
+  required?: boolean;
+  description?: string;
+  schema?: Json;
+}
+
+export interface ApiResponse {
+  status: string;
+  schema?: Json;
+}
+
+export interface ApiEndpoint {
+  method: string;
+  path: string;
+  tags: string[];
+  summary?: string;
+  description?: string;
+  parameters: ApiParameter[];
+  requestBody?: Json;
+  responses: ApiResponse[];
+  handler?: string;
+  handlerFile?: string;
+  file: string;
+  line: number;
+  sourceKind: ApiSourceKind;
+  fidelity: ApiFidelity;
+}
+
+export interface ApiInventory {
+  sources: ApiSource[];
+  endpoints: ApiEndpoint[];
+  warnings: string[];
+  base?: string;
 }

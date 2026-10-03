@@ -21,89 +21,6 @@ export function nodeHeight(node: Node): number {
   return node.measured?.height ?? node.height ?? styleHeight ?? 96;
 }
 
-export function absolutePosition(node: Node, byId: Map<string, Node>): { x: number; y: number } {
-  if (node.parentId) {
-    const parent = byId.get(node.parentId);
-    if (parent) {
-      return {
-        x: parent.position.x + node.position.x,
-        y: parent.position.y + node.position.y,
-      };
-    }
-  }
-  return node.position;
-}
-
-/**
- * Pick the handles that face the other node so edges leave from the side
- * (right→left) when blocks are side by side, and top/bottom when stacked.
- */
-export function pickHandles(
-  source: Node,
-  target: Node,
-  byId: Map<string, Node>
-): { sourceHandle?: string; targetHandle?: string } {
-  const from = absolutePosition(source, byId);
-  const to = absolutePosition(target, byId);
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dx) > Math.abs(dy)) {
-    return dx > 0
-      ? { sourceHandle: "r-out", targetHandle: "l-in" }
-      : { sourceHandle: "l-out", targetHandle: "r-in" };
-  }
-  return dy > 0
-    ? { sourceHandle: "b-out", targetHandle: "t-in" }
-    : { sourceHandle: "t-out", targetHandle: "b-in" };
-}
-
-// Preferred handle order per direction: the first entry faces the other node,
-// the rest rotate to adjacent sides. The side facing *away* from the target is
-// excluded, so an edge never leaves backwards and loops (U-turn).
-const OUT_ORDER: Record<string, string[]> = {
-  right: ["r-out", "b-out", "t-out"],
-  left: ["l-out", "b-out", "t-out"],
-  down: ["b-out", "r-out", "l-out"],
-  up: ["t-out", "r-out", "l-out"],
-};
-const IN_ORDER: Record<string, string[]> = {
-  right: ["l-in", "t-in", "b-in"],
-  left: ["r-in", "t-in", "b-in"],
-  down: ["t-in", "l-in", "r-in"],
-  up: ["b-in", "l-in", "r-in"],
-};
-
-/**
- * Like `pickHandles`, but rotates through each block's four sides by edge index
- * so many edges into or out of one block do not all overlap on a single path.
- */
-export function spreadHandles(
-  source: Node,
-  target: Node,
-  byId: Map<string, Node>,
-  sourceIndex: number,
-  targetIndex: number
-): { sourceHandle: string; targetHandle: string } {
-  const from = absolutePosition(source, byId);
-  const to = absolutePosition(target, byId);
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const direction =
-    Math.abs(dx) > Math.abs(dy)
-      ? dx >= 0
-        ? "right"
-        : "left"
-      : dy >= 0
-        ? "down"
-        : "up";
-  const outs = OUT_ORDER[direction];
-  const ins = IN_ORDER[direction];
-  return {
-    sourceHandle: outs[sourceIndex % outs.length],
-    targetHandle: ins[targetIndex % ins.length],
-  };
-}
-
 /**
  * Near-square grid positions for a set of nodes: 9 -> 3x3, 10 -> 3 cols x 4
  * rows, 16 -> 4x4. Column widths come from each column's widest block.
@@ -157,7 +74,7 @@ export function arrangeGrid(
 
 /**
  * Stack a class node's methods by their real heights and give the class the
- * matching height, then stack top-level nodes that the user has not pinned.
+ * matching height, then grid the top-level nodes.
  * Converges: returns the same array reference when nothing needs to change.
  */
 export function reflowLayout(current: Node[]): Node[] {
@@ -249,30 +166,14 @@ export function reflowLayout(current: Node[]): Node[] {
   }
   topOffset += TOP_GAP;
 
-  const anyPinned = topLevel.some(
-    (node) => (node.data as CodeNodeData).pinned === true
-  );
-  if (anyPinned) {
-    let cursor = topOffset;
-    for (const node of topLevel) {
-      const pinned = (node.data as CodeNodeData).pinned === true;
-      const desiredY = pinned ? Math.max(node.position.y, topOffset) : cursor;
-      if (!pinned && (node.position.x !== 0 || node.position.y !== desiredY)) {
-        node.position = { x: 0, y: desiredY };
-        changed = true;
-      }
-      cursor = Math.max(cursor, desiredY) + nodeHeight(node) + TOP_GAP;
+  const grid = arrangeGrid(topLevel, 0, topOffset, TOP_GAP, TOP_GAP);
+  topLevel.forEach((node, index) => {
+    const desired = grid.positions[index];
+    if (node.position.x !== desired.x || node.position.y !== desired.y) {
+      node.position = desired;
+      changed = true;
     }
-  } else {
-    const grid = arrangeGrid(topLevel, 0, topOffset, TOP_GAP, TOP_GAP);
-    topLevel.forEach((node, index) => {
-      const desired = grid.positions[index];
-      if (node.position.x !== desired.x || node.position.y !== desired.y) {
-        node.position = desired;
-        changed = true;
-      }
-    });
-  }
+  });
 
   return changed ? next : current;
 }

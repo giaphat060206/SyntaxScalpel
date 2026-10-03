@@ -1,26 +1,9 @@
-use std::collections::HashMap;
-
 use tree_sitter::{Node, Parser};
 
-use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult, Position};
+use crate::models::{NodeKind, ParseResult};
+use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
-struct Def<'a> {
-    id: String,
-    kind: NodeKind,
-    name: String,
-    params: Vec<String>,
-    returns: Vec<String>,
-    uses: Vec<String>,
-    value: Option<String>,
-    parent: Option<String>,
-    body: Option<Node<'a>>,
-}
-
-pub fn parse_source(
-    source: &str,
-    file_path: &str,
-    layout: &HashMap<String, Position>,
-) -> Result<ParseResult, String> {
+pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_python::LANGUAGE.into())
@@ -31,41 +14,51 @@ pub fn parse_source(
 
     let imported = imported_names(source, file_path);
     let defs = collect_defs(tree.root_node(), source, &imported);
-    let nodes = defs.iter().map(|def| to_node(def, layout)).collect();
-    let edges = collect_edges(&defs, source);
+    Ok(function_graph::assemble(defs, source, file_path, calls_in))
+}
 
-    Ok(ParseResult {
-        nodes,
-        edges,
-        file_path: file_path.to_string(),
-    })
+/// Decorated definitions (`@staticmethod`, `@app.route`) wrap the real
+/// definition; unwrap so the definition can be extracted, while the outer node
+/// keeps the decorators inside the reported line range.
+fn unwrap_decorated(node: Node) -> Node {
+    if node.kind() == "decorated_definition" {
+        node.child_by_field_name("definition").unwrap_or(node)
+    } else {
+        node
+    }
 }
 
 fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        match child.kind() {
+        let member = unwrap_decorated(child);
+        match member.kind() {
             "function_definition" => {
-                if let Some(def) = function_def(child, source, None, imported) {
+                if let Some(def) = function_def(member, source, None, imported, Some(child)) {
                     defs.push(def);
                 }
             }
             "class_definition" => {
-                let class_name = child
+                let class_name = member
                     .child_by_field_name("name")
                     .and_then(|n| n.utf8_text(source.as_bytes()).ok())
                     .unwrap_or("")
                     .to_string();
                 let mut class_uses = Vec::new();
-                if let Some(body) = child.child_by_field_name("body") {
+                if let Some(body) = member.child_by_field_name("body") {
                     class_uses = uses_in(body, source, imported);
                     let mut inner_cursor = body.walk();
                     for inner in body.children(&mut inner_cursor) {
-                        if inner.kind() == "function_definition" {
-                            if let Some(def) =
-                                function_def(inner, source, Some(class_name.clone()), imported)
-                            {
+                        let method = unwrap_decorated(inner);
+                        if method.kind() == "function_definition" {
+                            if let Some(def) = function_def(
+                                method,
+                                source,
+                                Some(class_name.clone()),
+                                imported,
+                                Some(inner),
+                            ) {
                                 defs.push(def);
                             }
                         }
@@ -80,6 +73,8 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
                     uses: class_uses,
                     value: None,
                     parent: None,
+                    start_line: line_range(child).0,
+                    end_line: line_range(child).1,
                     body: None,
                 });
             }
@@ -99,6 +94,7 @@ fn function_def<'a>(
     source: &str,
     parent: Option<String>,
     imported: &[String],
+    range_node: Option<Node<'a>>,
 ) -> Option<Def<'a>> {
     let name = node
         .child_by_field_name("name")?
@@ -118,6 +114,7 @@ fn function_def<'a>(
     let body = node.child_by_field_name("body")?;
     let returns = return_names(body, source);
     let uses = uses_in(body, source, imported);
+    let span = range_node.unwrap_or(node);
 
     Some(Def {
         id,
@@ -128,6 +125,8 @@ fn function_def<'a>(
         uses,
         value: None,
         parent,
+        start_line: line_range(span).0,
+        end_line: line_range(span).1,
         body: Some(body),
     })
 }
@@ -164,6 +163,8 @@ fn variable_def<'a>(
         uses,
         value,
         parent: None,
+        start_line: line_range(statement).0,
+        end_line: line_range(statement).1,
         body: None,
     })
 }
@@ -205,14 +206,6 @@ fn uses_in_text(text: &str, imported: &[String]) -> Vec<String> {
         }
     }
     out
-}
-
-fn node_text(node: Node, source: &str) -> String {
-    node.utf8_text(source.as_bytes()).unwrap_or("").to_string()
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn parameter_names(node: Node, source: &str) -> Vec<String> {
@@ -283,37 +276,10 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-fn collect_edges(defs: &[Def], source: &str) -> Vec<GraphEdge> {
-    let mut targets: HashMap<&str, &str> = HashMap::new();
-    for def in defs {
-        if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
-            targets.insert(def.id.as_str(), def.id.as_str());
-            targets.insert(def.name.as_str(), def.id.as_str());
-        }
-    }
-
-    let mut edges: Vec<GraphEdge> = Vec::new();
-    for def in defs {
-        let Some(body) = def.body else { continue };
-        let mut calls = Vec::new();
-        collect_calls(body, source, &mut calls);
-        for name in calls {
-            let Some(target) = targets.get(name.as_str()) else {
-                continue;
-            };
-            if *target == def.id.as_str() {
-                continue;
-            }
-            let edge = GraphEdge {
-                source: def.id.clone(),
-                target: target.to_string(),
-            };
-            if !edges.iter().any(|e| e.source == edge.source && e.target == edge.target) {
-                edges.push(edge);
-            }
-        }
-    }
-    edges
+pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+    let mut calls = Vec::new();
+    collect_calls(node, source, &mut calls);
+    calls
 }
 
 fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
@@ -345,23 +311,10 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn to_node(def: &Def, layout: &HashMap<String, Position>) -> GraphNode {
-    GraphNode {
-        id: def.id.clone(),
-        kind: def.kind.clone(),
-        name: def.name.clone(),
-        params: def.params.clone(),
-        returns: def.returns.clone(),
-        uses: def.uses.clone(),
-        value: def.value.clone(),
-        parent: def.parent.clone(),
-        position: layout.get(&def.id).cloned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::GraphEdge;
 
     const SOURCE: &str = "\
 def add(a, b):
@@ -373,7 +326,7 @@ def main():
 ";
 
     fn parse(source: &str) -> ParseResult {
-        parse_source(source, "src/main.py", &HashMap::new()).unwrap()
+        parse_source(source, "src/main.py").unwrap()
     }
 
     #[test]
@@ -461,6 +414,40 @@ def build():
             .map(|n| n.name.as_str())
             .collect();
         assert_eq!(variables, vec!["X"]);
+    }
+
+    #[test]
+    fn extracts_decorated_methods_and_top_level_functions() {
+        let source = "\
+class C:
+    @staticmethod
+    def a():
+        return 1
+
+@app.route('/')
+def handler():
+    return 2
+";
+        let result = parse(source);
+        let method = result.nodes.iter().find(|n| n.id == "C.a").unwrap();
+        assert_eq!(method.kind, NodeKind::Method);
+        // The range includes the decorator line.
+        assert_eq!(method.start_line, 2);
+        assert_eq!(method.end_line, 4);
+
+        let handler = result.nodes.iter().find(|n| n.name == "handler").unwrap();
+        assert_eq!(handler.kind, NodeKind::Function);
+        assert_eq!(handler.start_line, 6);
+        assert_eq!(handler.end_line, 8);
+    }
+
+    #[test]
+    fn records_the_line_range_of_each_definition() {
+        let source = "\n\ndef add(a, b):\n    return a + b\n";
+        let result = parse(source);
+        let add = result.nodes.iter().find(|n| n.name == "add").unwrap();
+        assert_eq!(add.start_line, 3);
+        assert_eq!(add.end_line, 4);
     }
 
     #[test]
@@ -571,21 +558,5 @@ def show(x):
 ";
         let result = parse(source);
         assert!(result.edges.is_empty());
-    }
-
-    #[test]
-    fn applies_saved_positions_by_node_id() {
-        let mut layout = HashMap::new();
-        layout.insert("helper".to_string(), Position { x: 12.0, y: 34.0 });
-        let result =
-            parse_source("def helper():\n    return 1\n", "src/a.py", &layout).unwrap();
-        assert_eq!(result.nodes[0].position, Some(Position { x: 12.0, y: 34.0 }));
-    }
-
-    #[test]
-    fn leaves_position_none_when_not_in_layout() {
-        let result = parse_source("def helper():\n    return 1\n", "src/a.py", &HashMap::new())
-            .unwrap();
-        assert_eq!(result.nodes[0].position, None);
     }
 }

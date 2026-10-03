@@ -1,169 +1,36 @@
 import {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   Background,
   Controls,
-  MarkerType,
   ReactFlow,
   ReactFlowProvider,
-  useNodesState,
-  useReactFlow,
-  type Edge,
-  type Node,
-  type NodeMouseHandler,
-  type OnNodeDrag,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type {
-  GraphEdge,
-  GraphNode,
-  ImportAnalysis,
-  LayoutMap,
-  ParseResult,
-} from "../../shared/types";
-import { buildFlow, type FlowNode } from "./flow";
-import { traceNeighbors } from "./trace";
+import type { ImportAnalysis, ParseResult } from "../../shared/types";
+import { buildFunctionNodes, decorateFunctionNodes } from "./nodes";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
-import { colorForNode } from "./colors";
-import {
-  CONSTANTS_NODE_ID,
-  IMPORTED_BY_NODE_ID,
-  IMPORTS_NODE_ID,
-  CLASS_WIDTH,
-  spreadHandles,
-  reflowLayout,
-} from "./layout";
+import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
+import { GraphSearch } from "./GraphSearch";
+import { ElkEdge } from "./elk/ElkEdge";
 import { EmptyState } from "../../shared/StateViews";
+import {
+  useGraphCanvas,
+  type DomainEdge,
+  type EdgeVisibility,
+} from "./canvas/useGraphCanvas";
 
 const nodeTypes = { scalpel: CodeNode };
-
-// Content-aware sizing: estimate the width a monospace line needs so a single
-// `in:`/`out:`/value stays on one line by default. Height stays content-driven.
-const CHAR_WIDTH = 7.2;
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 560;
-
-function naturalWidth(lines: string[]): number {
-  const longest = lines.reduce((max, line) => Math.max(max, line.length), 0);
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(longest * CHAR_WIDTH) + 32));
-}
-
-function graphNodeLines(node: GraphNode): string[] {
-  return [
-    node.name,
-    ...node.params.map((param) => `in: ${param}`),
-    ...node.returns.map((value) => `out: ${value}`),
-    ...(node.value !== undefined ? [`= ${node.value}`] : []),
-  ];
-}
-
-function specialFlowNodes(imports: ImportAnalysis | null | undefined): Node[] {
-  if (!imports) {
-    return [];
-  }
-  const importLines = imports.imports.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.specifier}: ${entry.names.join(", ")}`
-      : entry.specifier
-  );
-  const importerLines = imports.importedBy.map((entry) =>
-    entry.names.length > 0
-      ? `${entry.path}: ${entry.names.join(", ")}`
-      : entry.path
-  );
-
-  return [
-    {
-      id: IMPORTS_NODE_ID,
-      type: "scalpel",
-      position: { x: 0, y: 0 },
-      style: {
-        width: naturalWidth([`IMPORTS (${imports.imports.length})`, ...importLines]),
-      },
-      draggable: false,
-      zIndex: 4,
-      data: {
-        special: { title: `IMPORTS (${imports.imports.length})`, lines: importLines },
-        color: colorForNode(IMPORTS_NODE_ID),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    },
-    {
-      id: IMPORTED_BY_NODE_ID,
-      type: "scalpel",
-      position: { x: 0, y: 300 },
-      style: {
-        width: naturalWidth([
-          `IMPORTED BY (${imports.importedBy.length})`,
-          ...importerLines,
-        ]),
-      },
-      draggable: false,
-      zIndex: 4,
-      data: {
-        special: {
-          title: `IMPORTED BY (${imports.importedBy.length})`,
-          lines: importerLines,
-        },
-        color: colorForNode(IMPORTED_BY_NODE_ID),
-        highlighted: false,
-        dimmed: false,
-      } satisfies CodeNodeData,
-    },
-  ];
-}
-
-function visibilityOf(id: string, edges: GraphEdge[], selectedId: string | null) {
-  const traced = selectedId ? traceNeighbors(edges, selectedId) : null;
-  return {
-    highlighted: traced ? traced.has(id) : false,
-    dimmed: traced ? !traced.has(id) : false,
-  };
-}
-
-function toFlowNode(
-  node: FlowNode,
-  selectedId: string | null,
-  edges: GraphEdge[],
-  endpointParents: Set<string> = new Set()
-): Node {
-  return {
-    id: node.id,
-    type: node.type,
-    position: node.position,
-    parentId: node.parentId,
-    extent: node.extent,
-    style:
-      node.style ??
-      (node.data.node.kind === "class"
-        ? { width: CLASS_WIDTH }
-        : { width: naturalWidth(graphNodeLines(node.data.node)) }),
-    draggable: node.data.node.kind !== "class",
-    zIndex: node.data.node.kind === "class" ? 1 : 4,
-    data: {
-      node: node.data.node,
-      color: colorForNode(node.id),
-      transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
-      pinned: node.data.node.position != null,
-      ...visibilityOf(node.id, edges, selectedId),
-    } satisfies CodeNodeData,
-  };
-}
+const edgeTypes = { elk: ElkEdge };
 
 interface Props {
   result: ParseResult;
   imports?: ImportAnalysis | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  onDragStop: (positions: LayoutMap) => void;
-  onResetLayout?: () => void;
 }
 
 export function GraphView(props: Props) {
@@ -179,263 +46,94 @@ function GraphViewInner({
   imports,
   selectedId,
   onSelect,
-  onDragStop,
-  onResetLayout,
 }: Props) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [showLines, setShowLines] = useState(true);
-  const { fitView } = useReactFlow();
-  const lastFit = useRef<string>("");
 
-  // Rebuild the flow whenever a different file (or its import analysis) changes.
-  useEffect(() => {
-    const flow = buildFlow(result);
-    const variables = flow.nodes.filter(
-      (node) => node.data.node.kind === "variable"
-    );
-    const others = flow.nodes.filter((node) => node.data.node.kind !== "variable");
+  const builtNodes = useMemo(
+    () => buildFunctionNodes(result, imports),
+    [result, imports]
+  );
 
-    const constantsContainer: Node[] =
-      variables.length > 0
-        ? [
-            {
-              id: CONSTANTS_NODE_ID,
-              type: "scalpel",
-              position: { x: 0, y: 0 },
-              style: { width: CLASS_WIDTH },
-              draggable: false,
-              zIndex: 1,
-                data: {
-                  node: {
-                    id: CONSTANTS_NODE_ID,
-                    kind: "class",
-                    name: `CONSTANTS (${variables.length})`,
-                    params: [],
-                    returns: [],
-                    uses: [],
-                  },
-                  color: colorForNode(CONSTANTS_NODE_ID),
-                  highlighted: false,
-                  dimmed: false,
-                } satisfies CodeNodeData,
-            },
-          ]
-        : [];
+  // A selection that does not match any node on the canvas (stale id from a
+  // previous file) must not dim the whole graph.
+  const activeSelectedId = useMemo(
+    () =>
+      selectedId !== null && builtNodes.some((node) => node.id === selectedId)
+        ? selectedId
+        : null,
+    [selectedId, builtNodes]
+  );
 
-    const constantChildren = variables.map((node) => ({
-      ...toFlowNode(node, null, result.edges),
-      parentId: CONSTANTS_NODE_ID,
-      extent: "parent" as const,
-    }));
+  const decoratedNodes = useMemo(
+    () => decorateFunctionNodes(builtNodes, result.edges, activeSelectedId),
+    [builtNodes, result.edges, activeSelectedId]
+  );
 
-    // Class ids that own an edge endpoint stay transparent so their method
-    // lines remain visible through the class container.
-    const endpointParents = new Set<string>();
-    for (const edge of result.edges) {
-      for (const id of [edge.source, edge.target]) {
-        const dot = id.lastIndexOf(".");
-        if (dot > 0) {
-          endpointParents.add(id.slice(0, dot));
-        }
-      }
-    }
-
-    setNodes([
-      ...specialFlowNodes(imports),
-      ...constantsContainer,
-      ...constantChildren,
-      ...others.map((node) => toFlowNode(node, null, result.edges, endpointParents)),
-    ]);
-  }, [result, imports, setNodes]);
-
-  // Re-decorate for trace highlighting without touching positions the user
-  // dragged. Class transparency comes from the rebuild (endpoint-based), so it
-  // is preserved here.
-  useEffect(() => {
-    setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: { ...node.data, ...visibilityOf(node.id, result.edges, selectedId) },
-      }))
-    );
-  }, [selectedId, result.edges, setNodes]);
-
-  // Edges are derived from the current node positions so their handles can face
-  // the other block; each block rotates its edges across its four sides so
-  // parallel lines do not stack, and idle edges are faded for readability.
-  const edges: Edge[] = useMemo(() => {
-    const byId = new Map(nodes.map((node) => [node.id, node]));
-    const outCount = new Map<string, number>();
-    const inCount = new Map<string, number>();
-    return result.edges.map((edge, edgeIndex) => {
-      const source = byId.get(edge.source);
-      const target = byId.get(edge.target);
-      const sourceIndex = outCount.get(edge.source) ?? 0;
-      const targetIndex = inCount.get(edge.target) ?? 0;
-      outCount.set(edge.source, sourceIndex + 1);
-      inCount.set(edge.target, targetIndex + 1);
-      const handles =
-        source && target
-          ? spreadHandles(source, target, byId, sourceIndex, targetIndex)
-          : {};
-      const active =
-        selectedId !== null &&
-        (edge.source === selectedId || edge.target === selectedId);
-      const unrelated = selectedId !== null && !active;
-      const sourceColor =
-        (source?.data as CodeNodeData | undefined)?.color ?? "#00F0FF";
-      const stroke = sourceColor;
-      return {
+  const domainEdges = useMemo<DomainEdge[]>(
+    () =>
+      result.edges.map((edge) => ({
+        ...edge,
         id: `${edge.source}->${edge.target}`,
-        source: edge.source,
-        target: edge.target,
-        type: "smoothstep",
-        pathOptions: { borderRadius: 14, offset: 24 + (edgeIndex % 4) * 16 },
-        ...handles,
-        zIndex: 0,
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: stroke,
-          width: 16,
-          height: 16,
-        },
-        style: {
-          stroke,
-          strokeWidth: 2,
-          opacity: unrelated ? 0.12 : active ? 1 : showLines ? 0.7 : 0,
-        },
-      };
-    });
-  }, [nodes, result.edges, selectedId]);
+      })),
+    [result.edges]
+  );
 
-  // Re-stack once React Flow has measured real node heights, and again after any
-  // resize. Keyed on a height signature so dragging positions never triggers a
-  // reflow, and converges because `reflowLayout` returns the same array when
-  // nothing needs to move.
-  // Re-stack once the measured heights have settled. With many nodes, React Flow
-  // measures them in waves; coalescing the reflow avoids re-gridding the whole
-  // graph dozens of times (which reads as the graph flinging around).
-  const sizeSignature = nodes
-    .map((node) => `${node.id}:${Math.round(node.measured?.height ?? 0)}`)
-    .join("|");
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setNodes((current) => reflowLayout(current));
-    }, 140);
-    return () => window.clearTimeout(timer);
-  }, [sizeSignature, setNodes]);
+  const handleEdgeVisibility = useCallback(
+    (edge: DomainEdge, selected: unknown): EdgeVisibility => {
+      if (typeof selected !== "string") return "active";
+      return edge.source === selected || edge.target === selected
+        ? "active"
+        : "dim";
+    },
+    []
+  );
 
-  // Fit the view once per file (and once more when import blocks arrive), after
-  // React Flow has measured the nodes.
-  const fitToken = `${result.filePath}|${imports ? imports.imports.length : "none"}|${
-    imports ? imports.importedBy.length : "none"
+  const layoutKey = `${result.filePath}|${
+    imports ? `${imports.imports.length}|${imports.importedBy.length}` : "none"
   }`;
-  useEffect(() => {
-    if (lastFit.current === fitToken) {
-      return;
-    }
-    const id = window.setTimeout(() => {
-      lastFit.current = fitToken;
-      fitView({ padding: 0.2 });
-    }, 120);
-    return () => window.clearTimeout(id);
-  }, [fitToken, sizeSignature, fitView]);
 
-  const closeMenu = useCallback(() => setMenu(null), []);
+  const canvas = useGraphCanvas({
+    nodes: decoratedNodes,
+    edges: domainEdges,
+    selection: activeSelectedId,
+    layoutKey,
+    fit: { token: layoutKey },
+    edgeVisibility: handleEdgeVisibility,
+  });
 
-  const openMenu = useCallback(
-    (event: ReactMouseEvent | globalThis.MouseEvent) => {
-      event.preventDefault();
-      setMenu({ x: event.clientX, y: event.clientY });
-    },
-    []
+  const searchItems = useMemo<SearchItem[]>(
+    () =>
+      canvas.nodes
+        .map((node) => (node.data as CodeNodeData).node)
+        .filter((graph): graph is NonNullable<typeof graph> => Boolean(graph))
+        .map((graph) => ({
+          id: graph.id,
+          label: graph.name,
+          hint: graph.kind,
+        })),
+    [canvas.nodes]
   );
 
-  const handleRealign = useCallback(() => {
-    setMenu(null);
-    const cleared: ParseResult = {
-      ...result,
-      nodes: result.nodes.map((node) => ({ ...node, position: undefined })),
-    };
-    const flow = buildFlow(cleared);
-    setNodes([
-      ...specialFlowNodes(imports),
-      ...flow.nodes.map((node) => toFlowNode(node, null, result.edges)),
-    ]);
-    lastFit.current = "";
-    onResetLayout?.();
-    window.setTimeout(() => {
-      lastFit.current = fitToken;
-      fitView({ padding: 0.2 });
-    }, 80);
-  }, [result, imports, setNodes, onResetLayout, fitView, fitToken]);
-
-  const handleFitView = useCallback(() => {
-    setMenu(null);
-    fitView({ padding: 0.2 });
-  }, [fitView]);
-
-  const handleNodeClick: NodeMouseHandler = useCallback(
-    (_event, node) => onSelect(node.id),
-    [onSelect]
-  );
-
-  const handleNodeMouseEnter: NodeMouseHandler = useCallback(
-    (_event, node) => setHoveredId(node.id),
-    []
-  );
-
-  const handleNodeMouseLeave: NodeMouseHandler = useCallback(
-    () => setHoveredId(null),
-    []
-  );
-
-  const handleDragStop: OnNodeDrag = useCallback(
-    (_event, node) => {
-      // Save the FULL layout, not just the dragged node. `save_layout` replaces the
-      // entry for this file, so sending one node would erase every other node's
-      // saved position on the next open.
-      const positions: LayoutMap = {};
-      for (const current of nodes) {
-        const position = current.id === node.id ? node.position : current.position;
-        positions[current.id] = { x: position.x, y: position.y };
+  const handleSearchPick = useCallback(
+    (id: string) => {
+      onSelect(id);
+      if (!canvas.zoomToNode(id)) {
+        canvas.fitView();
       }
-      // Mark the dragged node pinned so auto-reflow leaves its position alone.
-      setNodes((current) =>
-        current.map((item) =>
-          item.id === node.id
-            ? { ...item, data: { ...item.data, pinned: true } }
-            : item
-        )
-      );
-      onDragStop(positions);
     },
-    [nodes, onDragStop, setNodes]
+    [onSelect, canvas.fitView, canvas.zoomToNode]
   );
 
-  // Close the context menu on Escape.
-  useEffect(() => {
-    if (!menu) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMenu(null);
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [menu]);
+  // The explorer's search picks the same way (a function cannot be "opened").
+  useSearchRegistration(searchItems, handleSearchPick);
 
   if (result.nodes.length === 0) {
     return <EmptyState message="No functions detected" />;
   }
 
-  const activeId = selectedId ?? hoveredId;
+  const activeId = activeSelectedId ?? hoveredId;
   const activeNode = activeId
-    ? nodes.find((node) => node.id === activeId)
+    ? canvas.nodes.find((node) => node.id === activeId)
     : undefined;
   const activeGraph = activeNode
     ? (activeNode.data as CodeNodeData).node
@@ -463,21 +161,20 @@ function GraphViewInner({
         </div>
       )}
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
+        nodes={canvas.nodes}
+        edges={canvas.edges}
+        onNodesChange={canvas.onNodesChange}
         nodeTypes={nodeTypes}
-        onNodeClick={handleNodeClick}
-        onNodeMouseEnter={handleNodeMouseEnter}
-        onNodeMouseLeave={handleNodeMouseLeave}
-        onNodeDragStop={handleDragStop}
+        edgeTypes={edgeTypes}
+        onNodeClick={(_event, node) => onSelect(node.id)}
+        onNodeMouseEnter={(_event, node) => setHoveredId(node.id)}
+        onNodeMouseLeave={() => setHoveredId(null)}
         onPaneClick={() => {
-          closeMenu();
+          canvas.closeMenu();
           onSelect(null);
         }}
-        onPaneContextMenu={openMenu}
-        onNodeContextMenu={openMenu}
-        fitView
+        onPaneContextMenu={(event) => canvas.openMenu(event)}
+        onNodeContextMenu={(event, node) => canvas.openMenu(event, node.id)}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
@@ -488,14 +185,20 @@ function GraphViewInner({
 
       <button
         type="button"
-        onClick={() => setShowLines((value) => !value)}
+        onClick={canvas.toggleLines}
         className="absolute bottom-3 left-12 z-10 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
       >
-        {showLines ? "Hide lines" : "Show lines"}
+        {canvas.showLines ? "Hide lines" : "Show lines"}
       </button>
 
+      <GraphSearch
+        items={searchItems}
+        onPick={handleSearchPick}
+        placeholder="Search functions and methods…"
+      />
+
       {activeGraph && (
-        <div className="absolute right-3 top-3 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">
+        <div className="absolute right-3 top-12 z-20 max-h-[60%] w-72 overflow-auto rounded border border-accent/30 bg-panel/95 p-3 text-xs shadow-lg">
           <div className="break-words font-mono text-sm text-accent">
             {activeGraph.name}
           </div>
@@ -532,30 +235,30 @@ function GraphViewInner({
         </div>
       )}
 
-      {menu && (
+      {canvas.menu && (
         <>
           <div
             className="fixed inset-0 z-40"
-            onClick={closeMenu}
+            onClick={canvas.closeMenu}
             onContextMenu={(event) => {
               event.preventDefault();
-              closeMenu();
+              canvas.closeMenu();
             }}
           />
           <div
             className="fixed z-50 min-w-[160px] rounded border border-white/10 bg-panel py-1 shadow-lg"
-            style={{ left: menu.x, top: menu.y }}
+            style={{ left: canvas.menu.x, top: canvas.menu.y }}
           >
             <button
               type="button"
-              onClick={handleRealign}
+              onClick={canvas.realign}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Re-align nodes
             </button>
             <button
               type="button"
-              onClick={handleFitView}
+              onClick={canvas.fitView}
               className="block w-full px-3 py-1.5 text-left text-xs text-white/90 hover:bg-accent/10 hover:text-accent"
             >
               Fit view
