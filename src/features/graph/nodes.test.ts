@@ -103,13 +103,13 @@ describe("buildFunctionNodes for external files", () => {
     const nodes = buildFunctionNodes(graph(result, { externals: [externalFile] }));
     const block = nodes.find((n) => n.id === "pkg/file2.py");
     expect(block).toBeDefined();
-    expect((block?.data as { external?: string }).external).toBe("file");
+    expect((block?.data as { crossFile?: string }).crossFile).toBe("file");
     expect((block?.data as { node?: { name: string } }).node?.name).toBe("file2.py");
 
     const definition = nodes.find((n) => n.id === "pkg/file2.py::Thing.run");
     expect(definition?.parentId).toBe("pkg/file2.py");
     expect(definition?.extent).toBe("parent");
-    expect((definition?.data as { external?: string }).external).toBe("definition");
+    expect((definition?.data as { crossFile?: string }).crossFile).toBe("definition");
   });
 
   it("keeps every external definition attached to a block that exists", () => {

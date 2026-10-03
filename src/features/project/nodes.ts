@@ -76,7 +76,6 @@ export function buildProjectNodes(
         project: {
           kind: "file",
           name: file.name,
-          imports: file.imports,
           fileKind: file.kind,
           entry: entryList.includes(file.id),
           external: file.external === true,

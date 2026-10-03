@@ -22,7 +22,7 @@ interface FlowNode {
   position: Position;
   parentId?: string;
   extent?: "parent";
-  data: { node: GraphNode; external?: "file" | "definition" };
+  data: { node: GraphNode; crossFile?: "file" | "definition" };
   style?: { width: number; height: number };
 }
 
@@ -114,7 +114,7 @@ function externalFlowNodes(externals: ExternalFile[]): FlowNode[] {
           returns: [],
           uses: [],
         },
-        external: "file",
+        crossFile: "file",
       },
       style: { width: CLASS_WIDTH, height: 60 + METHOD_ROW * file.nodes.length },
     });
@@ -125,7 +125,7 @@ function externalFlowNodes(externals: ExternalFile[]): FlowNode[] {
         parentId: file.path,
         extent: "parent",
         position: { x: 20, y: 76 + METHOD_ROW * index },
-        data: { node: definition, external: "definition" },
+        data: { node: definition, crossFile: "definition" },
       });
     });
   }
@@ -204,7 +204,7 @@ function toFlowNode(node: FlowNode, endpointParents: Set<string>): Node {
     zIndex: node.data.node.kind === "class" ? 1 : 4,
     data: {
       node: node.data.node,
-      external: node.data.external,
+      crossFile: node.data.crossFile,
       color: colorForNode(node.id),
       transparent: node.data.node.kind === "class" && endpointParents.has(node.id),
       highlighted: false,

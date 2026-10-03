@@ -25,7 +25,7 @@ describe("CodeNode external blocks", () => {
   it("draws the block standing for another file dashed, with an ext badge", () => {
     const { container } = renderNode({
       node: { ...definition, id: "pkg/file2.py", kind: "class", name: "file2.py" },
-      external: "file",
+      crossFile: "file",
       highlighted: false,
       dimmed: false,
     });
@@ -39,7 +39,7 @@ describe("CodeNode external blocks", () => {
   it("draws a Definition inside another file dashed too", () => {
     const { container } = renderNode({
       node: { ...definition, id: "pkg/file2.py::Thing.run", name: "run" },
-      external: "definition",
+      crossFile: "definition",
       highlighted: false,
       dimmed: false,
     });
