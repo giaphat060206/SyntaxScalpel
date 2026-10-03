@@ -76,32 +76,45 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
+/// `export function f() {}` and friends wrap the declaration; unwrap so the
+/// Definition is extracted, while the outer node keeps `export` inside the
+/// reported line range. `export default <expression>` exposes no declaration
+/// field and stays unparsed.
+fn unwrap_export(node: Node) -> Node {
+    if node.kind() == "export_statement" {
+        node.child_by_field_name("declaration").unwrap_or(node)
+    } else {
+        node
+    }
+}
+
 fn collect_defs(root: Node, source: &str, imported: &[String]) -> Vec<Def> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        match child.kind() {
+        let member = unwrap_export(child);
+        match member.kind() {
             "function_declaration" => {
-                if let Some(def) = declared_function(child, source, None, imported) {
+                if let Some(def) = declared_function(member, source, None, imported) {
                     defs.push(def);
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
-                collect_declarators(child, source, None, &mut defs, imported);
+                collect_declarators(member, source, None, &mut defs, imported);
             }
             "class_declaration" => {
-                let class_name = child
+                let class_name = member
                     .child_by_field_name("name")
                     .map(|n| node_text(n, source))
                     .unwrap_or_default();
                 let mut class_uses = Vec::new();
-                if let Some(body) = child.child_by_field_name("body") {
+                if let Some(body) = member.child_by_field_name("body") {
                     class_uses = uses_in(body, source, imported);
                     let mut inner = body.walk();
-                    for member in body.children(&mut inner) {
-                        if member.kind() == "method_definition" {
+                    for inner_member in body.children(&mut inner) {
+                        if inner_member.kind() == "method_definition" {
                             if let Some(def) = declared_function(
-                                member,
+                                inner_member,
                                 source,
                                 Some(class_name.clone()),
                                 imported,
@@ -446,6 +459,15 @@ function run() {
         parse_source(source, "src/app.js").unwrap()
     }
 
+    fn node_ids(result: &ParseResult, kind: NodeKind) -> Vec<&str> {
+        result
+            .nodes
+            .iter()
+            .filter(|node| node.kind == kind)
+            .map(|node| node.id.as_str())
+            .collect()
+    }
+
     #[test]
     fn extracts_function_declarations() {
         let result = parse(SOURCE);
@@ -538,6 +560,51 @@ const MAX = 10;
 
         let max = defs.iter().find(|def| def.name == "MAX").unwrap();
         assert!(max.calls.is_empty());
+    }
+
+    #[test]
+    fn extracts_declarations_behind_export() {
+        let source = "\
+export function add(a, b) {
+  return a + b;
+}
+
+export const mul = (a, b) => a * b;
+
+export class Calc {
+  double(n) {
+    return add(n, n);
+  }
+}
+";
+        let result = parse(source);
+        assert_eq!(
+            result.nodes.iter().filter(|n| n.kind == NodeKind::Function).count(),
+            2
+        );
+        assert_eq!(node_ids(&result, NodeKind::Class), vec!["Calc"]);
+        let add = result.nodes.iter().find(|n| n.name == "add").unwrap();
+        assert_eq!(add.params, vec!["a", "b"]);
+        assert_eq!(node_ids(&result, NodeKind::Method), vec!["Calc.double"]);
+        assert!(result.edges.contains(&GraphEdge {
+            source: "Calc.double".into(),
+            target: "add".into(),
+        }));
+    }
+
+    #[test]
+    fn an_exported_definition_keeps_its_export_line_in_range() {
+        let source = "export function add(a, b) {\n  return a + b;\n}\n";
+        let result = parse(source);
+        let add = result.nodes.iter().find(|n| n.name == "add").unwrap();
+        assert_eq!(add.start_line, 1);
+        assert_eq!(add.end_line, 3);
+    }
+
+    #[test]
+    fn export_default_without_a_named_declaration_adds_nothing() {
+        let result = parse("export default compute(1);\n");
+        assert!(result.nodes.is_empty());
     }
 
     #[test]

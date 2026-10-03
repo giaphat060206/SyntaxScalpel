@@ -462,12 +462,12 @@ mod tests {
         let root = temp_project("js");
         std::fs::write(
             root.join("math.js"),
-            "function add(a, b) {\n  return a + b;\n}\n",
+            "export function add(a, b) {\n  return a + b;\n}\n",
         )
         .unwrap();
         std::fs::write(
             root.join("app.js"),
-            "import { add } from './math';\n\nfunction run(a) {\n  return add(a, 1);\n}\n",
+            "import { add } from './math';\n\nexport function run(a) {\n  return add(a, 1);\n}\n",
         )
         .unwrap();
 
