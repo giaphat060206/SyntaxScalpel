@@ -6,10 +6,12 @@ pub mod imports;
 pub mod jsts;
 pub mod project;
 pub mod python;
+pub mod rust;
 
 pub enum Language {
     Python,
     JsTs,
+    Rust,
 }
 
 pub fn parse_file(root: &str, rel: &str, language: Language) -> Result<ParseResult, String> {
@@ -19,5 +21,6 @@ pub fn parse_file(root: &str, rel: &str, language: Language) -> Result<ParseResu
     match language {
         Language::Python => python::parse_source(&source, &rel),
         Language::JsTs => jsts::parse_source(&source, &rel),
+        Language::Rust => rust::parse_source(&source, &rel),
     }
 }

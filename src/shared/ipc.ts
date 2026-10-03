@@ -33,6 +33,10 @@ export function parseJsTs(path: string, root: string): Promise<ParseResult> {
   return invoke<ParseResult>("parse_js_ts", { path, root });
 }
 
+export function parseRust(path: string, root: string): Promise<ParseResult> {
+  return invoke<ParseResult>("parse_rust", { path, root });
+}
+
 export function analyzeImports(path: string, root: string): Promise<ImportAnalysis> {
   return invoke<ImportAnalysis>("analyze_imports", { path, root });
 }

@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import type { ImportAnalysis } from "../../shared/types";
-import { routeForExtension } from "../../shared/extensions";
+import { routeForExtension, isCodeRoute } from "../../shared/extensions";
 import { analyzeImports } from "../../shared/ipc";
 import { useAsyncLoad } from "./useAsyncLoad";
 
@@ -14,7 +14,7 @@ export function useImports(
   filePath: string | null
 ): ImportAnalysis | null {
   const route = filePath ? routeForExtension(filePath) : "unsupported";
-  const isCode = route === "python" || route === "jsts";
+  const isCode = route !== "unsupported" && isCodeRoute(route);
   const enabled = Boolean(root && filePath && isCode);
 
   const load = useCallback(() => {

@@ -8,19 +8,28 @@ pub struct ImportEntry {
     pub names: Vec<String>,
 }
 
+/// Lower-cased extension, matching how the project graph classifies files.
+fn extension_of(file_path: &str) -> Option<String> {
+    file_path.rsplit_once('.').map(|(_, ext)| ext.to_lowercase())
+}
+
 fn grammar_for(file_path: &str) -> Option<tree_sitter::Language> {
-    let ext = file_path.rsplit_once('.').map(|(_, e)| e)?;
-    match ext {
+    match extension_of(file_path)?.as_str() {
         "py" => Some(tree_sitter_python::LANGUAGE.into()),
         "ts" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
         "tsx" => Some(tree_sitter_typescript::LANGUAGE_TSX.into()),
         "js" | "jsx" => Some(tree_sitter_javascript::LANGUAGE.into()),
+        "rs" => Some(tree_sitter_rust::LANGUAGE.into()),
         _ => None,
     }
 }
 
-fn is_python(file_path: &str) -> bool {
-    file_path.ends_with(".py")
+fn language_of(file_path: &str) -> &'static str {
+    match extension_of(file_path).as_deref() {
+        Some("py") => "python",
+        Some("rs") => "rust",
+        _ => "js",
+    }
 }
 
 fn node_text(node: Node, source: &str) -> String {
@@ -49,10 +58,10 @@ pub fn extract_imports(source: &str, file_path: &str) -> Vec<ImportEntry> {
     let Some(tree) = parse(source, file_path) else {
         return Vec::new();
     };
-    if is_python(file_path) {
-        extract_python(tree.root_node(), source)
-    } else {
-        extract_js(tree.root_node(), source)
+    match language_of(file_path) {
+        "python" => extract_python(tree.root_node(), source),
+        "rust" => extract_rust(tree.root_node(), source),
+        _ => extract_js(tree.root_node(), source),
     }
 }
 
@@ -158,6 +167,129 @@ fn collect_js_names(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
+/// Rust `use` trees and `mod` declarations, flattened to one entry per imported
+/// path: `crate::a::{b, c}` becomes `crate::a::b` and `crate::a::c`.
+fn extract_rust(root: Node, source: &str) -> Vec<ImportEntry> {
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "use_declaration" => {
+                    if let Some(argument) = child.child_by_field_name("argument") {
+                        collect_use(argument, "", source, &mut out);
+                    }
+                }
+                // `mod foo;` pulls in a sibling module file; the inline form
+                // defines its own items and so declares no dependency.
+                "mod_item" => {
+                    if child.child_by_field_name("body").is_none() {
+                        if let Some(name) = child.child_by_field_name("name") {
+                            let text = node_text(name, source);
+                            if !text.is_empty() {
+                                out.push(ImportEntry {
+                                    specifier: format!("self::{text}"),
+                                    names: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            stack.push(child);
+        }
+    }
+    out
+}
+
+fn collect_use(argument: Node, prefix: &str, source: &str, out: &mut Vec<ImportEntry>) {
+    match argument.kind() {
+        "use_as_clause" => {
+            let path = argument
+                .child_by_field_name("path")
+                .map(|path| join_use_path(prefix, &node_text(path, source)))
+                .unwrap_or_else(|| prefix.to_string());
+            let alias = argument
+                .child_by_field_name("alias")
+                .map(|alias| node_text(alias, source))
+                .unwrap_or_default();
+            let names = if alias.is_empty() {
+                last_segment(&path)
+            } else {
+                vec![alias]
+            };
+            out.push(ImportEntry {
+                specifier: path,
+                names,
+            });
+        }
+        "use_wildcard" => {
+            let text = node_text(argument, source);
+            let base = text.trim().trim_end_matches('*').trim_end_matches("::");
+            out.push(ImportEntry {
+                specifier: join_use_path(prefix, base),
+                names: vec!["*".to_string()],
+            });
+        }
+        "scoped_use_list" => {
+            let path = argument
+                .child_by_field_name("path")
+                .map(|path| join_use_path(prefix, &node_text(path, source)))
+                .unwrap_or_else(|| prefix.to_string());
+            let Some(list) = argument.child_by_field_name("list") else {
+                return;
+            };
+            let mut cursor = list.walk();
+            for item in list.named_children(&mut cursor) {
+                collect_use(item, &path, source, out);
+            }
+        }
+        "use_list" => {
+            let mut cursor = argument.walk();
+            for item in argument.named_children(&mut cursor) {
+                collect_use(item, prefix, source, out);
+            }
+        }
+        // `use path::{self, other}`: `self` names the path itself.
+        "self" => out.push(ImportEntry {
+            specifier: prefix.to_string(),
+            names: last_segment(prefix),
+        }),
+        _ => {
+            let path = join_use_path(prefix, &node_text(argument, source));
+            let names = last_segment(&path);
+            out.push(ImportEntry { specifier: path, names });
+        }
+    }
+}
+
+/// Splice a nested `use` item onto the path it was nested under.
+fn join_use_path(prefix: &str, raw: &str) -> String {
+    let raw = raw.trim();
+    if prefix.is_empty() || raw.is_empty() {
+        return format!("{prefix}{raw}");
+    }
+    let absolute = ["crate", "self", "super"]
+        .iter()
+        .any(|root| raw == *root || raw.starts_with(&format!("{root}::")));
+    if absolute {
+        raw.to_string()
+    } else {
+        format!("{prefix}::{raw}")
+    }
+}
+
+fn last_segment(path: &str) -> Vec<String> {
+    path.rsplit("::")
+        .next()
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| vec![segment.to_string()])
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +334,84 @@ import * as utils from './utils';
             .find(|e| e.specifier == "./utils")
             .map(|e| e.names.clone())
             .unwrap_or_default()
+    }
+
+    fn rust_specifiers(entries: &[ImportEntry]) -> Vec<String> {
+        entries.iter().map(|e| e.specifier.clone()).collect()
+    }
+
+    #[test]
+    fn extracts_rust_use_paths() {
+        let source = "\
+use crate::parser::python;
+use super::util;
+use std::collections::HashMap;
+";
+        let entries = extract_imports(source, "src/lib.rs");
+        assert_eq!(
+            rust_specifiers(&entries),
+            vec!["crate::parser::python", "super::util", "std::collections::HashMap"]
+        );
+        assert_eq!(entries[0].names, vec!["python".to_string()]);
+        assert_eq!(entries[1].names, vec!["util".to_string()]);
+        assert_eq!(entries[2].names, vec!["HashMap".to_string()]);
+    }
+
+    #[test]
+    fn flattens_braced_rust_use_trees() {
+        let source = "use crate::parser::{python, jsts};\nuse serde::{Serialize, Deserialize};\n";
+        let entries = extract_imports(source, "src/lib.rs");
+        assert_eq!(
+            rust_specifiers(&entries),
+            vec![
+                "crate::parser::python",
+                "crate::parser::jsts",
+                "serde::Serialize",
+                "serde::Deserialize",
+            ]
+        );
+    }
+
+    #[test]
+    fn expands_rust_nested_use_trees_and_self() {
+        let source = "use crate::a::{self, b::{c, d}};\n";
+        let entries = extract_imports(source, "src/lib.rs");
+        assert_eq!(
+            rust_specifiers(&entries),
+            vec!["crate::a", "crate::a::b::c", "crate::a::b::d"]
+        );
+        assert_eq!(entries[0].names, vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn records_rust_aliases_and_wildcards() {
+        let source = "use std::collections::HashMap as Map;\nuse self::inner::*;\nuse super::*;\n";
+        let entries = extract_imports(source, "src/lib.rs");
+        assert_eq!(entries[0].specifier, "std::collections::HashMap");
+        assert_eq!(entries[0].names, vec!["Map".to_string()]);
+        assert_eq!(entries[1].specifier, "self::inner");
+        assert_eq!(entries[1].names, vec!["*".to_string()]);
+        assert_eq!(entries[2].specifier, "super");
+        assert_eq!(entries[2].names, vec!["*".to_string()]);
+    }
+
+    #[test]
+    fn mod_declarations_import_a_module_file() {
+        let source = "mod parser;\nmod inline { fn inner() {} }\n";
+        let entries = extract_imports(source, "src/lib.rs");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].specifier, "self::parser");
+        assert!(entries[0].names.is_empty());
+    }
+
+    #[test]
+    fn extension_matching_ignores_case() {
+        let rust = extract_imports("use crate::math;\n", "SRC/LIB.RS");
+        assert_eq!(rust.len(), 1);
+        assert_eq!(rust[0].specifier, "crate::math");
+
+        let python = extract_imports("from utils import add\n", "MAIN.PY");
+        assert_eq!(python.len(), 1);
+        assert_eq!(python[0].specifier, "utils");
     }
 }

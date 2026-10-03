@@ -99,12 +99,12 @@ Frontend routes by file extension to a parse command. One Rust command per langu
 |---|---|---|
 | `.py` | `parse_python` | Python (MVP) |
 | `.js`, `.jsx`, `.ts`, `.tsx` | `parse_js_ts` | JS/TS shared module (MVP) |
+| `.rs` | `parse_rust` | Rust |
 | `.go` | `parse_go` | Go (Tier 1) |
 | `.c`, `.h` | `parse_c` | C (Tier 2) |
 | `.cpp`, `.cc`, `.hpp` | `parse_cpp` | C++ (Tier 2) |
 | `.java` | `parse_java` | Java (Tier 2) |
 | `.cs` | `parse_csharp` | C# (Tier 2) |
-| `.rs` | `parse_rust` | Rust (Tier 2) |
 | `.md` | `read_markdown` | docs viewer |
 | other | — | toast "Unsupported file type" |
 
@@ -115,8 +115,9 @@ Each language module: Tree-sitter grammar (cargo crate) + per-language extractio
 | Tier | Languages | Cost driver |
 |---|---|---|
 | 0 (MVP) | Python; JS, TS, JSX/TSX | Python = baseline extraction pattern. JS/TS = shared module via `tree-sitter-typescript` superset; arrow functions + object methods need extra rules; ~1.5–2x Python module effort |
+| 0 (done) | Rust | Containers instead of classes (`struct`/`enum`/`trait`/`impl` target/inline `mod`); `::` module paths replace relative specifiers. See ADR-0005 |
 | 1 (next) | Go | Function-style; existing extraction pattern applies as-is |
-| 2 | C, C++, Java, C#, Rust | Per-language extraction modules + edge-resolution rules: Java methods always class-nested; C headers/prototypes; C++ overloads/templates complicate call matching |
+| 2 | C, C++, Java, C# | Per-language extraction modules + edge-resolution rules: Java methods always class-nested; C headers/prototypes; C++ overloads/templates complicate call matching |
 | Deferred | HTML, CSS | HTML = DOM/tag tree, not callable units — needs a tree-view feature type, not a call graph. CSS = selectors/rules, no calls — plain viewer or special view, never a graph |
 
 Roadmap is documented intent under "Could Have" — no Must/Should MVP scope changes. Each new tier-N language is one extraction module + one grammar crate + tests; no frontend or payload changes.
@@ -140,6 +141,24 @@ Applies to `.js`, `.jsx`, `.ts`, `.tsx` via one module and the `parse_js_ts` com
 - Outputs: identifiers in `return` statements; empty for implicit-return arrow functions unless expression is a simple identifier.
 - Edges: call-expression / `new` expression callee name matching an in-file function or method name. Callbacks passed as arguments (`arr.map(cb)`) are external calls — no edge, per global rule.
 - Skipped: interfaces, type aliases, type annotations, generics, decorators, `export`/`import` statements (imports produce no edges, per "in-file calls only").
+
+### Extraction rules (Rust)
+
+Applies to `.rs` via one module and the `parse_rust` command. See ADR-0005.
+
+- Nodes:
+  - `fn` at file level → `function`.
+  - `struct_item`, `enum_item`, `union_item`, `trait_item`, each `impl_item` target, and each inline `mod_item` → `class` Container.
+  - `fn` inside an `impl`/`trait` body → `method` with `parent` = the type or trait id; inside an inline `mod` → `method` with `parent` = the module, id `module.Type.fn` when the `impl` is nested in that module.
+  - `function_signature_item` (trait method with no body) → `method` with an empty body.
+  - `const_item` / `static_item` → `variable`, value = the initializer expression.
+- Inputs: parameters as written (`&self`, `mut x: i32`, `factor: i32`).
+- Outputs: identifiers in `return` expressions; when a body has none, the trailing expression of its block.
+- Uses: identifiers naming an imported `use` path in the body.
+- Edges: `call_expression` callee matching an in-file function or method name, including `self.method()`, `Self::method()` and `Type::method()`. `Struct { .. }` construction is not a call. Calls inside a macro invocation's arguments produce no edge (macro arguments stay unexpanded token trees).
+- Skipped: type aliases, `macro_definition`, `let` bindings, inline `mod` bodies' own module identity, and `mod foo;` declarations (which surface as Import Edges to the module file instead).
+- Imports: `use` trees flatten to one entry per path; `crate`/`self`/`super` and `::` item paths resolve against the module-file layout without reading `Cargo.toml`.
+- Entry points: `main.rs`, then `lib.rs`, by the conventional-name rule.
 
 ## 4. Workflows
 

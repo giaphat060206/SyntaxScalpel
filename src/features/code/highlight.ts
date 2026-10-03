@@ -6,6 +6,7 @@ import javascript from "highlight.js/lib/languages/javascript";
 import json from "highlight.js/lib/languages/json";
 import markdown from "highlight.js/lib/languages/markdown";
 import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
 import sql from "highlight.js/lib/languages/sql";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
@@ -18,6 +19,7 @@ hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("markdown", markdown);
 hljs.registerLanguage("python", python);
+hljs.registerLanguage("rust", rust);
 hljs.registerLanguage("sql", sql);
 hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("xml", xml);
@@ -29,6 +31,7 @@ const BY_EXTENSION: Record<string, string> = {
   jsx: "javascript",
   ts: "typescript",
   tsx: "typescript",
+  rs: "rust",
   json: "json",
   css: "css",
   scss: "css",

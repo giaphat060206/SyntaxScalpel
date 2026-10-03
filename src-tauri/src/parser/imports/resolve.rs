@@ -19,7 +19,7 @@ pub struct ImportAnalysis {
     pub imported_by: Vec<ImporterEntry>,
 }
 
-const CODE_EXTENSIONS: [&str; 5] = ["py", "ts", "tsx", "js", "jsx"];
+const CODE_EXTENSIONS: [&str; 6] = ["py", "ts", "tsx", "js", "jsx", "rs"];
 const SKIPPED_DIRS: [&str; 8] = [
     ".git", "node_modules", "target", "dist", ".scalpel", "__pycache__", ".venv", "venv",
 ];
@@ -77,6 +77,18 @@ pub fn resolve_specifier(
 ) -> Option<PathBuf> {
     if specifier.is_empty() {
         return None;
+    }
+
+    // Rust module paths are unambiguous: `::` never appears in a JS or Python
+    // specifier, and `crate`/`self`/`super` are Rust path roots. Resolution
+    // falls through when nothing matches so other languages keep their rules.
+    if specifier.contains("::") || matches!(specifier, "crate" | "self" | "super") {
+        if let Some(found) = rust_bases(specifier, importer_rel)
+            .into_iter()
+            .find_map(|base| try_candidates(root, &base))
+        {
+            return Some(found);
+        }
     }
 
     if specifier.starts_with('.') {
@@ -278,8 +290,8 @@ impl Resolver {
 
 fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
     let base = root.join(relative_base);
-    const EXTS: [&str; 17] = [
-        "py", "ts", "tsx", "js", "jsx", "md", "json", "css", "scss", "html", "yaml", "yml",
+    const EXTS: [&str; 18] = [
+        "py", "ts", "tsx", "js", "jsx", "rs", "md", "json", "css", "scss", "html", "yaml", "yml",
         "toml", "ini", "txt", "sql", "sh",
     ];
     // A base whose file name already contains a dot (`ai.easy`, `app.config`)
@@ -310,12 +322,95 @@ fn try_candidates(root: &Path, relative_base: &Path) -> Option<PathBuf> {
                 return Some(index);
             }
         }
+        let module = base.join("mod.rs");
+        if module.is_file() {
+            return Some(module);
+        }
         let init = base.join("__init__.py");
         if init.is_file() {
             return Some(init);
         }
     }
     None
+}
+
+/// Directory holding the children of the module a file declares.
+///
+/// A file `a/b.rs` declares module `a::b`, whose child modules live in `a/b/`;
+/// crate-root files (`lib.rs`, `main.rs`, `mod.rs`) own their own directory.
+fn module_dir(importer_rel: &str) -> PathBuf {
+    let path = Path::new(importer_rel);
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if matches!(stem.as_str(), "mod" | "lib" | "main") {
+        dir
+    } else {
+        dir.join(stem)
+    }
+}
+
+/// The importer's directory and every ancestor up to the project root, nearest
+/// first. A crate root sits at one of these, so `crate::a::b` resolves without
+/// reading `Cargo.toml`.
+fn ancestor_dirs(importer_rel: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut current = Path::new(importer_rel)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    loop {
+        dirs.push(current.clone());
+        if current.as_os_str().is_empty() {
+            break;
+        }
+        current = current.parent().map(Path::to_path_buf).unwrap_or_default();
+    }
+    dirs
+}
+
+/// Candidate project-relative bases for a Rust module path, best guess first.
+///
+/// Trailing segments may name items rather than modules (`crate::math::add`),
+/// so progressively shorter prefixes are tried; longer prefixes win across all
+/// anchors, which keeps `crate::parser::python` pointing at `python.rs` even
+/// when a sibling `parser.rs` exists.
+fn rust_bases(specifier: &str, importer_rel: &str) -> Vec<PathBuf> {
+    let segments: Vec<&str> = specifier.split("::").filter(|s| !s.is_empty()).collect();
+    let (anchors, rest): (Vec<PathBuf>, &[&str]) = match segments.first().copied() {
+        Some("crate") => (ancestor_dirs(importer_rel), &segments[1..]),
+        Some("self") => (vec![module_dir(importer_rel)], &segments[1..]),
+        Some("super") => {
+            let mut dir = module_dir(importer_rel);
+            let mut index = 0;
+            while segments.get(index) == Some(&"super") {
+                dir = dir.parent().map(Path::to_path_buf).unwrap_or_default();
+                index += 1;
+            }
+            (vec![dir], &segments[index..])
+        }
+        // A bare path is a Rust 2015-style crate-relative module path.
+        _ => (ancestor_dirs(importer_rel), &segments[..]),
+    };
+
+    let mut bases = Vec::new();
+    if rest.is_empty() {
+        // `use super::*;` depends on the parent module's own file.
+        bases.extend(anchors);
+        return bases;
+    }
+    for length in (1..=rest.len()).rev() {
+        for anchor in &anchors {
+            let mut base = anchor.clone();
+            for segment in &rest[..length] {
+                base.push(segment);
+            }
+            bases.push(base);
+        }
+    }
+    bases
 }
 
 pub fn stem_index(files: &[PathBuf]) -> HashMap<String, PathBuf> {
@@ -473,5 +568,74 @@ mod tests {
         let resolved = resolver.resolve(&entry, "main.py");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].target, root.join("utils.py"));
+    }
+
+    #[test]
+    fn resolves_crate_paths_without_a_cargo_manifest() {
+        let root = temp_project("rust-crate");
+        std::fs::create_dir_all(root.join("src/parser")).unwrap();
+        std::fs::write(root.join("src/parser/python.rs"), "").unwrap();
+        std::fs::write(root.join("src/parser/mod.rs"), "").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        let files = project_files(&root, 0);
+        let index = stem_index(&files);
+
+        let found = resolve_specifier("crate::parser::python", "src/parser/mod.rs", &root, &index)
+            .expect("crate path resolves");
+        assert_eq!(relative(&root, &found), "src/parser/python.rs");
+
+        let module = resolve_specifier("crate::parser", "src/lib.rs", &root, &index)
+            .expect("module path falls back to mod.rs");
+        assert_eq!(relative(&root, &module), "src/parser/mod.rs");
+    }
+
+    #[test]
+    fn resolves_item_imports_to_their_module_file() {
+        let root = temp_project("rust-item");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/math.rs"), "").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        let files = project_files(&root, 0);
+        let index = stem_index(&files);
+
+        let found = resolve_specifier("crate::math::add", "src/lib.rs", &root, &index)
+            .expect("trailing item name is not part of the file path");
+        assert_eq!(relative(&root, &found), "src/math.rs");
+    }
+
+    #[test]
+    fn resolves_module_declarations_and_parent_modules() {
+        let root = temp_project("rust-mods");
+        std::fs::create_dir_all(root.join("src/a/b")).unwrap();
+        std::fs::write(root.join("src/a/b.rs"), "").unwrap();
+        std::fs::write(root.join("src/a/b/child.rs"), "").unwrap();
+        std::fs::write(root.join("src/a/util.rs"), "").unwrap();
+        std::fs::write(root.join("src/a/mod.rs"), "").unwrap();
+        let files = project_files(&root, 0);
+        let index = stem_index(&files);
+
+        let child = resolve_specifier("self::child", "src/a/b.rs", &root, &index)
+            .expect("`mod child;` inside b.rs lives in b/");
+        assert_eq!(relative(&root, &child), "src/a/b/child.rs");
+
+        let util = resolve_specifier("super::util", "src/a/b.rs", &root, &index)
+            .expect("`super` is the parent module directory");
+        assert_eq!(relative(&root, &util), "src/a/util.rs");
+
+        let parent = resolve_specifier("super", "src/a/b.rs", &root, &index)
+            .expect("`use super::*` depends on the parent module file");
+        assert_eq!(relative(&root, &parent), "src/a/mod.rs");
+    }
+
+    #[test]
+    fn external_rust_crates_stay_unresolved() {
+        let root = temp_project("rust-external");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        let files = project_files(&root, 0);
+        let index = stem_index(&files);
+
+        assert!(resolve_specifier("std::collections::HashMap", "src/lib.rs", &root, &index).is_none());
+        assert!(resolve_specifier("serde::Serialize", "src/lib.rs", &root, &index).is_none());
     }
 }

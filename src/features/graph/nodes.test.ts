@@ -58,3 +58,59 @@ describe("decorateFunctionNodes", () => {
     expect((nodes.find((n) => n.id === "V")?.data as { dimmed: boolean }).dimmed).toBe(true);
   });
 });
+
+const rustResult: ParseResult = {
+  filePath: "src/lib.rs",
+  nodes: [
+    { id: "Point", kind: "class", name: "Point", params: [], returns: [], uses: [] },
+    {
+      id: "Point.new",
+      kind: "method",
+      name: "new",
+      params: ["x: i32"],
+      returns: [],
+      uses: [],
+      parent: "Point",
+    },
+    { id: "SCALE", kind: "variable", name: "SCALE", params: [], returns: [], uses: [], value: "10" },
+    {
+      id: "helper",
+      kind: "function",
+      name: "helper",
+      params: ["value: i32"],
+      returns: ["value"],
+      uses: [],
+    },
+    { id: "tests", kind: "class", name: "tests", params: [], returns: [], uses: [] },
+    {
+      id: "tests.inside",
+      kind: "method",
+      name: "inside",
+      params: [],
+      returns: [],
+      uses: [],
+      parent: "tests",
+    },
+  ],
+  edges: [{ source: "Point.new", target: "helper" }],
+};
+
+describe("buildFunctionNodes for a Rust payload", () => {
+  it("renders every definition the backend sent", () => {
+    const ids = buildFunctionNodes(rustResult, null).map((node) => node.id);
+    for (const node of rustResult.nodes) {
+      expect(ids).toContain(node.id);
+    }
+  });
+
+  it("nests impl and module methods inside their containers", () => {
+    const nodes = buildFunctionNodes(rustResult, null);
+    expect(nodes.find((n) => n.id === "Point.new")?.parentId).toBe("Point");
+    expect(nodes.find((n) => n.id === "tests.inside")?.parentId).toBe("tests");
+  });
+
+  it("still groups Rust constants under the CONSTANTS container", () => {
+    const nodes = buildFunctionNodes(rustResult, null);
+    expect(nodes.find((n) => n.id === "SCALE")?.parentId).toBe(CONSTANTS_NODE_ID);
+  });
+});

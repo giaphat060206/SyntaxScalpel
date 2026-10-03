@@ -27,7 +27,7 @@ Repo folder is `SyntaxScalper` (older name); the product name is **SyntaxScalpel
 ## 2. Tech stack
 
 - **Shell/runtime:** Tauri v2 (WebView2), React 18 + TypeScript (strict, `noUnusedLocals`), Vite.
-- **Backend:** Rust; `tree-sitter` 0.25 (+ python/typescript/javascript grammars); `serde`/`serde_json`;
+- **Backend:** Rust; `tree-sitter` 0.25 (+ python/typescript/javascript/rust grammars); `serde`/`serde_json`;
   **`serde_norway`** (YAML, for OpenAPI/YAML specs and `@openapi` blocks).
 - **Frontend libs:** `@xyflow/react` (React Flow v12), `react-resizable-panels` v4, `react-markdown` +
   `remark-gfm` + `rehype-highlight`, `highlight.js`, `elkjs`, Tailwind v3.4 + `@tailwindcss/typography`, Vitest.
@@ -53,13 +53,14 @@ src-tauri/src/
   parser/
     python.rs            Python extraction
     jsts.rs              JS/TS extraction (shared for .js/.jsx/.ts/.tsx)
+    rust.rs              Rust extraction (structs/enums/traits/impls/inline mods as containers)
     function_graph.rs    shared Def + edge/uses/returns assembly; each language injects calls_in
     imports/             extract.rs (tree-sitter) + resolve.rs (Resolver, AliasMap) + mod.rs re-exports
     project.rs           project_graph(root, scope): folders, files, edges, entry points, external nodes
     api/                 analyze_api extraction: OpenAPI spec adapter, swagger-jsdoc @openapi adapter,
                          Next.js App Router adapter, $ref resolver, source merge
   commands/
-    parse.rs             parse_python, parse_js_ts, analyze_imports, project_graph, analyze_api
+    parse.rs             parse_python, parse_js_ts, parse_rust, analyze_imports, project_graph, analyze_api
     fs_cmds.rs           list_directory, read_markdown, read_file
 src/
   main.tsx               entry; ErrorBoundary + global error overlay
@@ -85,7 +86,7 @@ src/
                                   Breadcrumb.tsx, Welcome.tsx
 docs/superpowers/specs/  design specs; docs/superpowers/plans/  implementation plans
 docs/adr/                ADR-0001 single-file graphs, 0002 no layout persistence, 0003 ELK owns layout,
-                         0004 endpoints static extraction
+                         0004 endpoints static extraction, 0005 Rust Function Graph mapping
 GLOSSARY.md              domain vocabulary
 ```
 
@@ -127,8 +128,11 @@ GLOSSARY.md              domain vocabulary
 ## 6. Key decisions and constraints (respect these)
 
 - **Single-file graphs**; edges are in-file only; class ids are never edge targets; no self-edges (ADR-0001).
-- Node ids: `name`, `ClassName`, `ClassName.method`, `varName.method`.
+- Node ids: `name`, `ClassName`, `ClassName.method`, `varName.method`, `modName.item` (item inside an inline Rust
+  `mod`). A `parent` must always name a **class** node that is top-level in the same payload — the frontend drops
+  a child whose parent it cannot find.
 - **Endpoints are extracted statically** from declared contracts only; never run/query the backend (ADR-0004).
+- **Rust maps onto the same four kinds** — containers instead of classes, one container level deep (ADR-0005).
 - **No layout persistence** (ADR-0002); **ELK owns layout** (ADR-0003).
 - **Rules of Hooks**: every hook runs before any early return.
 - React Flow v12: controlled nodes/edges; don't pass the `fitView` prop when centring programmatically; canvas
@@ -140,6 +144,8 @@ GLOSSARY.md              domain vocabulary
 
 - Integration branch `feature/backend_endpoints_view` holds the whole project history since `main` (the ELK work,
   UI work, the module-deepening refactor, the Endpoints feature, and follow-up UI tweaks). `main` is behind.
+- Rust support lives on branch **`feature/rust-support`** (off `main`): `parser/rust.rs`, `parse_rust`, the `.rs`
+  extension route, `use`/`mod` import extraction, `::` specifier resolution, and Rust entry points.
 - The Endpoints spec is GitHub issue **#1**; its tickets **#2–#7** are closed.
 - Suites green at the time of writing: `npm test`, `npm run build`, `cargo test`.
 
@@ -151,4 +157,7 @@ GLOSSARY.md              domain vocabulary
 - The Endpoints view always scans the Project Root, not the current scope.
 - No component tests for the graph integrations beyond the canvas/adapters; ELK worker/fallback branches are
   unit-untested.
-- Wide language coverage is still MVP (Python, JS/TS); other languages are roadmap.
+- Rust: calls written inside a macro invocation's arguments produce no edge (macro arguments are unexpanded token
+  trees); a type declared inside an inline `mod` has no Container of its own — its methods group under the module;
+  nested containers are not modelled beyond one level.
+- Languages covered are Python, JS/TS, and Rust; Go, C, C++, Java, and C# are roadmap.

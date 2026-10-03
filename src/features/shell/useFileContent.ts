@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type { ParseResult } from "../../shared/types";
 import { routeForExtension } from "../../shared/extensions";
-import { parseJsTs, parsePython, readMarkdown } from "../../shared/ipc";
+import { parseJsTs, parsePython, parseRust, readMarkdown } from "../../shared/ipc";
 import { useAsyncLoad } from "./useAsyncLoad";
 
 export type FileState =
@@ -31,6 +31,8 @@ export function useFileContent(
         return { status: "graph", result: await parsePython(filePath, root) };
       case "jsts":
         return { status: "graph", result: await parseJsTs(filePath, root) };
+      case "rust":
+        return { status: "graph", result: await parseRust(filePath, root) };
       case "markdown":
         return { status: "markdown", content: await readMarkdown(filePath, root) };
       default:
