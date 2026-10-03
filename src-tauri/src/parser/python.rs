@@ -4,6 +4,12 @@ use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
+    Ok(function_graph::assemble(definitions(source, file_path)?, file_path))
+}
+
+/// Every Definition this source declares, each with the names it calls.
+/// Shared with the cross-file neighbourhood builder.
+pub(crate) fn definitions(source: &str, file_path: &str) -> Result<Vec<Def>, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_python::LANGUAGE.into())
@@ -13,8 +19,7 @@ pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String
         .ok_or_else(|| "failed to parse source".to_string())?;
 
     let imported = imported_names(source, file_path);
-    let defs = collect_defs(tree.root_node(), source, &imported);
-    Ok(function_graph::assemble(defs, source, file_path, calls_in))
+    Ok(collect_defs(tree.root_node(), source, &imported))
 }
 
 /// Decorated definitions (`@staticmethod`, `@app.route`) wrap the real
@@ -28,7 +33,7 @@ fn unwrap_decorated(node: Node) -> Node {
     }
 }
 
-fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
+fn collect_defs(root: Node, source: &str, imported: &[String]) -> Vec<Def> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
@@ -71,11 +76,11 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
                     params: Vec::new(),
                     returns: Vec::new(),
                     uses: class_uses,
+                    calls: Vec::new(),
                     value: None,
                     parent: None,
                     start_line: line_range(child).0,
                     end_line: line_range(child).1,
-                    body: None,
                 });
             }
             "expression_statement" => {
@@ -89,13 +94,13 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
     defs
 }
 
-fn function_def<'a>(
-    node: Node<'a>,
+fn function_def(
+    node: Node,
     source: &str,
     parent: Option<String>,
     imported: &[String],
-    range_node: Option<Node<'a>>,
-) -> Option<Def<'a>> {
+    range_node: Option<Node>,
+) -> Option<Def> {
     let name = node
         .child_by_field_name("name")?
         .utf8_text(source.as_bytes())
@@ -114,6 +119,7 @@ fn function_def<'a>(
     let body = node.child_by_field_name("body")?;
     let returns = return_names(body, source);
     let uses = uses_in(body, source, imported);
+    let calls = calls_in(body, source);
     let span = range_node.unwrap_or(node);
 
     Some(Def {
@@ -123,19 +129,15 @@ fn function_def<'a>(
         params,
         returns,
         uses,
+        calls,
         value: None,
         parent,
         start_line: line_range(span).0,
         end_line: line_range(span).1,
-        body: Some(body),
     })
 }
 
-fn variable_def<'a>(
-    statement: Node<'a>,
-    source: &str,
-    imported: &[String],
-) -> Option<Def<'a>> {
+fn variable_def(statement: Node, source: &str, imported: &[String]) -> Option<Def> {
     let mut cursor = statement.walk();
     let assignment = statement
         .named_children(&mut cursor)
@@ -161,11 +163,11 @@ fn variable_def<'a>(
         params: Vec::new(),
         returns: Vec::new(),
         uses,
+        calls: Vec::new(),
         value,
         parent: None,
         start_line: line_range(statement).0,
         end_line: line_range(statement).1,
-        body: None,
     })
 }
 
@@ -276,7 +278,7 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<String> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
@@ -388,6 +390,23 @@ def build():
         let build = result.nodes.iter().find(|n| n.name == "build").unwrap();
         assert!(build.uses.contains(&"DEFAULT_NODES".to_string()));
         assert!(build.uses.contains(&"getpid".to_string()));
+    }
+
+    #[test]
+    fn records_the_names_each_definition_calls() {
+        let defs = definitions(SOURCE, "src/main.py").unwrap();
+        let main = defs.iter().find(|def| def.name == "main").unwrap();
+        assert_eq!(main.calls, vec!["add".to_string()]);
+
+        let add = defs.iter().find(|def| def.name == "add").unwrap();
+        assert!(add.calls.is_empty());
+    }
+
+    #[test]
+    fn a_module_level_assignment_exposes_value_but_calls_nothing() {
+        let defs = definitions("TOTAL = compute(1)\n", "src/main.py").unwrap();
+        assert_eq!(defs[0].value.as_deref(), Some("compute(1)"));
+        assert!(defs[0].calls.is_empty());
     }
 
     #[test]

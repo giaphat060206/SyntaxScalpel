@@ -4,6 +4,12 @@ use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
+    Ok(function_graph::assemble(definitions(source, file_path)?, file_path))
+}
+
+/// Every Definition this source declares, each with the names it calls.
+/// Shared with the cross-file neighbourhood builder.
+pub(crate) fn definitions(source: &str, file_path: &str) -> Result<Vec<Def>, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&tree_sitter_rust::LANGUAGE.into())
@@ -20,7 +26,7 @@ pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String
     let mut defs = Vec::new();
     let mut containers = Vec::new();
     collect_items(tree.root_node(), &ctx, None, "", &mut defs, &mut containers);
-    Ok(function_graph::assemble(defs, source, file_path, calls_in))
+    Ok(defs)
 }
 
 struct Ctx<'s> {
@@ -66,12 +72,12 @@ fn definition_lines(node: Node) -> (usize, usize) {
 /// Only root-level items open a container (`struct`/`enum`/`union`/`trait`,
 /// an `impl` target, or an inline `mod`); definitions inside an inline module
 /// stay children of that module, with the impl target folded into their id.
-fn collect_items<'a>(
-    node: Node<'a>,
+fn collect_items(
+    node: Node,
     ctx: &Ctx,
     parent: Option<&str>,
     prefix: &str,
-    defs: &mut Vec<Def<'a>>,
+    defs: &mut Vec<Def>,
     containers: &mut Vec<String>,
 ) {
     let mut cursor = node.walk();
@@ -172,11 +178,11 @@ fn base_type_name(node: Node, ctx: &Ctx) -> Option<String> {
     }
 }
 
-fn add_container<'a>(
+fn add_container(
     id: &str,
     name: &str,
-    node: Node<'a>,
-    defs: &mut Vec<Def<'a>>,
+    node: Node,
+    defs: &mut Vec<Def>,
     containers: &mut Vec<String>,
 ) {
     if containers.iter().any(|existing| existing == id) {
@@ -191,20 +197,15 @@ fn add_container<'a>(
         params: Vec::new(),
         returns: Vec::new(),
         uses: Vec::new(),
+        calls: Vec::new(),
         value: None,
         parent: None,
         start_line,
         end_line,
-        body: None,
     });
 }
 
-fn function_def<'a>(
-    node: Node<'a>,
-    ctx: &Ctx,
-    parent: Option<&str>,
-    prefix: &str,
-) -> Option<Def<'a>> {
+fn function_def(node: Node, ctx: &Ctx, parent: Option<&str>, prefix: &str) -> Option<Def> {
     let name = node.child_by_field_name("name").map(|name| node_text(name, ctx.source))?;
     if name.is_empty() {
         return None;
@@ -212,6 +213,7 @@ fn function_def<'a>(
     let body = node.child_by_field_name("body");
     let returns = body.map(|body| return_names(body, ctx)).unwrap_or_default();
     let uses = body.map(|body| uses_in(body, ctx)).unwrap_or_default();
+    let calls = body.map(|body| calls_in(body, ctx.source)).unwrap_or_default();
     let (start_line, end_line) = definition_lines(node);
 
     Some(Def {
@@ -225,15 +227,15 @@ fn function_def<'a>(
         params: parameter_names(node, ctx),
         returns,
         uses,
+        calls,
         value: None,
         parent: parent.map(str::to_string),
         start_line,
         end_line,
-        body,
     })
 }
 
-fn value_def<'a>(node: Node<'a>, ctx: &Ctx, prefix: &str) -> Option<Def<'a>> {
+fn value_def(node: Node, ctx: &Ctx, prefix: &str) -> Option<Def> {
     let name = item_name(node, ctx);
     if name.is_empty() {
         return None;
@@ -254,11 +256,11 @@ fn value_def<'a>(node: Node<'a>, ctx: &Ctx, prefix: &str) -> Option<Def<'a>> {
         params: Vec::new(),
         returns: Vec::new(),
         uses,
+        calls: Vec::new(),
         value,
         parent: None,
         start_line,
         end_line,
-        body: None,
     })
 }
 
@@ -391,7 +393,7 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<String> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
@@ -598,6 +600,19 @@ fn fallback(value: i32) -> i32 {
     fn returns_are_empty_when_a_body_returns_nothing() {
         let result = parse("fn nothing() {\n    let x = 1;\n}\n");
         assert!(node(&result, "nothing").returns.is_empty());
+    }
+
+    #[test]
+    fn records_the_names_each_definition_calls() {
+        let defs = definitions(SOURCE, "src/lib.rs").unwrap();
+
+        let helper = defs.iter().find(|def| def.id == "helper").unwrap();
+        assert!(helper.calls.contains(&"double".to_string()));
+        assert!(helper.calls.contains(&"fallback".to_string()));
+
+        // A trait method with no body has nothing to call.
+        let declared = defs.iter().find(|def| def.id == "Shape.area").unwrap();
+        assert!(declared.calls.is_empty());
     }
 
     #[test]

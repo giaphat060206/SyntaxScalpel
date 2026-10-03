@@ -4,18 +4,23 @@ use tree_sitter::Node;
 
 use crate::models::{GraphEdge, GraphNode, NodeKind, ParseResult};
 
-pub struct Def<'a> {
+/// One extracted Definition, with everything a Function Graph needs.
+///
+/// `calls` is captured while the definition's body is still in hand, so edge
+/// building never re-walks the tree and other modules can read a file's
+/// Definitions without holding on to its syntax tree.
+pub struct Def {
     pub id: String,
     pub kind: NodeKind,
     pub name: String,
     pub params: Vec<String>,
     pub returns: Vec<String>,
     pub uses: Vec<String>,
+    pub calls: Vec<String>,
     pub value: Option<String>,
     pub parent: Option<String>,
     pub start_line: usize,
     pub end_line: usize,
-    pub body: Option<Node<'a>>,
 }
 
 pub fn line_range(node: Node) -> (usize, usize) {
@@ -45,11 +50,7 @@ pub fn to_node(def: &Def) -> GraphNode {
     }
 }
 
-pub fn collect_edges(
-    defs: &[Def],
-    source: &str,
-    calls_in: fn(Node, &str) -> Vec<String>,
-) -> Vec<GraphEdge> {
+pub fn collect_edges(defs: &[Def]) -> Vec<GraphEdge> {
     let mut targets: HashMap<&str, &str> = HashMap::new();
     for def in defs {
         if def.kind != NodeKind::Class && def.kind != NodeKind::Variable {
@@ -60,9 +61,7 @@ pub fn collect_edges(
 
     let mut edges: Vec<GraphEdge> = Vec::new();
     for def in defs {
-        let Some(body) = def.body else { continue };
-        let calls = calls_in(body, source);
-        for name in calls {
+        for name in &def.calls {
             let Some(target) = targets.get(name.as_str()) else {
                 continue;
             };
@@ -84,14 +83,9 @@ pub fn collect_edges(
     edges
 }
 
-pub fn assemble(
-    defs: Vec<Def>,
-    source: &str,
-    file_path: &str,
-    calls_in: fn(Node, &str) -> Vec<String>,
-) -> ParseResult {
+pub fn assemble(defs: Vec<Def>, file_path: &str) -> ParseResult {
     let nodes = defs.iter().map(to_node).collect();
-    let edges = collect_edges(&defs, source, calls_in);
+    let edges = collect_edges(&defs);
     ParseResult {
         nodes,
         edges,
@@ -104,7 +98,7 @@ mod tests {
     use super::*;
     use crate::models::{GraphEdge, NodeKind};
 
-    fn def(id: &str, kind: NodeKind) -> Def<'static> {
+    fn def(id: &str, kind: NodeKind) -> Def {
         Def {
             id: id.into(),
             kind,
@@ -112,30 +106,29 @@ mod tests {
             params: vec![],
             returns: vec![],
             uses: vec![],
+            calls: vec![],
             value: None,
             parent: None,
             start_line: 1,
             end_line: 1,
-            body: None,
         }
     }
 
     #[test]
     fn collect_edges_maps_names_dedups_and_skips_self_edges() {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_python::LANGUAGE.into())
-            .unwrap();
-        let tree = parser.parse("x = 1\n", None).unwrap();
-        let body = tree.root_node();
-
         let mut caller = def("caller", NodeKind::Function);
-        caller.body = Some(body);
+        caller.calls = vec![
+            "callee".into(),
+            "callee".into(),
+            "C".into(),
+            "self_ref".into(),
+            "public_name".into(),
+        ];
         let mut self_ref = def("self_ref", NodeKind::Function);
-        self_ref.body = Some(body);
+        self_ref.calls = vec!["callee".into(), "public_name".into()];
         let mut aliased = def("aliased_id", NodeKind::Function);
         aliased.name = "public_name".into();
-        aliased.body = Some(body);
+        aliased.calls = vec!["callee".into(), "self_ref".into()];
         let defs = vec![
             caller,
             self_ref,
@@ -144,18 +137,8 @@ mod tests {
             def("C", NodeKind::Class),
         ];
 
-        let edges = collect_edges(&defs, "", |_, _| {
-            vec![
-                "callee".into(),
-                "callee".into(),
-                "C".into(),
-                "self_ref".into(),
-                "public_name".into(),
-            ]
-        });
-
         assert_eq!(
-            edges,
+            collect_edges(&defs),
             vec![
                 GraphEdge {
                     source: "caller".into(),
@@ -186,6 +169,30 @@ mod tests {
                     target: "self_ref".into(),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn a_definition_without_calls_contributes_no_edges() {
+        assert!(collect_edges(&[def("loner", NodeKind::Function)]).is_empty());
+    }
+
+    #[test]
+    fn containers_and_variables_are_never_edge_targets() {
+        let mut caller = def("caller", NodeKind::Function);
+        caller.calls = vec!["C".into(), "V".into(), "callee".into()];
+        let defs = vec![
+            caller,
+            def("C", NodeKind::Class),
+            def("V", NodeKind::Variable),
+            def("callee", NodeKind::Function),
+        ];
+        assert_eq!(
+            collect_edges(&defs),
+            vec![GraphEdge {
+                source: "caller".into(),
+                target: "callee".into(),
+            }]
         );
     }
 }

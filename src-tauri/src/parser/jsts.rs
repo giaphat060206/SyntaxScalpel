@@ -14,6 +14,12 @@ pub(crate) fn grammar_for(file_path: &str) -> tree_sitter::Language {
 }
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
+    Ok(function_graph::assemble(definitions(source, file_path)?, file_path))
+}
+
+/// Every Definition this source declares, each with the names it calls.
+/// Shared with the cross-file neighbourhood builder.
+pub(crate) fn definitions(source: &str, file_path: &str) -> Result<Vec<Def>, String> {
     let mut parser = Parser::new();
     parser
         .set_language(&grammar_for(file_path))
@@ -23,11 +29,10 @@ pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String
         .ok_or_else(|| "failed to parse source".to_string())?;
 
     let imported = imported_names(source, file_path);
-    let defs = collect_defs(tree.root_node(), source, &imported);
-    Ok(function_graph::assemble(defs, source, file_path, calls_in))
+    Ok(collect_defs(tree.root_node(), source, &imported))
 }
 
-pub fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<String> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
@@ -70,7 +75,7 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<Def<'a>> {
+fn collect_defs(root: Node, source: &str, imported: &[String]) -> Vec<Def> {
     let mut defs = Vec::new();
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
@@ -113,11 +118,11 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
                         params: Vec::new(),
                         returns: Vec::new(),
                         uses: class_uses,
+                        calls: Vec::new(),
                         value: None,
                         parent: None,
                         start_line: line_range(child).0,
                         end_line: line_range(child).1,
-                        body: None,
                     });
                 }
             }
@@ -128,11 +133,11 @@ fn collect_defs<'a>(root: Node<'a>, source: &str, imported: &[String]) -> Vec<De
     defs
 }
 
-fn collect_declarators<'a>(
-    declaration: Node<'a>,
+fn collect_declarators(
+    declaration: Node,
     source: &str,
     parent: Option<String>,
-    defs: &mut Vec<Def<'a>>,
+    defs: &mut Vec<Def>,
     imported: &[String],
 ) {
     let mut cursor = declaration.walk();
@@ -180,23 +185,18 @@ fn collect_declarators<'a>(
                     params: Vec::new(),
                     returns: Vec::new(),
                     uses: uses_in_text(&node_text(value, source), imported),
+                    calls: Vec::new(),
                     value: Some(collapse_whitespace(&node_text(value, source))),
                     parent: None,
                     start_line: line_range(declarator).0,
                     end_line: line_range(declarator).1,
-                    body: None,
                 });
             }
         }
     }
 }
 
-fn collect_object_methods<'a>(
-    root: Node<'a>,
-    source: &str,
-    imported: &[String],
-    defs: &mut Vec<Def<'a>>,
-) {
+fn collect_object_methods(root: Node, source: &str, imported: &[String], defs: &mut Vec<Def>) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         let mut cursor = node.walk();
@@ -209,12 +209,12 @@ fn collect_object_methods<'a>(
     }
 }
 
-fn collect_methods_in_object<'a>(
-    object: Node<'a>,
+fn collect_methods_in_object(
+    object: Node,
     source: &str,
     owner_override: Option<String>,
     imported: &[String],
-    defs: &mut Vec<Def<'a>>,
+    defs: &mut Vec<Def>,
 ) {
     let owner = owner_override.or_else(|| ancestor_variable_name(object, source));
     let mut cursor = object.walk();
@@ -255,12 +255,12 @@ fn ancestor_variable_name(node: Node, source: &str) -> Option<String> {
     None
 }
 
-fn declared_function<'a>(
-    node: Node<'a>,
+fn declared_function(
+    node: Node,
     source: &str,
     parent: Option<String>,
     imported: &[String],
-) -> Option<Def<'a>> {
+) -> Option<Def> {
     let name = node
         .child_by_field_name("name")
         .map(|n| node_text(n, source))
@@ -289,6 +289,8 @@ fn declared_function<'a>(
         Some(b) => uses_in_text(&node_text(b, source), imported),
         None => Vec::new(),
     };
+    // An expression body is the whole arrow function, so calls in it count.
+    let calls = body.map(|b| calls_in(b, source)).unwrap_or_default();
 
     Some(Def {
         id,
@@ -297,11 +299,11 @@ fn declared_function<'a>(
         params,
         returns,
         uses,
+        calls,
         value: None,
         parent,
         start_line: line_range(node).0,
         end_line: line_range(node).1,
-        body: node.child_by_field_name("body"),
     })
 }
 
@@ -505,6 +507,36 @@ function run() {
         let result = parse(source);
         let pick = result.nodes.iter().find(|n| n.name == "pick").unwrap();
         assert_eq!(pick.uses, vec!["MAX_NODES".to_string()]);
+    }
+
+    #[test]
+    fn records_the_names_each_definition_calls() {
+        let source = "\
+function helper(x) {
+  return x;
+}
+
+const dist = (a) => helper(a);
+
+function run() {
+  const c = new Calc();
+  return dist(c.double(2));
+}
+
+const MAX = 10;
+";
+        let defs = definitions(source, "src/app.js").unwrap();
+
+        // An expression-bodied arrow function: the whole body is a call site.
+        let dist = defs.iter().find(|def| def.name == "dist").unwrap();
+        assert_eq!(dist.calls, vec!["helper".to_string()]);
+
+        let run = defs.iter().find(|def| def.name == "run").unwrap();
+        assert!(run.calls.contains(&"dist".to_string()));
+        assert!(run.calls.contains(&"double".to_string()));
+
+        let max = defs.iter().find(|def| def.name == "MAX").unwrap();
+        assert!(max.calls.is_empty());
     }
 
     #[test]
