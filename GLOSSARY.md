@@ -100,6 +100,7 @@ A Definition for a named callable that is not a Method.
 
 **Class**:
 A Definition that is a Container in a Function Graph and holds Method Definitions.
+In Rust the Container is a `struct`, `enum`, `union`, `trait`, an `impl` target, or an inline `mod`.
 
 **Method**:
 A Definition for a callable belonging to a Class or object.

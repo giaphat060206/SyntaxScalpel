@@ -59,7 +59,7 @@ interface ProjectGraph {
 ### Rules
 
 - Walk the scope subtree with the existing skip list (`.git`, `node_modules`, `target`, `dist`, `.scalpel`, `__pycache__`, `.venv`, `venv`, dot-dirs), depth cap 12, symlinks skipped.
-- Extension allow-list: `py, js, jsx, ts, tsx` (files) — the languages the parsers support. Markdown is not part of the project graph.
+- Extension allow-list: `py, js, jsx, ts, tsx, rs` (files) — the languages the parsers support. Markdown is not part of the project graph.
 - `imports` per file: reuse `imports::extract_imports`, then resolve each specifier with `imports::resolve_specifier` against a stem index built from the scope's files.
 - Folder ids are project-relative paths; ids must be non-empty (React Flow requires it), so the scope root uses `.` rather than `""`.
 - `edges`: one per (source file, resolved target file), deduplicated. Only kept when the resolved target is **inside the scope**. Unresolved/external specifiers stay in the file's `imports` (with `targetId` empty) but produce no edge.
@@ -117,5 +117,5 @@ type Location =
 
 - Folder→folder aggregate edges.
 - Project-wide function/method graph, or showing functions inside the project view.
-- Languages beyond Python/JS/TS in the project graph.
+- Languages beyond the ones with an extraction module (Python, JS/TS, Rust) in the project graph.
 - Persisting project-view layout (positions are session-only, like node sizes).

@@ -29,10 +29,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 
 ## Layout
 
-- `src-tauri/src/parser/` — `python.rs`, `jsts.rs` (shared JS/TS), `function_graph.rs` (shared assembler),
-  `imports/` (extraction + `Resolver`: specifier resolution, tsconfig aliases), `project.rs` (folders/files/
-  edges/entry points/external nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger documents, swagger-jsdoc
-  `@openapi` comments, Next.js App Router route conventions).
+- `src-tauri/src/parser/` — `python.rs`, `jsts.rs` (shared JS/TS), `rust.rs`, `function_graph.rs` (shared
+  assembler), `imports/` (extraction + `Resolver`: specifier resolution, tsconfig aliases), `project.rs`
+  (folders/files/edges/entry points/external nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger
+  documents, swagger-jsdoc `@openapi` comments, Next.js App Router route conventions).
 - `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`.
 - `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
   `endpoints/`, `shell/`.
@@ -45,16 +45,26 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   `Result<T, String>` and never panic.
 - Tauri v2 commands use `#[tauri::command(rename_all = "camelCase")]`; the frontend passes `{ root, relPath, path }`.
 - File reads are **root-anchored** (`Path::new(root).join(path)`); paths are project-relative with `/`.
-- Node ids: `name` (function), `ClassName` (class), `ClassName.method` (method), `varName.method` (JS object method).
+- Node ids: `name` (function), `ClassName` (class), `ClassName.method` (method), `varName.method` (JS object
+  method), `modName.item` (item inside an inline Rust `mod`). Every `parent` must name a top-level **class** node
+  in the same payload, because the frontend attaches children to their parent and drops orphans.
 - Edges are **in-file only**; class ids are never edge targets; no self-edges.
 - Python `decorated_definition` must be unwrapped (`@staticmethod`, `@app.route`); line ranges include decorators.
+- Rust: `struct`/`enum`/`union`/`trait`, each `impl` target, and each inline `mod` become **class** containers;
+  `fn` inside a container is a method (`Type.fn`), otherwise a function; `function_signature_item` (a trait method
+  without a body) is a method with no body; `const`/`static` are variables; line ranges include `#[attribute]`
+  lines; parameters render **as written** (`&self`, `factor: i32`); returns come from `return` expressions and
+  fall back to the block's trailing expression. See ADR-0005.
+- Rust imports: `use` trees flatten to one entry per path (`crate::a::{b, c}` → `crate::a::b`, `crate::a::c`);
+  `use path::*` yields names `["*"]`; `mod foo;` (no body) yields `self::foo`; inline `mod` declares no import.
+  `crate`/`self`/`super` paths, `::` item paths, and `mod.rs` module files resolve without reading `Cargo.toml`.
 - Specifier resolution: count leading dots (`.` own dir, `..` parent, `...` grandparent); a target file name
   containing a dot prefers **appending** the extension (`ai.easy` → `ai.easy.js`) then replacing; `tsconfig.json`
   / `jsconfig.json` `baseUrl` + `paths` aliases resolve; imports resolving outside the scope become **external**
   nodes; recognized extensions are
-  `py js jsx ts tsx md txt json yaml yml toml ini css scss html sql sh`.
-- Entry points: folder `index.html` script → Python `__main__` guard → conventional names **per folder** →
-  folder `package.json` (`main`/`module`/`scripts.start`) → graph roots.
+  `py js jsx ts tsx rs md txt json yaml yml toml ini css scss html sql sh`.
+- Entry points: folder `index.html` script → Python `__main__` guard → conventional names **per folder**
+  (`main.rs`, then `lib.rs`, for Rust) → folder `package.json` (`main`/`module`/`scripts.start`) → graph roots.
 - API Endpoints are extracted **statically** from declared contracts only — OpenAPI/Swagger documents (JSON/YAML),
   swagger-jsdoc `@openapi` comment blocks, and Next.js `**/api/**/route.{ts,js}` handlers — never by running or
   querying the backend. YAML is parsed with `serde_norway`. Fidelity is `full` for published contracts and
@@ -82,6 +92,11 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Navigation is a `Location` (`empty | folder | code | endpoints`); the top-bar **API** button opens the Endpoints
   view. Canvas viewport helpers on `useGraphCanvas`: `fitView` (whole graph), `zoomToNode` (fit a block's bounds),
   `focusNode` (pan to a block at the current zoom), `centerOn` (centre at an explicit zoom).
+- Adding a language touches four places: `parser/<lang>.rs` with a `Language` variant, `shared/extensions.ts`
+  (`FileRoute` + `CODE_ROUTES`), `shared/ipc.ts` + `shell/useFileContent.ts`, and `code/highlight.ts`. The payload
+  shapes stay language-agnostic. See ADR-0005.
+- The frontend renders whatever the backend sends, but `graph/nodes.ts` attaches a child to its parent only when
+  that parent is a top-level node; a language module must never emit a `parent` that has no container node.
 
 ## Style and workflow
 
