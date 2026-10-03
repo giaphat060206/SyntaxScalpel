@@ -55,7 +55,7 @@ fn project_files(root: &Path, depth: usize) -> Vec<PathBuf> {
     files
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+pub fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"))
@@ -240,8 +240,7 @@ impl Resolver {
     /// package's own `__init__.py`. When the plain specifier resolves to the importer
     /// itself, each imported name is tried as a submodule (`".constants"`), which
     /// yields the real target files.
-    pub fn resolve(&self, entry: &ImportEntry, importer_rel: &str) -> Vec<ResolvedImport> {
-        let specifier = entry.specifier.as_str();
+    pub fn resolve(&self, entry: &ImportEntry, importer_rel: &str) -> Vec<ResolvedImport> {        let specifier = entry.specifier.as_str();
         let names = entry.names.as_slice();
         let importer = self.root.join(importer_rel);
         if let Some(primary) = resolve_specifier(specifier, importer_rel, &self.root, &self.index) {
@@ -421,6 +420,12 @@ pub fn stem_index(files: &[PathBuf]) -> HashMap<String, PathBuf> {
         }
     }
     index
+}
+
+/// A Resolver covering every code file in the project, for callers that map
+/// specifiers themselves instead of going through `analyze`.
+pub fn resolver_for(root: &Path) -> Resolver {
+    Resolver::new(root, &project_files(root, 0), AliasMap::load(root))
 }
 
 /// Imports of `path`, plus every project file whose imports resolve to `path`.

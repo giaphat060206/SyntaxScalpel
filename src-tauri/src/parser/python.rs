@@ -4,7 +4,8 @@ use crate::models::{NodeKind, ParseResult};
 use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
-    Ok(function_graph::assemble(definitions(source, file_path)?, file_path))
+    let defs = definitions(source, file_path)?;
+    Ok(function_graph::assemble(&defs, file_path))
 }
 
 /// Every Definition this source declares, each with the names it calls.

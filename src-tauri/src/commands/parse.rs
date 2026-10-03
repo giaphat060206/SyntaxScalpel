@@ -2,6 +2,7 @@ use crate::models::ParseResult;
 use crate::parser::{self, Language};
 use crate::parser::api::ApiInventory;
 use crate::parser::imports::ImportAnalysis;
+use crate::parser::neighborhood::FunctionGraph;
 use crate::parser::project::ProjectGraph;
 
 #[tauri::command(rename_all = "camelCase")]
@@ -17,6 +18,13 @@ pub fn parse_js_ts(path: String, root: String) -> Result<ParseResult, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn parse_rust(path: String, root: String) -> Result<ParseResult, String> {
     parser::parse_file(&root, &path, Language::Rust)
+}
+
+/// One file's Function Graph plus the imports that reach other files, in one
+/// project scan instead of a parse plus a separate import analysis.
+#[tauri::command(rename_all = "camelCase")]
+pub fn function_graph(path: String, root: String) -> Result<FunctionGraph, String> {
+    crate::parser::neighborhood::function_graph(&root, &path)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -132,5 +140,37 @@ mod tests {
         assert_eq!(result.nodes.len(), 1);
         assert_eq!(result.nodes[0].name, "two");
         assert_eq!(result.file_path, "nested/b.py");
+    }
+
+    #[test]
+    fn function_graph_command_returns_the_neighbourhood_in_one_call() {
+        let dir = std::env::temp_dir().join(format!("scalpel-fn-graph-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("file2.py"), "def func2():\n    return 1\n").unwrap();
+        std::fs::write(
+            dir.join("file1.py"),
+            "from file2 import func2\n\ndef func1():\n    return func2()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(
+            "file1.py".to_string(),
+            dir.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(graph.file.nodes.len(), 1);
+        assert_eq!(graph.imports.imports.len(), 1);
+        assert_eq!(graph.externals.len(), 1);
+        assert_eq!(graph.externals[0].path, "file2.py");
+        assert_eq!(graph.cross_edges.len(), 1);
+        assert_eq!(graph.cross_edges[0].source, "func1");
+        assert_eq!(graph.cross_edges[0].target, "file2.py::func2");
+    }
+
+    #[test]
+    fn function_graph_command_errors_on_missing_file() {
+        assert!(function_graph("missing.py".into(), "C:/missing".into()).is_err());
     }
 }

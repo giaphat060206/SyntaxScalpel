@@ -83,9 +83,9 @@ pub fn collect_edges(defs: &[Def]) -> Vec<GraphEdge> {
     edges
 }
 
-pub fn assemble(defs: Vec<Def>, file_path: &str) -> ParseResult {
+pub fn assemble(defs: &[Def], file_path: &str) -> ParseResult {
     let nodes = defs.iter().map(to_node).collect();
-    let edges = collect_edges(&defs);
+    let edges = collect_edges(defs);
     ParseResult {
         nodes,
         edges,

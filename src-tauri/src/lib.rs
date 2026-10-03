@@ -21,6 +21,7 @@ pub fn run() {
             commands::parse::parse_python,
             commands::parse::parse_js_ts,
             commands::parse::parse_rust,
+            commands::parse::function_graph,
             commands::parse::analyze_imports,
             commands::parse::project_graph,
             commands::parse::analyze_api,
