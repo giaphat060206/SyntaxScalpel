@@ -6,7 +6,7 @@ use crate::parser::imports::{extract_imports, AliasMap, Resolver};
 
 const MAX_FILES: usize = 2000;
 const MAX_DEPTH: usize = 12;
-const CODE_EXTENSIONS: [&str; 5] = ["py", "js", "jsx", "ts", "tsx"];
+const CODE_EXTENSIONS: [&str; 6] = ["py", "js", "jsx", "ts", "tsx", "rs"];
 const DOC_EXTENSIONS: [&str; 12] = [
     "md", "txt", "json", "yaml", "yml", "toml", "ini", "css", "scss", "html",
     "sql", "sh",
@@ -411,10 +411,10 @@ fn entry_by_main_guard(
 
 /// Conventional file names, per folder, highest priority group first.
 fn entry_by_name(files: &[EntryFile], folders: &[&str]) -> Vec<String> {
-    const NAMES: [&str; 16] = [
-        "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "__main__.py", "app.py",
-        "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
-        "server.ts", "server.js",
+    const NAMES: [&str; 18] = [
+        "main.py", "main.js", "main.jsx", "main.ts", "main.tsx", "main.rs", "__main__.py",
+        "app.py", "manage.py", "run.py", "cli.py", "index.ts", "index.tsx", "index.js", "index.jsx",
+        "server.ts", "server.js", "lib.rs",
     ];
     let mut named = Vec::new();
     for folder in folders {
@@ -926,8 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn includes_docs_but_not_unknown_types() {
-        let root = temp_project("docs");
+    fn includes_docs_but_not_unknown_types() {        let root = temp_project("docs");
         std::fs::write(root.join("README.md"), "# hi\n").unwrap();
         std::fs::write(root.join("settings.json"), "{}\n").unwrap();
         std::fs::write(root.join("styles.css"), "body {}\n").unwrap();
@@ -1018,5 +1017,87 @@ mod tests {
         let graph = project_graph(&root.to_string_lossy(), "").unwrap();
         let ids: Vec<&str> = graph.files.iter().map(|f| f.id.as_str()).collect();
         assert_eq!(ids, vec!["main.py"]);
+    }
+
+    #[test]
+    fn treats_rust_files_as_code_and_links_modules() {
+        let root = temp_project("rust-tree");
+        std::fs::create_dir_all(root.join("src/parser")).unwrap();
+        std::fs::write(
+            root.join("src/lib.rs"),
+            "mod parser;\npub use parser::python::parse_source;\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("src/parser/mod.rs"), "mod python;\n").unwrap();
+        std::fs::write(
+            root.join("src/parser/python.rs"),
+            "pub fn parse_source() {}\n",
+        )
+        .unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let kinds: Vec<(&str, &str)> = graph
+            .files
+            .iter()
+            .map(|file| (file.id.as_str(), file.kind.as_str()))
+            .collect();
+        assert!(kinds.contains(&("src/lib.rs", "code")));
+        assert!(kinds.contains(&("src/parser/mod.rs", "code")));
+        assert!(kinds.contains(&("src/parser/python.rs", "code")));
+
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "src/lib.rs" && edge.target == "src/parser/mod.rs"));
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == "src/parser/mod.rs" && edge.target == "src/parser/python.rs"
+        }));
+        assert!(graph.edges.iter().any(|edge| {
+            edge.source == "src/lib.rs" && edge.target == "src/parser/python.rs"
+        }));
+    }
+
+    #[test]
+    fn rust_entry_point_prefers_main_rs_then_lib_rs() {
+        let root = temp_project("rust-entry");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "pub fn run() {}\n").unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entries, vec!["src/main.rs".to_string()]);
+        assert_eq!(graph.entry.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn rust_library_entry_point_falls_back_to_lib_rs() {
+        let root = temp_project("rust-lib-entry");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), "mod util;\n").unwrap();
+        std::fs::write(root.join("src/util.rs"), "pub fn helper() {}\n").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        assert_eq!(graph.entry.as_deref(), Some("src/lib.rs"));
+    }
+
+    /// End-to-end over a real crate: every `.rs` file is a Code File and the
+    /// module declarations resolve to edges.
+    #[test]
+    fn builds_a_project_graph_for_this_crates_own_source() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let graph = project_graph(&root.to_string_lossy(), "src").unwrap();
+
+        let rust_files: Vec<&ProjectFile> = graph
+            .files
+            .iter()
+            .filter(|file| file.id.ends_with(".rs"))
+            .collect();
+        assert!(rust_files.len() > 10, "expected the crate source tree");
+        assert!(rust_files.iter().all(|file| file.kind == "code"));
+        assert!(graph
+            .edges
+            .iter()
+            .any(|edge| edge.source == "src/lib.rs" && edge.target == "src/parser/mod.rs"));
+        assert!(graph.entry.is_some());
     }
 }
