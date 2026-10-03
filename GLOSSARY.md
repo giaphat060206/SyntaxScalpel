@@ -37,7 +37,8 @@ A link between two Nodes; always qualified by its graph.
 See: Call Edge, Import Edge.
 
 **Call Edge**:
-An Edge in a Function Graph, from a caller Definition to a callee Definition in the same file.
+An Edge in a Function Graph, from a caller Definition to a callee Definition.
+See: Cross-file Call Edge.
 
 **Import Edge**:
 An Edge in a Project Graph, from an importing file to an imported file inside the Scope.
@@ -52,6 +53,19 @@ _Avoid_: entry, start (for an Entry Point)
 **External Node**:
 A Leaf in a Project Graph standing for an Import target outside the Scope; no file lies behind it.
 _Avoid_: external target, dependency
+
+### Cross-file concepts
+
+**Cross-file Call Edge**:
+A Call Edge whose far end is a Definition in another file. A Function Graph resolves these one hop out, never
+transitively.
+_Avoid_: cross-file reference, external call
+
+**Cross-file Block**:
+The dashed Container in a Function Graph standing for another file, holding the Definitions its Cross-file Call
+Edges reach. One level deep: the block is itself the Container, so a Method appears as `file::Container.method`
+without a second Container.
+_Avoid_: external node (that is a Project Graph Leaf outside the Scope), external block
 
 ### API
 
@@ -118,10 +132,12 @@ A synthetic Block in a Function Graph with no backing Definition.
 _Avoid_: special node, pseudo-node
 
 **Imports Block**:
-A Special Block listing the file's Imports.
+A Special Block listing the Imports no Cross-file Block could draw: specifiers that resolved to no file, and
+resolved ones whose Definitions nothing calls. Omitted when there is nothing left over.
 
 **Imported-By Block**:
-A Special Block listing the files that Import this file.
+A Special Block listing the files that Import this file and drew no Cross-file Block. Omitted when there is
+nothing left over.
 
 **Constants Container**:
 A Special Block grouping the file's Variable Definitions.

@@ -30,9 +30,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 ## Layout
 
 - `src-tauri/src/parser/` — `python.rs`, `jsts.rs` (shared JS/TS), `rust.rs`, `function_graph.rs` (shared
-  assembler), `imports/` (extraction + `Resolver`: specifier resolution, tsconfig aliases), `project.rs`
-  (folders/files/edges/entry points/external nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger
-  documents, swagger-jsdoc `@openapi` comments, Next.js App Router route conventions).
+  assembler), `imports/` (extraction + `Resolver`: specifier resolution, tsconfig aliases), `neighborhood.rs`
+  (one-hop cross-file Call Edges + the Import Analysis), `project.rs` (folders/files/edges/entry points/external
+  nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger documents, swagger-jsdoc `@openapi` comments, Next.js
+  App Router route conventions).
 - `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`.
 - `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
   `endpoints/`, `shell/`.
@@ -46,10 +47,22 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Tauri v2 commands use `#[tauri::command(rename_all = "camelCase")]`; the frontend passes `{ root, relPath, path }`.
 - File reads are **root-anchored** (`Path::new(root).join(path)`); paths are project-relative with `/`.
 - Node ids: `name` (function), `ClassName` (class), `ClassName.method` (method), `varName.method` (JS object
-  method), `modName.item` (item inside an inline Rust `mod`). Every `parent` must name a top-level **class** node
-  in the same payload, because the frontend attaches children to their parent and drops orphans.
+  method), `modName.item` (item inside an inline Rust `mod`), and `path::ClassName.method` for a Definition shown
+  from another file. Every `parent` must name a top-level **class** node in the same payload, because the frontend
+  attaches children to their parent and drops orphans.
 - Edges are **in-file only**; class ids are never edge targets; no self-edges.
+- The Function Graph also carries one-hop Cross-file Call Edges: `neighborhood.rs` resolves each Definition's call
+  names against the Import Edges `Resolver` already computes, materialises the far side's Definitions in one dashed
+  block per file (the block's id is the file path, and it is the only Container for those Definitions), and reports
+  what it could not draw as `residualImports` / `residualImportedBy`. A file-level Definition is reached only when
+  its own name was imported; a Method is reached when its Container is imported **and** referenced by the calling
+  Definition. Blocks are capped (12 files, 40 Definitions) and `truncated` is surfaced. See ADR-0006.
+- `function_graph` is the one command the UI calls for a file, returning the file's graph, its Import Analysis, and
+  the neighbourhood from a single project scan. `parse_python` / `parse_js_ts` / `parse_rust` / `analyze_imports`
+  are still registered but no longer called by the frontend; retiring them means rerouting `parse_file` first.
 - Python `decorated_definition` must be unwrapped (`@staticmethod`, `@app.route`); line ranges include decorators.
+- JS/TS `export_statement` must be unwrapped (`export function`/`const`/`class`); line ranges include `export`.
+  `export default <expression>` declares nothing and stays unparsed.
 - Rust: `struct`/`enum`/`union`/`trait`, each `impl` target, and each inline `mod` become **class** containers;
   `fn` inside a container is a method (`Type.fn`), otherwise a function; `function_signature_item` (a trait method
   without a body) is a method with no body; `const`/`static` are variables; line ranges include `#[attribute]`
@@ -89,6 +102,15 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Visual rules: containers z-index `1`, leaf blocks `4`, edges `0` (lines always under blocks); containers are
   transparent **only when they hold an edge endpoint**; palette colour per block; edges arrowed `smoothstep`,
   unrelated edges dim to 12% on selection (no bolding).
+- Cross-file blocks: one dashed block per reached file, labelled `external file` with an `ext` badge, carrying
+  `crossFile: "file"` on the block and `crossFile: "definition"` on the Definitions inside it. Do not conflate
+  this with `ProjectBlock.external`, which is a Project Graph Leaf outside the Scope.
+- Container transparency is derived from a node's **`parentId`**, not from splitting its id: an external Method's
+  id is `path::Container.method`, whose last-dot prefix is not a node. Keep it that way or lines into a dashed
+  block get hidden behind it.
+- A Function Graph is loaded with a single `functionGraph(path, root)` call per file — do not add a second import
+  scan beside it. Picking a Definition from another file reads **that** file's source into the code pane; the
+  dashed block itself has no source section.
 - Navigation is a `Location` (`empty | folder | code | endpoints`); the top-bar **API** button opens the Endpoints
   view. Canvas viewport helpers on `useGraphCanvas`: `fitView` (whole graph), `zoomToNode` (fit a block's bounds),
   `focusNode` (pan to a block at the current zoom), `centerOn` (centre at an explicit zoom).

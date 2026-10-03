@@ -54,13 +54,15 @@ src-tauri/src/
     python.rs            Python extraction
     jsts.rs              JS/TS extraction (shared for .js/.jsx/.ts/.tsx)
     rust.rs              Rust extraction (structs/enums/traits/impls/inline mods as containers)
-    function_graph.rs    shared Def + edge/uses/returns assembly; each language injects calls_in
+    function_graph.rs    shared Def + edge/uses/returns assembly
+    neighborhood.rs      one-hop Cross-file Call Edges, dashed external blocks, the Import Analysis
     imports/             extract.rs (tree-sitter) + resolve.rs (Resolver, AliasMap) + mod.rs re-exports
     project.rs           project_graph(root, scope): folders, files, edges, entry points, external nodes
     api/                 analyze_api extraction: OpenAPI spec adapter, swagger-jsdoc @openapi adapter,
                          Next.js App Router adapter, $ref resolver, source merge
   commands/
-    parse.rs             parse_python, parse_js_ts, parse_rust, analyze_imports, project_graph, analyze_api
+    parse.rs             function_graph, parse_python, parse_js_ts, parse_rust, analyze_imports,
+                         project_graph, analyze_api
     fs_cmds.rs           list_directory, read_markdown, read_file
 src/
   main.tsx               entry; ErrorBoundary + global error overlay
@@ -82,11 +84,12 @@ src/
     markdown/MarkdownView.tsx
     code/CodeView.tsx, highlight.ts
     shell/                        App.tsx, TopBar.tsx, ContentPane.tsx, useAsyncLoad.ts, useApiInventory.ts,
-                                  useFileContent.ts, useImports.ts, useSource.ts, SearchContext.tsx, useRecents.ts,
+                                  useFileContent.ts, useSource.ts, SearchContext.tsx, useRecents.ts,
                                   Breadcrumb.tsx, Welcome.tsx
 docs/superpowers/specs/  design specs; docs/superpowers/plans/  implementation plans
-docs/adr/                ADR-0001 single-file graphs, 0002 no layout persistence, 0003 ELK owns layout,
-                         0004 endpoints static extraction, 0005 Rust Function Graph mapping
+docs/adr/                ADR-0001 single-file graphs (superseded by 0006), 0002 no layout persistence,
+                         0003 ELK owns layout, 0004 endpoints static extraction, 0005 Rust Function Graph
+                         mapping, 0006 Cross-file Call Edges
 GLOSSARY.md              domain vocabulary
 ```
 
@@ -112,8 +115,11 @@ GLOSSARY.md              domain vocabulary
 
 ### Function graph
 - Clicking a definition opens a highlighted code pane beside the graph (overlay; the graph stays mounted).
-- Imports/imported-by blocks and a constants container; info card; lines toggle; in-graph search (Ctrl+F).
-- Search picks zoom to the matched block's bounds and persist.
+- One dashed **external block** per file a Cross-file Call Edge reaches, holding only the Definitions it reaches;
+  clicking one of those reads **that** file's source into the pane. The dashed block itself has no source section.
+- Imports/importers blocks (now only what no block could draw) and a constants container; info card; lines toggle;
+  in-graph search (Ctrl+F); truncation banner when the neighbourhood cap was hit.
+- Search picks zoom to the matched block's bounds and persist. External Definitions are searchable too.
 
 ### Endpoints view
 - Scans the **Project Root** (whole project, not the current scope) for OpenAPI/Swagger documents, swagger-jsdoc
@@ -127,10 +133,14 @@ GLOSSARY.md              domain vocabulary
 
 ## 6. Key decisions and constraints (respect these)
 
-- **Single-file graphs**; edges are in-file only; class ids are never edge targets; no self-edges (ADR-0001).
+- **Single-file extraction, one-hop Cross-file Call Edges** (ADR-0006 supersedes ADR-0001's "in-file only"):
+  class ids are never edge targets; no self-edges; cross-file resolution never walks transitively.
 - Node ids: `name`, `ClassName`, `ClassName.method`, `varName.method`, `modName.item` (item inside an inline Rust
-  `mod`). A `parent` must always name a **class** node that is top-level in the same payload — the frontend drops
-  a child whose parent it cannot find.
+  `mod`), `path::ClassName.method` (a Definition shown from another file). A `parent` must always name a **class**
+  node that is top-level in the same payload — the frontend drops a child whose parent it cannot find.
+- **Reachability**: a file-level Definition is reached only when its own name was imported; a Method is reached
+  when its Container was imported **and** the calling Definition references it. Blocks cap at 12 files / 40
+  Definitions and the payload reports `truncated`.
 - **Endpoints are extracted statically** from declared contracts only; never run/query the backend (ADR-0004).
 - **Rust maps onto the same four kinds** — containers instead of classes, one container level deep (ADR-0005).
 - **No layout persistence** (ADR-0002); **ELK owns layout** (ADR-0003).
@@ -142,12 +152,13 @@ GLOSSARY.md              domain vocabulary
 
 ## 7. Current state
 
-- Integration branch `feature/backend_endpoints_view` holds the whole project history since `main` (the ELK work,
-  UI work, the module-deepening refactor, the Endpoints feature, and follow-up UI tweaks). `main` is behind.
-- Rust support lives on branch **`feature/rust-support`** (off `main`): `parser/rust.rs`, `parse_rust`, the `.rs`
-  extension route, `use`/`mod` import extraction, `::` specifier resolution, and Rust entry points.
+- `main` is at the merge of PR #9 (Rust support) plus one follow-up refactor commit that landed directly on it.
+- Cross-file Call Edges live on branch **`feature/cross-file-call-edges`** (off `main`): `parser/neighborhood.rs`,
+  the `function_graph` command, the `FunctionGraph` payload, dashed external blocks in the Function Graph, and the
+  JS/TS `export` fix the feature depended on.
 - The Endpoints spec is GitHub issue **#1**; its tickets **#2–#7** are closed.
-- Suites green at the time of writing: `npm test`, `npm run build`, `cargo test`.
+- Suites green at the time of writing: `npm test`, `npm run build`, `cargo test`. The dashed blocks are unit-tested
+  (including that the outline is dashed) but have **not** been visually reviewed.
 
 ## 8. Known gaps / next steps
 
@@ -157,7 +168,12 @@ GLOSSARY.md              domain vocabulary
 - The Endpoints view always scans the Project Root, not the current scope.
 - No component tests for the graph integrations beyond the canvas/adapters; ELK worker/fallback branches are
   unit-untested.
+- Cross-file resolution misses: a specifier resolving to a barrel that only re-exports (that file declares nothing,
+  so it stays text); namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`), which need
+  receiver tracking; and anything beyond one hop.
+- `parse_python` / `parse_js_ts` / `parse_rust` / `analyze_imports` are registered but no longer called by the
+  frontend. Retiring them needs `parse_file` rerouted first, or `parse_source` becomes a dead-code warning.
 - Rust: calls written inside a macro invocation's arguments produce no edge (macro arguments are unexpanded token
-  trees); a type declared inside an inline `mod` has no Container of its own — its methods group under the module;
-  nested containers are not modelled beyond one level.
+  trees), which also hides a Cross-file Call Edge; a type declared inside an inline `mod` has no Container of its
+  own — its methods group under the module; nested containers are not modelled beyond one level.
 - Languages covered are Python, JS/TS, and Rust; Go, C, C++, Java, and C# are roadmap.

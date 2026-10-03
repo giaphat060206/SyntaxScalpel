@@ -133,14 +133,31 @@ Roadmap is documented intent under "Could Have" — no Must/Should MVP scope cha
 Applies to `.js`, `.jsx`, `.ts`, `.tsx` via one module and the `parse_js_ts` command (`tree-sitter-typescript` grammar handles all four).
 
 - Nodes:
-  - `function_declaration` → `function`.
-  - Variable declarator whose value is an arrow function or function expression (`const x = () => {}`, `const x = function () {}`) → `function` named `x`.
-  - `class_declaration` → `class`; `method_definition` inside → `method` with `parent` = class id.
+  - `function_declaration` → `function`, including one behind an `export_statement`.
+  - Variable declarator whose value is an arrow function or function expression (`const x = () => {}`, `const x = function () {}`) → `function` named `x`, including behind `export`.
+  - `class_declaration` → `class`; `method_definition` inside → `method` with `parent` = class id. `export default <expression>` declares nothing and is skipped.
   - Object-literal methods (`{ foo() {} }`) → `method` with `parent` = owning variable/class id when determinable; otherwise standalone `function`.
 - Inputs: parameters from signature (regular, default, rest, destructured — destructured/complex params render as written, e.g. `{ a, b }`).
 - Outputs: identifiers in `return` statements; empty for implicit-return arrow functions unless expression is a simple identifier.
-- Edges: call-expression / `new` expression callee name matching an in-file function or method name. Callbacks passed as arguments (`arr.map(cb)`) are external calls — no edge, per global rule.
+- Edges: call-expression / `new` expression callee name matching an in-file function or method name. Callbacks passed as arguments (`arr.map(cb)`) are external calls — no edge, per global rule. Cross-file Call Edges are resolved separately, one hop out (see below).
 - Skipped: interfaces, type aliases, type annotations, generics, decorators, `export`/`import` statements (imports produce no edges, per "in-file calls only").
+
+### Cross-file Call Edges (all languages)
+
+Applies to every parsed language via `parser/neighborhood.rs` and the `function_graph` command. See ADR-0006.
+
+- For each Definition in the file, its call names are matched against the names its Imports bring in, resolved to a
+  target file by the same `Resolver` the Project Graph uses.
+- A file-level Definition is reached only when its **own** name was imported; a Method is reached when its
+  Container was imported **and** the calling Definition references it.
+- Reached Definitions are materialised in one dashed block per file (ADR-0006's Cross-file Block), giving ids
+  `path::Container.method`; the block is the only Container, so nesting stays one level deep.
+- The reverse direction holds too: a Definition in another file that calls into this one is reached from that
+  file's Imports of this one.
+- Imports nothing could be drawn for are reported as `residualImports` / `residualImportedBy` for the Function
+  Graph to list as text. Blocks cap at 12 files / 40 Definitions and report `truncated`.
+- Not resolved: namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`), specifiers
+  resolving to a barrel that only re-exports, and anything beyond one hop.
 
 ### Extraction rules (Rust)
 
@@ -163,11 +180,12 @@ Applies to `.rs` via one module and the `parse_rust` command. See ADR-0005.
 ## 4. Workflows
 
 ### Code workflow
-1. User clicks a code file in explorer (`.py` example below; `parse_js_ts` flow is identical for `.js`/`.jsx`/`.ts`/`.tsx`).
-2. Frontend invokes `parse_python(path)`.
-3. Rust: read file → Tree-sitter parse → extract nodes/edges → load positions from `.scalpel/metadata.json` → return JSON.
-4. GraphView renders React Flow graph: sharp orthogonal edges, cyan nodes.
-5. User drags node → debounced `save_layout` (500 ms).
+1. User clicks a code file in explorer (one flow for every parsed language).
+2. Frontend invokes `function_graph(path, root)`.
+3. Rust: read file → Tree-sitter parse → extract nodes/edges → resolve the one-hop cross-file neighbourhood and the
+   Import Analysis → return JSON.
+4. GraphView renders React Flow graph: sharp orthogonal edges, cyan nodes, dashed blocks for reached files.
+5. Picking a Definition reads its own file's source into the code pane.
 
 ### Documentation workflow
 1. User clicks `.md`.
