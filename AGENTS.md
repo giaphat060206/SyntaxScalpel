@@ -29,11 +29,13 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 
 ## Layout
 
-- `src-tauri/src/parser/` — `python.rs`, `jsts.rs` (shared JS/TS), `imports.rs` (extraction, specifier
-  resolution, tsconfig aliases), `project.rs` (folders/files/edges/entry points/external nodes).
-- `src-tauri/src/commands/` — `parse.rs`, `fs_cmds.rs`, `layout.rs` (layout commands are currently unused by
-  the UI).
-- `src/features/` — `explorer/`, `graph/` (incl. `elk/`), `markdown/`, `code/`, `project/`, `shell/`.
+- `src-tauri/src/parser/` — `python.rs`, `jsts.rs` (shared JS/TS), `function_graph.rs` (shared assembler),
+  `imports/` (extraction + `Resolver`: specifier resolution, tsconfig aliases), `project.rs` (folders/files/
+  edges/entry points/external nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger documents, swagger-jsdoc
+  `@openapi` comments, Next.js App Router route conventions).
+- `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`.
+- `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
+  `endpoints/`, `shell/`.
 - `src/shared/` — `types.ts`, `ipc.ts`, `extensions.ts`, `StateViews.tsx`, `ErrorBoundary.tsx`.
 - Design docs: `docs/superpowers/specs/`, plans: `docs/superpowers/plans/`, session handoff: `docs/HANDOFF.md`.
 
@@ -53,6 +55,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   `py js jsx ts tsx md txt json yaml yml toml ini css scss html sql sh`.
 - Entry points: folder `index.html` script → Python `__main__` guard → conventional names **per folder** →
   folder `package.json` (`main`/`module`/`scripts.start`) → graph roots.
+- API Endpoints are extracted **statically** from declared contracts only — OpenAPI/Swagger documents (JSON/YAML),
+  swagger-jsdoc `@openapi` comment blocks, and Next.js `**/api/**/route.{ts,js}` handlers — never by running or
+  querying the backend. YAML is parsed with `serde_norway`. Fidelity is `full` for published contracts and
+  `heuristic` for framework conventions. See ADR-0004.
 
 ## Frontend rules
 
@@ -73,6 +79,9 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Visual rules: containers z-index `1`, leaf blocks `4`, edges `0` (lines always under blocks); containers are
   transparent **only when they hold an edge endpoint**; palette colour per block; edges arrowed `smoothstep`,
   unrelated edges dim to 12% on selection (no bolding).
+- Navigation is a `Location` (`empty | folder | code | endpoints`); the top-bar **API** button opens the Endpoints
+  view. Canvas viewport helpers on `useGraphCanvas`: `fitView` (whole graph), `zoomToNode` (fit a block's bounds),
+  `focusNode` (pan to a block at the current zoom), `centerOn` (centre at an explicit zoom).
 
 ## Style and workflow
 

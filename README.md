@@ -4,11 +4,11 @@ Local-first desktop app that dissects source files into interactive node graphs 
 
 ## Features
 
-- Parse Python (`.py`) and JavaScript/TypeScript (`.js`, `.jsx`, `.ts`, `.tsx`) into call graphs
-- Class and method nesting, plus function inputs (params) and outputs (return names)
-- 1-hop call tracing: click a node to highlight its callers and callees
-- Markdown rendering (GFM, syntax highlighting, checkboxes)
-- Resizable split view: design spec on the left, implementation graph on the right
+- **Project graph** — folders and files as nested blocks with file→file import edges, detected entry points, and external nodes
+- **Function graph** — functions, classes, methods, and variables with in-file call edges; 1-hop call tracing; click a definition to read its highlighted source beside the graph
+- **Endpoints view** — HTTP endpoints extracted from OpenAPI/Swagger documents, swagger-jsdoc `@openapi` comments, and Next.js App Router handlers, with request/response schemas and a jump to the handler
+- **Markdown rendering** — GFM, syntax highlighting, and checkboxes, shown alongside the graph
+- Search across the active graph plus recent folders and resizable panels
 - Node layout is computed by Eclipse Layout Kernel (ELK), which also routes the edges orthogonally; positions are not persisted (dragging a block is temporary)
 
 ## Requirements
