@@ -308,6 +308,13 @@ fn build_definitions(
         .filter(|def| wanted.is_empty() || wanted.contains(def.id.as_str()))
         .collect();
     let peers: BTreeSet<&str> = selected.iter().map(|def| def.name.as_str()).collect();
+    if selected.is_empty() {
+        return Err(if ids.is_empty() {
+            format!("{file} declares no definitions")
+        } else {
+            format!("none of the selected definitions are in {file}")
+        });
+    }
 
     let mut writer = Writer::new(budget(options, true));
     let language = fence_language(file);
@@ -541,6 +548,44 @@ mod tests {
         for forbidden in ["startLine", "endLine", "crossEdges", "parentId", "residualImports"] {
             assert!(!digest.text.contains(forbidden), "{forbidden} leaked into {}", digest.text);
         }
+    }
+
+    #[test]
+    fn refuses_a_selection_that_matches_nothing() {
+        let root = fixture("digest-no-match");
+        write(&root, "a.py", "def one():\n    return 1\n");
+
+        let partial = Target::Definitions {
+            file: "a.py".into(),
+            ids: vec!["one".into(), "missing".into()],
+        };
+        assert!(build(root.to_str().unwrap(), &partial, &Options::default())
+            .unwrap()
+            .text
+            .contains("fn one"));
+
+        let none = Target::Definitions { file: "a.py".into(), ids: vec!["nope".into()] };
+        let error = build(root.to_str().unwrap(), &none, &Options::default()).unwrap_err();
+        assert!(error.contains("none of the selected definitions"), "{error}");
+
+        write(&root, "empty.py", "");
+        let empty = Target::Definitions { file: "empty.py".into(), ids: vec![] };
+        let error = build(root.to_str().unwrap(), &empty, &Options::default()).unwrap_err();
+        assert!(error.contains("declares no definitions"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_definition_that_belongs_to_another_file() {
+        let root = fixture("digest-cross-file-id");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+
+        let target = Target::Definitions {
+            file: "a.py".into(),
+            ids: vec!["b.py::two".into()],
+        };
+
+        assert!(build(root.to_str().unwrap(), &target, &Options::default()).is_err());
     }
 
     #[test]
