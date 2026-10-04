@@ -1,7 +1,9 @@
 use tree_sitter::{Node, Parser};
 
 use crate::models::{NodeKind, ParseResult};
-use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
+use crate::parser::function_graph::{
+    self, collapse_whitespace, line_range, node_text, CallSite, Def,
+};
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
     let defs = definitions(source, file_path)?;
@@ -394,16 +396,21 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<CallSite> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
 }
 
-fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
+fn collect_calls(node: Node, source: &str, out: &mut Vec<CallSite>) {
     if node.kind() == "call_expression" {
         if let Some(callee) = node.child_by_field_name("function") {
-            push_callee(callee, source, out);
+            if let Some(name) = push_callee(callee, source).filter(|name| !name.is_empty()) {
+                out.push(CallSite {
+                    name,
+                    line: node.start_position().row + 1,
+                });
+            }
         }
     }
     let mut cursor = node.walk();
@@ -422,25 +429,17 @@ fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
     }
 }
 
-fn push_callee(node: Node, source: &str, out: &mut Vec<String>) {
-    let name = match node.kind() {
+fn push_callee(node: Node, source: &str) -> Option<String> {
+    match node.kind() {
         "identifier" => Some(node_text(node, source)),
         "scoped_identifier" | "field_expression" => node
             .child_by_field_name("name")
             .or_else(|| node.child_by_field_name("field"))
             .map(|inner| node_text(inner, source)),
-        "generic_function" => {
-            if let Some(inner) = node.child_by_field_name("function") {
-                push_callee(inner, source, out);
-            }
-            None
-        }
+        "generic_function" => node
+            .child_by_field_name("function")
+            .and_then(|inner| push_callee(inner, source)),
         _ => None,
-    };
-    if let Some(name) = name {
-        if !name.is_empty() {
-            out.push(name);
-        }
     }
 }
 
@@ -504,6 +503,10 @@ fn fallback(value: i32) -> i32 {
 
     fn parse(source: &str) -> ParseResult {
         parse_source(source, "src/lib.rs").unwrap()
+    }
+
+    fn call_names(calls: &[CallSite]) -> Vec<String> {
+        calls.iter().map(|call| call.name.clone()).collect()
     }
 
     fn node<'a>(result: &'a ParseResult, id: &str) -> &'a crate::models::GraphNode {
@@ -608,12 +611,32 @@ fn fallback(value: i32) -> i32 {
         let defs = definitions(SOURCE, "src/lib.rs").unwrap();
 
         let helper = defs.iter().find(|def| def.id == "helper").unwrap();
-        assert!(helper.calls.contains(&"double".to_string()));
-        assert!(helper.calls.contains(&"fallback".to_string()));
+        assert!(call_names(&helper.calls).contains(&"double".to_string()));
+        assert!(call_names(&helper.calls).contains(&"fallback".to_string()));
 
         // A trait method with no body has nothing to call.
         let declared = defs.iter().find(|def| def.id == "Shape.area").unwrap();
         assert!(declared.calls.is_empty());
+    }
+
+    #[test]
+    fn records_the_line_of_each_call() {
+        let source = "\
+fn run() {
+    setup();
+    double(2)
+}
+";
+        let defs = definitions(source, "src/lib.rs").unwrap();
+        let run = defs.iter().find(|def| def.id == "run").unwrap();
+
+        assert_eq!(
+            run.calls,
+            vec![
+                CallSite { name: "setup".into(), line: 2 },
+                CallSite { name: "double".into(), line: 3 },
+            ]
+        );
     }
 
     #[test]

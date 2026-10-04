@@ -397,7 +397,7 @@ fn build_definitions(
             let mut calls: Vec<&str> = def
                 .calls
                 .iter()
-                .map(String::as_str)
+                .map(|call| call.name.as_str())
                 .filter(|name| peers.contains(*name))
                 .collect();
             calls.sort_unstable();

@@ -262,7 +262,9 @@ impl Neighborhood {
             for target in &targets {
                 for call in &def.calls {
                     let path = target.path.clone();
-                    let Some(node) = self.external_node(&path, call, &target.names, &used) else {
+                    let Some(node) =
+                        self.external_node(&path, &call.name, &target.names, &used)
+                    else {
                         continue;
                     };
                     // A re-export puts the Definition in the file that declares
@@ -297,11 +299,11 @@ impl Neighborhood {
                     }
                     let used: BTreeSet<&str> = caller.uses.iter().map(String::as_str).collect();
                     for call in &caller.calls {
-                        let Some(&index) = local_by_name.get(call) else {
+                        let Some(&index) = local_by_name.get(&call.name) else {
                             continue;
                         };
                         let target = &local[index];
-                        if !reachable(target, call, &imported, &used) {
+                        if !reachable(target, &call.name, &imported, &used) {
                             continue;
                         }
                         let mut node = to_node(caller);

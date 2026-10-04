@@ -1,7 +1,9 @@
 use tree_sitter::{Node, Parser};
 
 use crate::models::{NodeKind, ParseResult};
-use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
+use crate::parser::function_graph::{
+    self, collapse_whitespace, line_range, node_text, CallSite, Def,
+};
 
 pub fn parse_source(source: &str, file_path: &str) -> Result<ParseResult, String> {
     let defs = definitions(source, file_path)?;
@@ -279,29 +281,28 @@ fn push_unique(out: &mut Vec<String>, node: Node, source: &str) {
     }
 }
 
-fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<CallSite> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
 }
 
-fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
+fn collect_calls(node: Node, source: &str, out: &mut Vec<CallSite>) {
     if node.kind() == "call" {
         if let Some(function) = node.child_by_field_name("function") {
-            match function.kind() {
-                "identifier" => {
-                    if let Ok(text) = function.utf8_text(source.as_bytes()) {
-                        out.push(text.to_string());
-                    }
-                }
-                "attribute" => {
-                    if let Some(attr) = function.child_by_field_name("attribute") {
-                        if let Ok(text) = attr.utf8_text(source.as_bytes()) {
-                            out.push(text.to_string());
-                        }
-                    }
-                }
-                _ => {}
+            let name = match function.kind() {
+                "identifier" => function.utf8_text(source.as_bytes()).ok().map(str::to_string),
+                "attribute" => function
+                    .child_by_field_name("attribute")
+                    .and_then(|attr| attr.utf8_text(source.as_bytes()).ok())
+                    .map(str::to_string),
+                _ => None,
+            };
+            if let Some(name) = name {
+                out.push(CallSite {
+                    name,
+                    line: node.start_position().row + 1,
+                });
             }
         }
     }
@@ -330,6 +331,10 @@ def main():
 
     fn parse(source: &str) -> ParseResult {
         parse_source(source, "src/main.py").unwrap()
+    }
+
+    fn call_names(calls: &[CallSite]) -> Vec<String> {
+        calls.iter().map(|call| call.name.clone()).collect()
     }
 
     #[test]
@@ -397,10 +402,30 @@ def build():
     fn records_the_names_each_definition_calls() {
         let defs = definitions(SOURCE, "src/main.py").unwrap();
         let main = defs.iter().find(|def| def.name == "main").unwrap();
-        assert_eq!(main.calls, vec!["add".to_string()]);
+        assert_eq!(call_names(&main.calls), vec!["add".to_string()]);
 
         let add = defs.iter().find(|def| def.name == "add").unwrap();
         assert!(add.calls.is_empty());
+    }
+
+    #[test]
+    fn records_the_line_of_each_call() {
+        let source = "\
+def main():
+    setup()
+
+    return add(1, 2)
+";
+        let defs = definitions(source, "src/main.py").unwrap();
+        let main = defs.iter().find(|def| def.name == "main").unwrap();
+
+        assert_eq!(
+            main.calls,
+            vec![
+                CallSite { name: "setup".into(), line: 2 },
+                CallSite { name: "add".into(), line: 4 },
+            ]
+        );
     }
 
     #[test]

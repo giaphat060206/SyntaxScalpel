@@ -1,7 +1,9 @@
 use tree_sitter::{Node, Parser};
 
 use crate::models::{NodeKind, ParseResult};
-use crate::parser::function_graph::{self, collapse_whitespace, line_range, node_text, Def};
+use crate::parser::function_graph::{
+    self, collapse_whitespace, line_range, node_text, CallSite, Def,
+};
 
 pub(crate) fn grammar_for(file_path: &str) -> tree_sitter::Language {
     if file_path.ends_with(".tsx") {
@@ -33,34 +35,30 @@ pub(crate) fn definitions(source: &str, file_path: &str) -> Result<Vec<Def>, Str
     Ok(collect_defs(tree.root_node(), source, &imported))
 }
 
-fn calls_in(node: Node, source: &str) -> Vec<String> {
+fn calls_in(node: Node, source: &str) -> Vec<CallSite> {
     let mut calls = Vec::new();
     collect_calls(node, source, &mut calls);
     calls
 }
 
-fn collect_calls(node: Node, source: &str, out: &mut Vec<String>) {
+fn collect_calls(node: Node, source: &str, out: &mut Vec<CallSite>) {
     if node.kind() == "call_expression" || node.kind() == "new_expression" {
         if let Some(callee) = node
             .child_by_field_name("function")
             .or_else(|| node.child_by_field_name("constructor"))
         {
-            match callee.kind() {
-                "identifier" => {
-                    let text = node_text(callee, source);
-                    if !text.is_empty() {
-                        out.push(text);
-                    }
-                }
-                "member_expression" => {
-                    if let Some(prop) = callee.child_by_field_name("property") {
-                        let text = node_text(prop, source);
-                        if !text.is_empty() {
-                            out.push(text);
-                        }
-                    }
-                }
-                _ => {}
+            let name = match callee.kind() {
+                "identifier" => Some(node_text(callee, source)),
+                "member_expression" => callee
+                    .child_by_field_name("property")
+                    .map(|prop| node_text(prop, source)),
+                _ => None,
+            };
+            if let Some(name) = name.filter(|name| !name.is_empty()) {
+                out.push(CallSite {
+                    name,
+                    line: node.start_position().row + 1,
+                });
             }
         }
     }
@@ -459,6 +457,10 @@ function run() {
         parse_source(source, "src/app.js").unwrap()
     }
 
+    fn call_names(calls: &[CallSite]) -> Vec<String> {
+        calls.iter().map(|call| call.name.clone()).collect()
+    }
+
     fn node_ids(result: &ParseResult, kind: NodeKind) -> Vec<&str> {
         result
             .nodes
@@ -552,14 +554,34 @@ const MAX = 10;
 
         // An expression-bodied arrow function: the whole body is a call site.
         let dist = defs.iter().find(|def| def.name == "dist").unwrap();
-        assert_eq!(dist.calls, vec!["helper".to_string()]);
+        assert_eq!(call_names(&dist.calls), vec!["helper".to_string()]);
 
         let run = defs.iter().find(|def| def.name == "run").unwrap();
-        assert!(run.calls.contains(&"dist".to_string()));
-        assert!(run.calls.contains(&"double".to_string()));
+        assert!(call_names(&run.calls).contains(&"dist".to_string()));
+        assert!(call_names(&run.calls).contains(&"double".to_string()));
 
         let max = defs.iter().find(|def| def.name == "MAX").unwrap();
         assert!(max.calls.is_empty());
+    }
+
+    #[test]
+    fn records_the_line_of_each_call() {
+        let source = "\
+function run() {
+  setup();
+  return double(2);
+}
+";
+        let defs = definitions(source, "src/app.js").unwrap();
+        let run = defs.iter().find(|def| def.name == "run").unwrap();
+
+        assert_eq!(
+            run.calls,
+            vec![
+                CallSite { name: "setup".into(), line: 2 },
+                CallSite { name: "double".into(), line: 3 },
+            ]
+        );
     }
 
     #[test]
