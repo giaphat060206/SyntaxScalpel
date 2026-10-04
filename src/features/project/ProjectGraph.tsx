@@ -17,6 +17,7 @@ import type { ProjectGraph as ProjectGraphData } from "../../shared/types";
 import { projectGraph } from "../../shared/ipc";
 import { selectionInfo } from "./selection";
 import { buildProjectNodes, decorateProjectNodes } from "./nodes";
+import { emphasisVisibility, useEmphasis } from "../graph/emphasis";
 import { CodeNode } from "../graph/CodeNode";
 import { ElkEdge } from "../graph/elk/ElkEdge";
 import { EmptyState, ErrorState } from "../../shared/StateViews";
@@ -106,12 +107,24 @@ function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
     [data, toggleCollapse]
   );
 
+  const { emphasis, setEmphasis } = useEmphasis();
+
+  // Hovering an import row lights up the two files and the edge between them.
+  const emphasiseWith = useCallback(
+    (counterpart: string) => ({
+      onMouseEnter: () =>
+        setEmphasis({ ids: activeSelectedId ? [activeSelectedId, counterpart] : [counterpart] }),
+      onMouseLeave: () => setEmphasis(null),
+    }),
+    [activeSelectedId, setEmphasis]
+  );
+
   const decoratedNodes = useMemo<Node[]>(
     () =>
       data
-        ? decorateProjectNodes(builtNodes, data, collapsed, activeSelectedId)
+        ? decorateProjectNodes(builtNodes, data, collapsed, activeSelectedId, emphasis?.ids ?? [])
         : [],
-    [builtNodes, data, collapsed, activeSelectedId]
+    [builtNodes, data, collapsed, activeSelectedId, emphasis]
   );
 
   // Project edges carry no id; the canvas speaks in `DomainEdge`s.
@@ -127,19 +140,18 @@ function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
   // Only edges that touch the focused files stay bright; an edge between two
   // merely-highlighted files (e.g. two imports of the selection) dims.
   const handleEdgeVisibility = useCallback(
-    (edge: DomainEdge, selected: unknown): EdgeVisibility => {
-      if (typeof selected !== "string" || !data) {
-        return "active";
-      }
-      const focus = selectionInfo(data, selected)?.focus ?? null;
-      if (!focus) {
-        return "active";
-      }
-      return focus.has(edge.source) || focus.has(edge.target)
-        ? "active"
-        : "dim";
-    },
-    [data]
+    (edge: DomainEdge, selected: unknown): EdgeVisibility =>
+      emphasisVisibility(edge, emphasis, () => {
+        if (typeof selected !== "string" || !data) {
+          return "active";
+        }
+        const focus = selectionInfo(data, selected)?.focus ?? null;
+        if (!focus) {
+          return "active";
+        }
+        return focus.has(edge.source) || focus.has(edge.target) ? "active" : "dim";
+      }),
+    [data, emphasis]
   );
 
   const canvas = useGraphCanvas({
@@ -380,6 +392,7 @@ className="relative h-full bg-bg"
               <div
                 key={`${entry.targetId}|${entry.specifier}|${entry.names.join(",")}`}
                 className="flex items-start gap-1 font-mono text-white/85"
+                {...(entry.targetId ? emphasiseWith(entry.targetId) : {})}
               >
                 <span className="shrink-0 text-accent/60">•</span>
                 <span className="min-w-0 break-words">
@@ -399,6 +412,7 @@ className="relative h-full bg-bg"
               <div
                 key={importer.path}
                 className="flex items-start gap-1 font-mono text-white/85"
+                {...emphasiseWith(importer.path)}
               >
                 <span className="shrink-0 text-mint/60">•</span>
                 <span className="min-w-0 break-words">

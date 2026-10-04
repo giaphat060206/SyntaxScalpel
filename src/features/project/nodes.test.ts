@@ -42,4 +42,26 @@ describe("decorateProjectNodes", () => {
     const nodes = decorateProjectNodes(buildProjectNodes(data, () => {}), data, new Set(["src"]), null);
     expect(nodes.find((n) => n.id === "src/a.ts")?.hidden).toBe(true);
   });
+
+  it("highlights the ends of an emphasised connection and dims the rest", () => {
+    const nodes = decorateProjectNodes(buildProjectNodes(data, () => {}), data, new Set(), null, [
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+
+    const flag = (id: string, key: string) =>
+      (nodes.find((node) => node.id === id)?.data as Record<string, boolean>)[key];
+
+    expect(flag("src/a.ts", "highlighted")).toBe(true);
+    expect(flag("src/b.ts", "highlighted")).toBe(true);
+    expect(flag("src", "dimmed")).toBe(true);
+  });
+
+  it("changes nothing when there is no emphasis", () => {
+    const built = buildProjectNodes(data, () => {});
+    const plain = decorateProjectNodes(built, data, new Set(), null);
+    const empty = decorateProjectNodes(built, data, new Set(), null, []);
+
+    expect(empty.map((node) => node.data)).toEqual(plain.map((node) => node.data));
+  });
 });

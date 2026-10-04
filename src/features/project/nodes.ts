@@ -98,12 +98,16 @@ export function decorateProjectNodes(
   nodes: Node[],
   data: ProjectGraph,
   collapsed: Set<string>,
-  selectedId: string | null
+  selectedId: string | null,
+  emphasisIds: string[] = []
 ): Node[] {
   const hidden = hiddenIds(data, collapsed);
   const highlight = selectionInfo(data, selectedId)?.highlight ?? null;
+  const emphasis = new Set(emphasisIds);
+  const emphasised = emphasis.size > 0;
   return nodes.map((node) => {
     const nodeData = node.data as CodeNodeData;
+    const inEmphasis = emphasis.has(node.id);
     return {
       ...node,
       hidden: hidden.has(node.id),
@@ -112,8 +116,8 @@ export function decorateProjectNodes(
         project: nodeData.project
           ? { ...nodeData.project, collapsed: collapsed.has(node.id) }
           : nodeData.project,
-        highlighted: highlight ? node.id === selectedId : false,
-        dimmed: highlight ? !highlight.has(node.id) : false,
+        highlighted: emphasised ? inEmphasis : highlight ? node.id === selectedId : false,
+        dimmed: emphasised ? !inEmphasis : highlight ? !highlight.has(node.id) : false,
       },
     };
   });

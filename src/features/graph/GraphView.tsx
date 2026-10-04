@@ -12,6 +12,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { FunctionGraph } from "../../shared/types";
 import { buildFunctionNodes, crossFileNodeIdForName, crossFileNodeIdForPath, decorateFunctionNodes } from "./nodes";
+import { emphasisVisibility, useEmphasis } from "./emphasis";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
 import { GraphSearch } from "./GraphSearch";
@@ -60,9 +61,12 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
     [graph]
   );
 
+  const { emphasis, setEmphasis } = useEmphasis();
+  const emphasisIds = emphasis?.ids ?? [];
+
   const decoratedNodes = useMemo(
-    () => decorateFunctionNodes(builtNodes, allEdges, activeSelectedId),
-    [builtNodes, allEdges, activeSelectedId]
+    () => decorateFunctionNodes(builtNodes, allEdges, activeSelectedId, emphasisIds),
+    [builtNodes, allEdges, activeSelectedId, emphasis]
   );
 
   const domainEdges = useMemo<DomainEdge[]>(
@@ -75,13 +79,12 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
   );
 
   const handleEdgeVisibility = useCallback(
-    (edge: DomainEdge, selected: unknown): EdgeVisibility => {
-      if (typeof selected !== "string") return "active";
-      return edge.source === selected || edge.target === selected
-        ? "active"
-        : "dim";
-    },
-    []
+    (edge: DomainEdge, selected: unknown): EdgeVisibility =>
+      emphasisVisibility(edge, emphasis, () => {
+        if (typeof selected !== "string") return "active";
+        return edge.source === selected || edge.target === selected ? "active" : "dim";
+      }),
+    [emphasis]
   );
 
   // External blocks belong in the key: a new neighbourhood is a new graph.
@@ -127,6 +130,17 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
   }
 
   const activeId = activeSelectedId ?? hoveredId;
+
+  // A row in the info card names a counterpart the canvas may draw, so hovering
+  // it lights up the two ends and the arrow between them.
+  const emphasiseWith = useCallback(
+    (counterpart: string) => ({
+      onMouseEnter: () =>
+        setEmphasis({ ids: activeId ? [activeId, counterpart] : [counterpart] }),
+      onMouseLeave: () => setEmphasis(null),
+    }),
+    [activeId, setEmphasis]
+  );
   const activeNode = activeId
     ? canvas.nodes.find((node) => node.id === activeId)
     : undefined;
@@ -222,6 +236,7 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
                         type="button"
                         title={`Go to ${target}`}
                         onClick={() => canvas.focusNode(target)}
+                        {...emphasiseWith(target)}
                         className="text-accent hover:underline"
                       >
                         {name}
@@ -253,6 +268,7 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
                           type="button"
                           title={`Go to ${target}`}
                           onClick={() => canvas.focusNode(target)}
+                          {...emphasiseWith(target)}
                           className="text-accent hover:underline"
                         >
                           {entry.path}
@@ -276,6 +292,7 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
                           type="button"
                           title={`Go to ${target}`}
                           onClick={() => canvas.focusNode(target)}
+                          {...emphasiseWith(target)}
                           className="text-accent hover:underline"
                         >
                           {entry.path}

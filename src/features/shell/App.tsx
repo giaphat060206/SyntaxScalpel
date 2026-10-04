@@ -14,6 +14,7 @@ import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
 import { AiResultView } from "../ai/AiResultView";
 import { requestKey } from "../ai/requests";
+import { EmphasisProvider, type Emphasis } from "../graph/emphasis";
 import { aiSummary, type AiRequest, type AiSummary } from "../../shared/ipc";
 
 type Location =
@@ -64,8 +65,9 @@ export default function App() {
   const [aiResults, setAiResults] = useState<
     Record<string, { request: AiRequest; result: AiSummary }>
   >({});
-  // Emphasising a hovered connection's ends in the graphs arrives next.
-  const noHover = useCallback(() => {}, []);
+  /** The connection a pointer is over: its two ends, as canvas node ids. The
+   *  AI panel's rows and the graphs' info cards both drive this. */
+  const [emphasis, setEmphasis] = useState<Emphasis | null>(null);
   const { recents, remember, clear } = useRecents();
 
   const explorerPanel = usePanelRef();
@@ -249,6 +251,7 @@ export default function App() {
         />
       ) : (
       <div className="relative h-full bg-bg">
+      <EmphasisProvider value={{ emphasis, setEmphasis }}>
       {aiOpen && (
         <AiPanel
           root={root}
@@ -257,7 +260,7 @@ export default function App() {
           results={aiResults}
           onResult={handleAiResult}
           onShow={showAiResult}
-          onHover={noHover}
+          onHover={(row) => setEmphasis(row ? { ids: row.nodes } : null)}
           onClose={() => setAiOpen(false)}
         />
       )}
@@ -416,6 +419,7 @@ export default function App() {
           </>
         )}
       </Group>
+      </EmphasisProvider>
       </div>
       )}
         </div>

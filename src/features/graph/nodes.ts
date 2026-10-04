@@ -306,16 +306,26 @@ export function crossFileNodeIdForPath(nodes: Node[], path: string): string | nu
   return block ? path : null;
 }
 
+// While a connection is emphasised it is the focus: its two ends are
+// highlighted and everything else dims, whatever is selected.
 export function decorateFunctionNodes(
   nodes: Node[],
   edges: GraphEdge[],
-  selectedId: string | null
+  selectedId: string | null,
+  emphasisIds: string[] = []
 ): Node[] {
-  return nodes.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      ...visibilityOf(node.id, edges, selectedId),
-    },
-  }));
+  const emphasis = new Set(emphasisIds);
+  const emphasised = emphasis.size > 0;
+  return nodes.map((node) => {
+    const base = visibilityOf(node.id, edges, selectedId);
+    const inEmphasis = emphasis.has(node.id);
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        highlighted: emphasised ? inEmphasis : base.highlighted,
+        dimmed: emphasised ? !inEmphasis : base.dimmed,
+      },
+    };
+  });
 }

@@ -154,6 +154,41 @@ describe("decorateFunctionNodes", () => {
   });
 });
 
+describe("decorateFunctionNodes emphasis", () => {
+  const flag = (nodes: ReturnType<typeof buildFunctionNodes>, id: string, key: string) =>
+    (nodes.find((node) => node.id === id)?.data as Record<string, boolean>)[key];
+
+  it("highlights both ends of a connection and dims everything else", () => {
+    const g = graph(result);
+    const nodes = decorateFunctionNodes(buildFunctionNodes(g), g.file.edges, null, [
+      "f",
+      "Cls.m",
+    ]);
+
+    expect(flag(nodes, "f", "highlighted")).toBe(true);
+    expect(flag(nodes, "Cls.m", "highlighted")).toBe(true);
+    expect(flag(nodes, "V", "dimmed")).toBe(true);
+    expect(flag(nodes, "V", "highlighted")).toBe(false);
+  });
+
+  it("lets the emphasis win over a selection while it is up", () => {
+    const g = graph(result);
+    const nodes = decorateFunctionNodes(buildFunctionNodes(g), g.file.edges, "f", ["V"]);
+
+    expect(flag(nodes, "f", "highlighted")).toBe(false);
+    expect(flag(nodes, "f", "dimmed")).toBe(true);
+    expect(flag(nodes, "V", "highlighted")).toBe(true);
+  });
+
+  it("changes nothing when there is no emphasis", () => {
+    const g = graph(result);
+    const plain = decorateFunctionNodes(buildFunctionNodes(g), g.file.edges, "f");
+    const empty = decorateFunctionNodes(buildFunctionNodes(g), g.file.edges, "f", []);
+
+    expect(empty.map((node) => node.data)).toEqual(plain.map((node) => node.data));
+  });
+});
+
 describe("cross-file jump targets", () => {
   const nodes = buildFunctionNodes(graph(result, { externals: [externalFile] }));
 
