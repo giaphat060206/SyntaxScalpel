@@ -154,6 +154,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - The first Task run for a project stops at an egress notice naming the Provider and is remembered per project
   root; the result header keeps naming the Provider and carries Regenerate, Export (a save dialog, then
   `exportSummary`) and Dismiss. Answers render through `MarkdownView` in the side panel.
+- A finished Task is marked `✓` with `aria-pressed`, and clicking it again re-displays that answer without a
+  request at all. The mark holds only while the stored request still matches the one on screen — same target,
+  provider and model — so changing the selection or the model clears it and the Task generates again. This is a
+  session shortcut: the store, not the panel, decides whether a summary is reused.
 
 ## Style and workflow
 

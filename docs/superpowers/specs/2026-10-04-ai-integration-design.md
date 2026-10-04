@@ -213,6 +213,11 @@ egress notice in §8 has to be honest in the meantime.
   and files, `FunctionGraph` nodes — so neither needs a new backend command.
 - **Results:** rendered in the Docs panel, reusing `MarkdownView`, with a header carrying task, model, cache age,
   and Regenerate. This costs no new rendering code and inherits the resizable split.
+- **A finished Task stays visible as finished.** Once a Task has an answer, its entry is marked `✓` and clicking it
+  puts that answer back on screen without a request. The mark is held only while the stored request still matches
+  the one on screen — same target, provider and model — because an answer to a different question is not an answer
+  to this one. The panel remembers what it has shown; the store remains the authority on what is reused, so a
+  restart simply means the first click is a cache hit instead of a redisplay.
 - **Streaming** is deferred: it is the one requirement that forces chunked events across IPC, and summaries are
   short.
 

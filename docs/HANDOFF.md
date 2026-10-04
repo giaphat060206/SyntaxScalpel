@@ -155,6 +155,9 @@ GLOSSARY.md              domain vocabulary
   be read, grepped or hand-edited in place; a hand-written body is served like any other, and a broken header is
   just a miss. **Export** writes the stored document to a path chosen in a save dialog, header and all, using the
   same renderer as the store.
+- A finished Task is marked `✓` and clicking it again puts that answer straight back on screen with no request. The
+  mark is held per task and only while the request still matches — same target, provider and model — so changing the
+  selection or the model clears it. The panel is a shortcut, not the authority: the store decides what is reused.
 
 ### Layout (ELK)
 - ELK owns placement and orthogonal routing, in a worker with a fallback; >1500 nodes or any error falls back to
