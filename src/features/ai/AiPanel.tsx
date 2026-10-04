@@ -5,9 +5,10 @@ import { FilePicker } from "./FilePicker";
 import { RelationshipList } from "./RelationshipList";
 import { isConfirmed, rememberConfirmed } from "./egress";
 import type { ConnectionRow } from "./relationships";
-import { requestKey, sameRequest } from "./requests";
+import { requestKey, requestSignature, sameRequest } from "./requests";
 import { AI_TASKS } from "./tasks";
 import { useAiSettings, PROVIDERS } from "./useAiSettings";
+import { useCachedMarks } from "./useCachedMarks";
 import { useFunctionGraph, useRelationships } from "./useRelationships";
 
 type Mode = "scope" | "files" | "definitions";
@@ -84,6 +85,38 @@ export function AiPanel({
     graph: fileGraph.graph,
   });
 
+  // Everything the panel could offer to show: the Tasks for this target, and one
+  // request per relationship row.
+  const probes = useMemo<AiRequest[]>(() => {
+    if (!root) {
+      return [];
+    }
+    const shape =
+      mode === "files"
+        ? files.length > 0
+        : mode === "definitions"
+          ? file !== null && definitions.length > 0
+          : true;
+    const asks: AiRequest[] = target && shape
+      ? AI_TASKS.map((task) => ({
+          root,
+          target,
+          task: task.id,
+          provider: settings.provider,
+          model: settings.model,
+        }))
+      : [];
+    const rows = relationships.rows.map((row) => ({
+      root,
+      target: { kind: "connection" as const, source: row.source, target: row.target },
+      task: "relationship",
+      provider: settings.provider,
+      model: settings.model,
+    }));
+    return [...asks, ...rows];
+  }, [root, mode, file, files, definitions, target, settings.provider, settings.model, relationships.rows]);
+  const marks = useCachedMarks(root, probes);
+
   const choice = settings.provider;
   const blocked = !settings.ready
     ? "Add an API key"
@@ -115,7 +148,9 @@ export function AiPanel({
       onShow(already.request, already.result);
       return;
     }
-    if (!isConfirmed(request.root)) {
+    // A stored answer is read from this machine, so it needs no notice. Only a
+    // request that would actually reach the provider asks first.
+    if (!marks[requestSignature(request)] && !isConfirmed(request.root)) {
       setPending({ task: request.task, request });
       return;
     }
@@ -285,6 +320,7 @@ export function AiPanel({
             loading={relationships.loading}
             error={relationships.error}
             results={results}
+            marks={marks}
             provider={settings.provider}
             model={settings.model}
             onGenerate={askAbout}
@@ -301,25 +337,29 @@ export function AiPanel({
       </div>
       <ul className="m-0 mt-1 list-none space-y-1 p-0">
         {AI_TASKS.map((task) => {
-          // Held only while it answers the question on screen: change the code,
-          // the provider or the model and the answer no longer matches.
-          const done = Boolean(
-            root &&
-              target &&
-              results[task.id] &&
-              sameRequest(results[task.id].request, {
-                root,
+          const request: AiRequest | null = target
+            ? {
+                root: root ?? "",
                 target,
                 task: task.id,
                 provider: settings.provider,
                 model: settings.model,
-              })
+              }
+            : null;
+          // Held while it answers the question on screen: change the target, the
+          // provider or the model and the answer no longer matches. The store has
+          // the last word, so a mark survives a restart without the panel saving
+          // anything of its own.
+          const done = Boolean(
+            request &&
+              ((results[task.id] && sameRequest(results[task.id].request, request)) ||
+                marks[requestSignature(request)])
           );
           return (
             <li key={task.id}>
               <button
                 type="button"
-                disabled={blocked !== undefined || running !== null}
+                disabled={(blocked !== undefined && !done) || running !== null}
                 aria-pressed={done}
                 title={
                   done

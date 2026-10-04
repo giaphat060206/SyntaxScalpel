@@ -23,3 +23,14 @@ export function sameRequest(stored: AiRequest, wanted: AiRequest): boolean {
     JSON.stringify(stored.target) === JSON.stringify(wanted.target)
   );
 }
+
+/** The full identity of a question, for marks derived from the store: the same
+ *  target asked of another model is a different answer under a different key. */
+export function requestSignature(request: AiRequest): string {
+  return [
+    requestKey(request),
+    JSON.stringify(request.target),
+    request.provider,
+    request.model,
+  ].join("|");
+}

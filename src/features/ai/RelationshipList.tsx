@@ -1,6 +1,6 @@
 import type { AiRequest, AiSummary } from "../../shared/ipc";
 import type { ConnectionRow } from "./relationships";
-import { requestKey, sameRequest } from "./requests";
+import { requestKey, requestSignature, sameRequest } from "./requests";
 
 interface Props {
   root: string;
@@ -9,6 +9,8 @@ interface Props {
   error: string | null;
   /** What has already been generated this session, by request key. */
   results: Record<string, { request: AiRequest; result: AiSummary }>;
+  /** What the store can already answer, by request signature: derived, not saved. */
+  marks: Record<string, boolean>;
   provider: string;
   model: string;
   onGenerate: (row: ConnectionRow) => void;
@@ -30,6 +32,7 @@ export function RelationshipList({
   loading,
   error,
   results,
+  marks,
   provider,
   model,
   onGenerate,
@@ -57,7 +60,9 @@ export function RelationshipList({
           model,
         };
         const stored = results[requestKey(request)];
-        const done = Boolean(stored && sameRequest(stored.request, request));
+        const done =
+          Boolean(stored && sameRequest(stored.request, request)) ||
+          marks[requestSignature(request)] === true;
         return (
           <li
             key={`${row.direction}:${row.source}->${row.target}`}

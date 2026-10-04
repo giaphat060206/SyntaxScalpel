@@ -115,6 +115,12 @@ export function aiSummary(request: AiRequest): Promise<AiSummary> {
   });
 }
 
+/** Which of these requests the store can already answer. Marks are derived from
+ *  the Summary Cache, so they survive a restart with nothing saved to keep them. */
+export function aiCached(root: string, requests: AiRequest[]): Promise<boolean[]> {
+  return invoke<boolean[]>("ai_cached", { root, requests });
+}
+
 /** Writes one stored summary to a path the user picked, header and all. */
 export function exportSummary(root: string, key: string, path: string): Promise<void> {
   return invoke<void>("export_summary", { root, key, path });

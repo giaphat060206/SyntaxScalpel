@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
+  aiCached,
   aiSettings,
   aiSummary,
   functionGraph,
@@ -18,6 +19,7 @@ vi.mock("../../shared/ipc", () => ({
   setAiKey: vi.fn(),
   clearAiKey: vi.fn(),
   aiSummary: vi.fn(),
+  aiCached: vi.fn(async () => []),
   projectGraph: vi.fn(async () => ({
     root: "/project",
     folders: [],
@@ -450,6 +452,71 @@ describe("AiPanel relationships", () => {
 
     fireEvent.mouseLeave(row);
     expect(onHover).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe("AiPanel marks from the store", () => {
+  beforeEach(() => {
+    vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
+  });
+
+  it("marks a task the store can answer with no session history at all", async () => {
+    vi.mocked(aiCached).mockImplementation(async (_root, requests) =>
+      requests.map((request) => request.task === "project-overview")
+    );
+
+    renderPanel();
+
+    const button = await screen.findByRole("button", { name: /Project overview/ });
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
+    expect(
+      screen.getByRole("button", { name: /Report impact/ }).getAttribute("aria-pressed")
+    ).toBe("false");
+  });
+
+  it("shows a stored answer with no egress notice, because nothing leaves", async () => {
+    vi.mocked(aiCached).mockImplementation(async (_root, requests) =>
+      requests.map(() => true)
+    );
+    vi.mocked(aiSummary).mockResolvedValue({ ...answer, task: "project-overview" });
+    const { onResult } = renderPanel();
+    const button = await screen.findByRole("button", { name: /Project overview/ });
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(onResult).toHaveBeenCalled());
+    expect(screen.queryByText(/leaves this machine/)).toBeNull();
+  });
+
+  it("marks a relationship row the store can answer", async () => {
+    vi.mocked(aiCached).mockImplementation(async (_root, requests) =>
+      requests.map((request) => request.task === "relationship")
+    );
+    vi.mocked(functionGraph).mockResolvedValue({
+      file: {
+        filePath: "algorithms/pathfinder.py",
+        edges: [],
+        nodes: [{ id: "dijkstra", kind: "function", name: "dijkstra", params: [], returns: [] }],
+      },
+      imports: { imports: [], importedBy: [] },
+      externals: [
+        {
+          path: "utils/helpers.py",
+          nodes: [{ id: "push", kind: "function", name: "push", params: [], returns: [] }],
+        },
+      ],
+      crossEdges: [{ source: "dijkstra", target: "utils/helpers.py::push" }],
+      residualImports: [],
+      residualImportedBy: [],
+      truncated: false,
+    });
+
+    renderPanel({}, "algorithms/pathfinder.py");
+    fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
+    fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+
+    expect(await screen.findByRole("button", { name: "✓ Show" })).toBeTruthy();
   });
 });
 
