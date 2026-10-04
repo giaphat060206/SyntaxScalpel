@@ -14,10 +14,15 @@ scope for now.
 - Extraction still costs one module plus a grammar crate per language (ADR-0001), but the Function Graph now ships
   a neighbourhood, so how well a language answers cross-file questions depends on how well its specifiers and call
   names resolve.
-- A Definition in another file is reached only when its own name is imported (`from file2 import func2`), or when
-  it is a Method whose Container the calling Definition imported and references (`from file2 import Thing`, then
-  `Thing().run()`). Namespace-qualified calls — `import file2` then `file2.func2()`, `import * as f2` — are missed
-  until receivers are tracked.
+- A Definition in another file is reached when its own name is imported and the calling Definition uses it: a
+  file-level function or class directly (`from file2 import func2` then `func2()`, or `Path(...)` for a class), and
+  a Method through its Container (`from file2 import Thing` then `Thing().run()`). A module-level binding is never
+  a target — a matching call name is coincidence rather than a call to it. Namespace-qualified calls (`import
+  file2` then `file2.func2()`, `import * as f2`) are missed until receivers are tracked.
+- Cross-file is asymmetric with in-file on purpose: `Thing()` draws a Call Edge across a file boundary where an
+  in-file Call Edge deliberately draws none. A cross-file construction is a real file dependency; an in-file one is
+  noise. The arrow therefore means "calls, or constructs when it crosses a file", and only the target's kind label
+  tells the two apart.
 - An Import that resolves to a barrel which only re-exports (`parser/imports/mod.rs`) declares no Definitions, so
   it draws no block and stays text.
 - Blocks are capped by file and by Definition and the payload reports truncation: an import-heavy file can

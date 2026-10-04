@@ -50,13 +50,16 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   method), `modName.item` (item inside an inline Rust `mod`), and `path::ClassName.method` for a Definition shown
   from another file. Every `parent` must name a top-level **class** node in the same payload, because the frontend
   attaches children to their parent and drops orphans.
-- Edges are **in-file only**; class ids are never edge targets; no self-edges.
+- In-file Call Edges stay in-file only: a class id is never an **in-file** edge target; no self-edges.
 - The Function Graph also carries one-hop Cross-file Call Edges: `neighborhood.rs` resolves each Definition's call
   names against the Import Edges `Resolver` already computes, materialises the far side's Definitions in one dashed
   block per file (the block's id is the file path, and it is the only Container for those Definitions), and reports
-  what it could not draw as `residualImports` / `residualImportedBy`. A file-level Definition is reached only when
-  its own name was imported; a Method is reached when its Container is imported **and** referenced by the calling
-  Definition. Blocks are capped (12 files, 40 Definitions) and `truncated` is surfaced. See ADR-0006.
+  what it could not draw as `residualImports` / `residualImportedBy`. A file-level Definition — including a
+  **Class**, reached by a constructor call — is reached only when its own name was imported; a Method is reached
+  when its Container is imported **and** referenced by the calling Definition; a **Variable** is never a target.
+  Cross-file is deliberately asymmetric with in-file: `Thing()` draws an edge across files but never within one,
+  because a cross-file construction is a real file dependency. Blocks are capped (12 files, 40 Definitions) and
+  `truncated` is surfaced. See ADR-0006.
 - `function_graph` is the one command the UI calls for a file, returning the file's graph, its Import Analysis, and
   the neighbourhood from a single project scan. `parse_python` / `parse_js_ts` / `parse_rust` / `analyze_imports`
   are still registered but no longer called by the frontend; retiring them means rerouting `parse_file` first.

@@ -54,12 +54,16 @@ struct FileDefs {
     by_name: BTreeMap<String, usize>,
 }
 
-/// Definition ids and names a call could name, mirroring `collect_edges`:
-/// Containers and Variables are never Call Edge endpoints.
+/// Definition ids and names a call could name.
+///
+/// Containers are included because a constructor call reaches a class across
+/// files (`Thing()` → `file2.py::Thing`), which is exactly what an in-file Call
+/// Edge deliberately does not do. Variables stay out: a call whose name matches
+/// a module-level binding is coincidence, not a call to it.
 fn call_targets(defs: &[Def]) -> BTreeMap<String, usize> {
     let mut by_name = BTreeMap::new();
     for (index, def) in defs.iter().enumerate() {
-        if def.kind == NodeKind::Class || def.kind == NodeKind::Variable {
+        if def.kind == NodeKind::Variable {
             continue;
         }
         by_name.entry(def.id.clone()).or_insert(index);
@@ -382,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_method_is_reached_through_its_imported_container() {
+    fn a_constructor_and_a_method_on_it_are_both_reached() {
         let root = temp_project("method");
         std::fs::write(
             root.join("file2.py"),
@@ -399,16 +403,74 @@ mod tests {
 
         assert_eq!(
             graph.cross_edges,
-            vec![GraphEdge {
-                source: "go".into(),
-                target: "file2.py::Thing.run".into(),
-            }]
+            vec![
+                // `Thing()` is a constructor call, so the Container is reached
+                // too, alongside the Method called on the instance.
+                GraphEdge {
+                    source: "go".into(),
+                    target: "file2.py::Thing".into(),
+                },
+                GraphEdge {
+                    source: "go".into(),
+                    target: "file2.py::Thing.run".into(),
+                },
+            ]
         );
         let block = external(&graph, "file2.py");
-        assert_eq!(block.nodes.len(), 1);
-        assert_eq!(block.nodes[0].kind, NodeKind::Method);
+        assert_eq!(block.nodes.len(), 2);
+        assert_eq!(block.nodes[0].id, "file2.py::Thing");
+        assert_eq!(block.nodes[0].kind, NodeKind::Class);
+        assert_eq!(block.nodes[1].kind, NodeKind::Method);
         // Flat: the file block is the only container, never a nested one.
-        assert_eq!(block.nodes[0].parent.as_deref(), Some("file2.py"));
+        assert!(block
+            .nodes
+            .iter()
+            .all(|node| node.parent.as_deref() == Some("file2.py")));
+    }
+
+    #[test]
+    fn an_imported_class_is_reached_by_a_constructor_call() {
+        let root = temp_project("class-only");
+        std::fs::write(
+            root.join("core.py"),
+            "class Path:\n    def __init__(self, nodes):\n        self.nodes = nodes\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pathfinder.py"),
+            "from core import Path\n\ndef build():\n    return Path([1])\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "pathfinder.py").unwrap();
+
+        assert_eq!(
+            graph.cross_edges,
+            vec![GraphEdge {
+                source: "build".into(),
+                target: "core.py::Path".into(),
+            }]
+        );
+        let block = external(&graph, "core.py");
+        assert_eq!(block.nodes.len(), 1);
+        assert_eq!(block.nodes[0].name, "Path");
+        assert_eq!(block.nodes[0].kind, NodeKind::Class);
+        assert!(graph.residual_imports.is_empty());
+    }
+
+    #[test]
+    fn a_module_level_binding_is_never_a_call_target() {
+        let root = temp_project("binding");
+        std::fs::write(root.join("file2.py"), "HANDLER = lambda: 1\n").unwrap();
+        std::fs::write(
+            root.join("file1.py"),
+            "from file2 import HANDLER\n\ndef run():\n    return HANDLER()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+        assert!(graph.externals.is_empty());
+        assert!(graph.cross_edges.is_empty());
     }
 
     #[test]
