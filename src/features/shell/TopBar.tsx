@@ -37,7 +37,7 @@ export function TopBar({
       <button
         type="button"
         onClick={() => setMenuOpen((value) => !value)}
-        className="rounded pl-1 pr-2 py-0.5 text-white/85 hover:bg-white/10"
+        className="rounded px-2 py-0.5 text-white/85 hover:bg-white/10"
       >
         File
       </button>
