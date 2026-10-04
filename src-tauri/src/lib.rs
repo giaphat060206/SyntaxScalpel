@@ -26,6 +26,9 @@ pub fn run() {
             commands::parse::analyze_imports,
             commands::parse::project_graph,
             commands::parse::analyze_api,
+            commands::ai::ai_settings,
+            commands::ai::set_ai_key,
+            commands::ai::clear_ai_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
