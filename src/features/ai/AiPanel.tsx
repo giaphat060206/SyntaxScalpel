@@ -12,8 +12,25 @@ interface Props {
   root: string | null;
   scope: string;
   file: string | null;
+  /** What has already been generated this session, by task id. */
+  results: Record<string, { request: AiRequest; result: AiSummary }>;
   onResult: (request: AiRequest, result: AiSummary) => void;
+  /** Re-display something already generated, without asking anyone. */
+  onShow: (request: AiRequest, result: AiSummary) => void;
   onClose: () => void;
+}
+
+/** A stored answer counts only for the same question: same code, same provider,
+ *  same model. The Digest is deterministic, so equal requests mean one cache key
+ *  — this is a session shortcut, never a source of truth. */
+function sameRequest(stored: AiRequest, wanted: AiRequest): boolean {
+  return (
+    stored.root === wanted.root &&
+    stored.task === wanted.task &&
+    stored.provider === wanted.provider &&
+    stored.model === wanted.model &&
+    JSON.stringify(stored.target) === JSON.stringify(wanted.target)
+  );
 }
 
 const MODES: { id: Mode; label: string }[] = [
@@ -32,7 +49,7 @@ const action =
  * key entry itself always stays reachable — otherwise the app dead-ends with no
  * way to satisfy the gate.
  */
-export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
+export function AiPanel({ root, scope, file, results, onResult, onShow, onClose }: Props) {
   const settings = useAiSettings();
   const [keyDraft, setKeyDraft] = useState("");
   const [running, setRunning] = useState<string | null>(null);
@@ -79,6 +96,11 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
       provider: settings.provider,
       model: settings.model,
     };
+    const already = results[task];
+    if (already && sameRequest(already.request, request)) {
+      onShow(already.request, already.result);
+      return;
+    }
     if (!isConfirmed(root)) {
       setPending({ task, request });
       return;
@@ -228,22 +250,45 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
         What to do
       </div>
       <ul className="m-0 mt-1 list-none space-y-1 p-0">
-        {AI_TASKS.map((task) => (
-          <li key={task.id}>
-            <button
-              type="button"
-              disabled={blocked !== undefined || running !== null}
-              title={blocked ?? task.hint}
-              onClick={() => run(task.id)}
-              className={`w-full rounded border border-white/10 px-2 py-1 text-left hover:border-accent/40 hover:text-accent disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:text-white/85 ${
-                running === task.id ? "text-accent" : "text-white/90"
-              }`}
-            >
-              {running === task.id ? `${task.label}…` : task.label}
-              <span className="block text-[10px] text-dimmed">{task.hint}</span>
-            </button>
-          </li>
-        ))}
+        {AI_TASKS.map((task) => {
+          // Held only while it answers the question on screen: change the code,
+          // the provider or the model and the answer no longer matches.
+          const done = Boolean(
+            root &&
+              target &&
+              results[task.id] &&
+              sameRequest(results[task.id].request, {
+                root,
+                target,
+                task: task.id,
+                provider: settings.provider,
+                model: settings.model,
+              })
+          );
+          return (
+            <li key={task.id}>
+              <button
+                type="button"
+                disabled={blocked !== undefined || running !== null}
+                aria-pressed={done}
+                title={
+                  done
+                    ? "Already generated: click to show it again"
+                    : (blocked ?? task.hint)
+                }
+                onClick={() => run(task.id)}
+                className={`w-full rounded border px-2 py-1 text-left disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:text-white/85 ${
+                  done
+                    ? "border-accent/60 bg-accent/10 text-accent hover:bg-accent/20"
+                    : "border-white/10 hover:border-accent/40 hover:text-accent"
+                } ${running === task.id ? "text-accent" : done ? "" : "text-white/90"}`}
+              >
+                {running === task.id ? `${task.label}…` : `${done ? "✓ " : ""}${task.label}`}
+                <span className="block text-[10px] text-dimmed">{task.hint}</span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       {pending && (

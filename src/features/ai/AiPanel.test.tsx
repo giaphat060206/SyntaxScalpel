@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { aiSettings, aiSummary, setAiKey } from "../../shared/ipc";
+import { aiSettings, aiSummary, setAiKey, type AiRequest, type AiSummary } from "../../shared/ipc";
 import { AiPanel } from "./AiPanel";
 import { cacheLabel } from "./AiResultView";
 import { rememberConfirmed } from "./egress";
@@ -33,14 +33,33 @@ const answer = {
   outputTokens: 5,
 };
 
-function renderPanel() {
+function renderPanel(
+  results: Record<string, { request: AiRequest; result: AiSummary }> = {}
+) {
   const onResult = vi.fn();
+  const onShow = vi.fn();
   const onClose = vi.fn();
   const view = render(
-    <AiPanel root="/project" scope="" file={null} onResult={onResult} onClose={onClose} />
+    <AiPanel
+      root="/project"
+      scope=""
+      file={null}
+      results={results}
+      onResult={onResult}
+      onShow={onShow}
+      onClose={onClose}
+    />
   );
-  return { onResult, onClose, unmount: view.unmount };
+  return { onResult, onShow, onClose, unmount: view.unmount };
 }
+
+const scopeRequest: AiRequest = {
+  root: "/project",
+  target: { kind: "scope", scope: "" },
+  task: "project-overview",
+  provider: "openrouter",
+  model: "",
+};
 
 function taskButton(name: RegExp): HTMLButtonElement {
   return screen.getByRole("button", { name }) as HTMLButtonElement;
@@ -135,7 +154,15 @@ describe("AiPanel running a task", () => {
 
   it("asks nothing and says why when no folder is open", async () => {
     render(
-      <AiPanel root={null} scope="" file={null} onResult={vi.fn()} onClose={vi.fn()} />
+      <AiPanel
+        root={null}
+        scope=""
+        file={null}
+        results={{}}
+        onResult={vi.fn()}
+        onShow={vi.fn()}
+        onClose={vi.fn()}
+      />
     );
     const task = await findTask(/Explain selection/);
 
@@ -220,7 +247,15 @@ describe("AiPanel egress", () => {
   it("asks again for a different project", async () => {
     rememberConfirmed("/project");
     render(
-      <AiPanel root="/other" scope="" file={null} onResult={vi.fn()} onClose={vi.fn()} />
+      <AiPanel
+        root="/other"
+        scope=""
+        file={null}
+        results={{}}
+        onResult={vi.fn()}
+        onShow={vi.fn()}
+        onClose={vi.fn()}
+      />
     );
     const task = await findTask(/Project overview/);
     await waitFor(() => expect(task.disabled).toBe(false));
@@ -229,6 +264,75 @@ describe("AiPanel egress", () => {
 
     await screen.findByText(/leaves this machine/);
     expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+});
+
+describe("AiPanel remembering what is done", () => {
+  beforeEach(() => {
+    vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
+  });
+
+  it("leaves a task unmarked until it has an answer", async () => {
+    renderPanel();
+    const task = await findTask(/Project overview/);
+
+    expect(task.getAttribute("aria-pressed")).toBe("false");
+    expect(task.textContent).not.toContain("✓");
+  });
+
+  it("marks the task done and shows it again without asking anyone", async () => {
+    const { onShow } = renderPanel({
+      "project-overview": { request: scopeRequest, result: answer },
+    });
+    const task = await findTask(/Project overview/);
+
+    expect(task.getAttribute("aria-pressed")).toBe("true");
+    expect(task.textContent).toContain("✓");
+    expect(task.getAttribute("title")).toContain("show it again");
+
+    fireEvent.click(task);
+
+    expect(onShow).toHaveBeenCalledWith(scopeRequest, answer);
+    expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+
+  it("marks nothing done once the question changes", async () => {
+    renderPanel({
+      "project-overview": {
+        request: { ...scopeRequest, model: "some/other-model" },
+        result: answer,
+      },
+    });
+    const task = await findTask(/Project overview/);
+
+    expect(task.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("still generates when the stored answer was for other code", async () => {
+    const { onResult } = renderPanel({
+      "project-overview": {
+        request: {
+          ...scopeRequest,
+          target: { kind: "files", scope: "", files: ["other.py"] },
+        },
+        result: answer,
+      },
+    });
+    const task = await findTask(/Project overview/);
+    expect(task.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(task);
+    fireEvent.click(await screen.findByRole("button", { name: /Send to OpenRouter/ }));
+
+    await waitFor(() => expect(onResult).toHaveBeenCalled());
+    expect(vi.mocked(aiSummary)).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds only the task that matches, not its neighbours", async () => {
+    renderPanel({ "project-overview": { request: scopeRequest, result: answer } });
+
+    expect((await findTask(/Project overview/)).getAttribute("aria-pressed")).toBe("true");
+    expect((await findTask(/Report impact/)).getAttribute("aria-pressed")).toBe("false");
   });
 });
 

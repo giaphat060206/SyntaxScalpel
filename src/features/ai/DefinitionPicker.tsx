@@ -64,7 +64,8 @@ export function DefinitionPicker({ root, file, selected, onChange }: Props) {
     } else {
       next.add(id);
     }
-    onChange([...next]);
+    // Sorted, so click order cannot make an otherwise identical request look new.
+    onChange([...next].sort());
   };
 
   const line = (entry: Entry) => (

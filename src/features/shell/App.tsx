@@ -60,6 +60,9 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiResult, setAiResult] = useState<AiSummary | null>(null);
   const [aiRequest, setAiRequest] = useState<AiRequest | null>(null);
+  const [aiResults, setAiResults] = useState<
+    Record<string, { request: AiRequest; result: AiSummary }>
+  >({});
   const { recents, remember, clear } = useRecents();
 
   const explorerPanel = usePanelRef();
@@ -200,6 +203,15 @@ export default function App() {
   const handleAiResult = useCallback((request: AiRequest, result: AiSummary) => {
     setAiRequest(request);
     setAiResult(result);
+    // Remember it per task, so the panel can highlight what is already generated
+    // and show it again without asking anyone.
+    setAiResults((previous) => ({ ...previous, [request.task]: { request, result } }));
+    setDocsCollapsed(false);
+  }, []);
+
+  const showAiResult = useCallback((request: AiRequest, result: AiSummary) => {
+    setAiRequest(request);
+    setAiResult(result);
     setDocsCollapsed(false);
   }, []);
 
@@ -207,8 +219,8 @@ export default function App() {
     if (!aiRequest) {
       return;
     }
-    setAiResult(await aiSummary({ ...aiRequest, force: true }));
-  }, [aiRequest]);
+    handleAiResult(aiRequest, await aiSummary({ ...aiRequest, force: true }));
+  }, [aiRequest, handleAiResult]);
 
   return (
     <SearchProvider>
@@ -239,7 +251,9 @@ export default function App() {
           root={root}
           scope={aiScope}
           file={aiFile}
+          results={aiResults}
           onResult={handleAiResult}
+          onShow={showAiResult}
           onClose={() => setAiOpen(false)}
         />
       )}
