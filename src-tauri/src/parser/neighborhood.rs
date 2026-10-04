@@ -229,6 +229,40 @@ impl Neighborhood {
         Some(node)
     }
 
+    /// A member edge implies its container.
+    ///
+    /// Calling `path::Class.push` means the caller reached `path::Class`, so a
+    /// caller that also constructs it used to draw two arrows onto one dashed
+    /// block — one at the class, one at the method inside it. Keep the member and
+    /// drop the container edge, which is the more specific fact; a caller that
+    /// only constructs the class keeps it, because then there is nothing inside to
+    /// point at.
+    fn prune_implied_containers(&mut self) {
+        let pairs: Vec<(String, String)> = self.edges.iter().cloned().collect();
+        let mut implied: BTreeSet<(String, String)> = BTreeSet::new();
+        for (source, container) in &pairs {
+            let member = format!("{container}.");
+            if pairs
+                .iter()
+                .any(|(other_source, other)| other_source == source && other.starts_with(&member))
+            {
+                implied.insert((source.clone(), container.clone()));
+            }
+        }
+        self.edges.retain(|edge| !implied.contains(edge));
+
+        // A container left with no arrows is an empty box in the dashed block.
+        let live: BTreeSet<&str> = self
+            .edges
+            .iter()
+            .flat_map(|(source, target)| [source.as_str(), target.as_str()])
+            .collect();
+        for nodes in self.externals.values_mut() {
+            nodes.retain(|node| live.contains(node.id.as_str()));
+        }
+        self.externals.retain(|_, nodes| !nodes.is_empty());
+    }
+
     fn push_edge(&mut self, source: &str, target: &str) {
         if source != target {
             self.edges.insert((source.to_string(), target.to_string()));
@@ -347,6 +381,7 @@ pub fn function_graph(root: &str, path: &str) -> Result<FunctionGraph, String> {
     };
     builder.collect_outgoing(&analysis, &rel, &defs);
     builder.collect_incoming(&analysis, &defs, &local_by_name);
+    builder.prune_implied_containers();
 
     let externals: Vec<ExternalFile> = builder
         .externals
@@ -457,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn a_constructor_and_a_method_on_it_are_both_reached() {
+    fn a_method_call_connects_to_the_method_and_not_its_class() {
         let root = temp_project("method");
         std::fs::write(
             root.join("file2.py"),
@@ -475,12 +510,9 @@ mod tests {
         assert_eq!(
             graph.cross_edges,
             vec![
-                // `Thing()` is a constructor call, so the Container is reached
-                // too, alongside the Method called on the instance.
-                GraphEdge {
-                    source: "go".into(),
-                    target: "file2.py::Thing".into(),
-                },
+                // `Thing()` reaches the Container, and `.run()` reaches the
+                // Method, but the member is the more specific fact: one arrow,
+                // onto the Definition inside the class.
                 GraphEdge {
                     source: "go".into(),
                     target: "file2.py::Thing.run".into(),
@@ -488,15 +520,48 @@ mod tests {
             ]
         );
         let block = external(&graph, "file2.py");
-        assert_eq!(block.nodes.len(), 2);
-        assert_eq!(block.nodes[0].id, "file2.py::Thing");
-        assert_eq!(block.nodes[0].kind, NodeKind::Class);
-        assert_eq!(block.nodes[1].kind, NodeKind::Method);
+        // The class box is gone too: with no arrow it would be an empty shape.
+        assert_eq!(block.nodes.len(), 1);
+        assert_eq!(block.nodes[0].id, "file2.py::Thing.run");
+        assert_eq!(block.nodes[0].kind, NodeKind::Method);
         // Flat: the file block is the only container, never a nested one.
         assert!(block
             .nodes
             .iter()
             .all(|node| node.parent.as_deref() == Some("file2.py")));
+    }
+
+    #[test]
+    fn a_container_reached_by_another_definition_keeps_its_arrow() {
+        let root = temp_project("container-other-caller");
+        std::fs::write(
+            root.join("file2.py"),
+            "class Thing:\n    def run(self):\n        return 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("file1.py"),
+            "from file2 import Thing\n\ndef make():\n    return Thing()\n\ndef run_it():\n    return Thing().run()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "file1.py").unwrap();
+
+        // Only `run_it`'s container arrow is implied by its member arrow. `make`
+        // reaches the class and nothing inside it, so that arrow is its own fact.
+        assert_eq!(
+            graph.cross_edges,
+            vec![
+                GraphEdge {
+                    source: "make".into(),
+                    target: "file2.py::Thing".into(),
+                },
+                GraphEdge {
+                    source: "run_it".into(),
+                    target: "file2.py::Thing.run".into(),
+                },
+            ]
+        );
     }
 
     #[test]
