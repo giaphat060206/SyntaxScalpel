@@ -50,6 +50,16 @@ why the parser now records a line with every call. Considered keying by the view
 relationship, and a duplicate bill) and deriving the pair from a single canonical sort (wrong for a directed edge,
 where who calls whom is the whole point).
 
+**A mark in the panel is derived from the store, not saved beside it.** Once an answer exists, the panel shows
+that a Task is already generated — including after a restart, when it holds no history at all. The cheap way to do
+that is to remember which requests were generated, in a file or in `localStorage`. We do not: `ai_cached`
+recomputes the key a click would use and asks the store, through the same `resolve` the real path uses. So there is
+one record rather than two that can disagree, a mark cannot claim an answer that is gone, and it cannot go stale —
+an edit the Task's Digest layers do not read leaves the answer valid, and an edit they do read takes the mark away
+by itself. Considered a signed manifest of generated requests (fast, but a second source of truth that has to be
+invalidated in parallel with content addressing) and a fingerprint of every file in the target (faithful but it
+re-reads the scope to answer a question the store already answers exactly).
+
 **The local option is deferred, deliberately.** Ollama is the only provider consistent with a local-first claim,
 but it cannot be tested on the machine this feature is being built on, and an untestable provider path is worse
 than an absent one. v1 ships keyed cloud providers; because they share a wire format, Ollama is later an entry in a

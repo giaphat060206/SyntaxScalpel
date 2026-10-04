@@ -153,6 +153,9 @@ GLOSSARY.md              domain vocabulary
   highlights the two ends and the arrow between them.
 - A Relationship is keyed by the **pair** (`relationship:{caller}->{callee}`, caller first, both ends qualified by
   their own file), so asking from either end shows the same stored answer: `cached: true`, no second request.
+- Marks survive a restart, and nothing is saved to make that work: the panel asks the store (`ai_cached`) whether
+  each Task or relationship row is already answered, using the same key a click would use. A stored answer is read
+  locally, so showing one needs no Provider Key and no egress notice.
 - An imported Definition is sent with the qualified id its Cross-file Block carries (`path::local`), which resolves
   to the declaring file, so picking it there and picking it in its own file produce the same Digest.
 - The first Task run for a project stops at an egress notice naming the Provider, remembered per project root. The

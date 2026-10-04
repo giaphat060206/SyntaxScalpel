@@ -225,10 +225,11 @@ egress notice in §8 has to be honest in the meantime.
 - **Results:** rendered in the Docs panel, reusing `MarkdownView`, with a header carrying task, model, cache age,
   and Regenerate. This costs no new rendering code and inherits the resizable split.
 - **A finished Task stays visible as finished.** Once a Task has an answer, its entry is marked `✓` and clicking it
-  puts that answer back on screen without a request. The mark is held only while the stored request still matches
-  the one on screen — same target, provider and model — because an answer to a different question is not an answer
-  to this one. The panel remembers what it has shown; the store remains the authority on what is reused, so a
-  restart simply means the first click is a cache hit instead of a redisplay.
+  puts that answer back on screen without a request. That mark is **asked of the store, never saved**: the panel
+  probes with the same key the click would use, so a restart shows the same marks with no history kept anywhere, and
+  an edit that changes what the Task reads takes the mark away on its own. The store remains the authority on what
+  is reused, and reading a stored answer needs no Provider Key and no egress notice, because nothing leaves the
+  machine.
 - **The Relationship section** sits under the target choice and lists the counterparts of what is selected, grouped
   by how they connect: `calls` and `called by` for Definitions from the Function Graph's Cross-file Call Edges,
   `imports` and `imported by` for files, and a Scope's outbound boundary imports. A row carries no summary — it

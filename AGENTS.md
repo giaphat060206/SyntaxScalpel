@@ -35,7 +35,7 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger documents, swagger-jsdoc `@openapi` comments, Next.js
   App Router route conventions).
 - `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`, `ai.rs` (settings, key,
-  `ai_summary`).
+  `ai_summary`, `ai_cached`).
 - `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse, incl. Connection targets), `cache.rs`
   (prompt-hash store, one Markdown document per summary), `prompts.rs` (Task templates + `PROMPT_VERSION`),
   `providers/` (one OpenAI-compatible client, `Transport` seam), `settings.rs` (keyring behind `SecretStore`),
@@ -97,6 +97,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   `heuristic` for framework conventions. See ADR-0004.
 - AI Summaries live in `ai/` and are called **from Rust only**: the Provider Key is read from the OS keyring to
   build an authorization header, and it never crosses the IPC boundary or reaches the Summary Cache.
+- `ai_cached` is the store's only other reader: it answers "is this request already answered?" so the panel can
+  show marks it never saved. It resolves requests through the same `summary::resolve` as `summarize`, which is what
+  stops a mark and the click it invites from disagreeing, and it needs no Provider Key because nothing leaves the
+  machine. A request it cannot resolve is reported as not cached rather than failing the batch — marks are a hint.
 - A **Digest** is projected from the parse (`ai/digest.rs`) and is never an IPC payload — the graph payloads run
   1.1–3.6× the size of the source they describe, so sending one costs more than pasting the file. Layers are
   budgeted in characters, and a spent budget sets `truncated` rather than dropping content silently.
@@ -164,9 +168,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   root; the result header keeps naming the Provider and carries Regenerate, Export (a save dialog, then
   `exportSummary`) and Dismiss. Answers render through `MarkdownView` in the side panel.
 - A finished Task is marked `✓` with `aria-pressed`, and clicking it again re-displays that answer without a
-  request at all. The mark holds only while the stored request still matches the one on screen — same target,
-  provider and model — so changing the selection or the model clears it and the Task generates again. This is a
-  session shortcut: the store, not the panel, decides whether a summary is reused.
+  request at all. Marks are **derived, never saved**: `ai_cached` recomputes the key a click would use and asks the
+  store, so a mark survives a restart and cannot go stale — an edit the Task's own Digest layers do not read leaves
+  the answer (and the mark) valid, and one that changes them takes the mark away. Because a stored answer is read
+  from this machine, asking for one skips the egress notice; only a request that would reach the provider asks.
 - The panel's **Relationship** section lists what the current target connects to — `calls` / `called by` for
   selected Definitions, `imports` / `imported by` for files, a Scope's outbound imports — one row per counterpart,
   each with a **Generate** button that becomes `✓ Show`. A row carries no summary; the answer goes to the side
