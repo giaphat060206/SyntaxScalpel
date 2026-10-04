@@ -23,8 +23,11 @@ scope for now.
   in-file Call Edge deliberately draws none. A cross-file construction is a real file dependency; an in-file one is
   noise. The arrow therefore means "calls, or constructs when it crosses a file", and only the target's kind label
   tells the two apart.
-- An Import that resolves to a barrel which only re-exports (`parser/imports/mod.rs`) declares no Definitions, so
-  it draws no block and stays text.
+- An Import that resolves to a barrel which only re-exports (a Python `__init__.py`, a TS `index.ts`, a Rust
+  `mod.rs`) has the name followed to the file that declares it, up to three hops with a visited set so a
+  re-export cycle terminates. The dashed block is therefore labelled with the **declaring** file, which can differ
+  from the specifier that was written — and from the file the Project Graph draws its Import Edge to, since that
+  still resolves the specifier. Going through more hops than the cap leaves the Import as text.
 - Blocks are capped by file and by Definition and the payload reports truncation: an import-heavy file can
   otherwise add hundreds of Nodes and push ELK onto its grid fallback.
 - The Imports and Imported-By Blocks become residuals — they list only what no block could draw — and are omitted

@@ -12,6 +12,8 @@ pub const EXTERNAL_SEPARATOR: &str = "::";
 
 const MAX_EXTERNAL_FILES: usize = 12;
 const MAX_EXTERNAL_DEFS: usize = 40;
+/// How far a name may be followed through re-exporting files.
+const MAX_REEXPORT_HOPS: usize = 3;
 
 /// Definitions of another file that this file's Function Graph shows, because a
 /// Call Edge reaches them. `path` is also the id the frontend gives the block
@@ -48,10 +50,12 @@ pub fn external_id(path: &str, def_id: &str) -> String {
     format!("{path}{EXTERNAL_SEPARATOR}{def_id}")
 }
 
-/// A file's Definitions plus the id/name lookup a call is matched against.
+/// A file's Definitions plus the id/name lookup a call is matched against, and
+/// the Import entries that let a re-export be followed.
 struct FileDefs {
     defs: Vec<Def>,
     by_name: BTreeMap<String, usize>,
+    imports: Vec<ImportEntry>,
 }
 
 /// Definition ids and names a call could name.
@@ -110,9 +114,69 @@ impl Neighborhood {
             let source = std::fs::read_to_string(self.root.join(path)).ok()?;
             let defs = crate::parser::definitions(&source, path).ok()?;
             let by_name = call_targets(&defs);
-            self.cache.insert(path.to_string(), FileDefs { defs, by_name });
+            let imports = imports::extract_imports(&source, path);
+            self.cache.insert(
+                path.to_string(),
+                FileDefs {
+                    defs,
+                    by_name,
+                    imports,
+                },
+            );
         }
         self.cache.get(path)
+    }
+
+    /// The file that actually declares `call`, starting at `target`.
+    ///
+    /// A barrel — a Python `__init__.py`, a TS `index.ts`, a Rust `mod.rs` —
+    /// declares nothing itself and only re-exports, so a name imported through
+    /// one has to be followed to the file that defines it. Bounded by hops and a
+    /// visited set, so a re-export cycle terminates.
+    fn declaring_file(&mut self, target: &str, call: &str) -> Option<String> {
+        let mut pending = vec![(target.to_string(), 0usize)];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        while let Some((current, hops)) = pending.pop() {
+            if !seen.insert(current.clone()) {
+                continue;
+            }
+            let declares = self
+                .file(&current)
+                .map(|file| file.by_name.contains_key(call))
+                .unwrap_or(false);
+            if declares {
+                return Some(current);
+            }
+            if hops >= MAX_REEXPORT_HOPS {
+                continue;
+            }
+            for next in self.reexported_targets(&current, call) {
+                pending.push((next, hops + 1));
+            }
+        }
+        None
+    }
+
+    /// Files `path` re-exports `call` from, via its own Import entries.
+    fn reexported_targets(&mut self, path: &str, call: &str) -> Vec<String> {
+        let Some(entries) = self.file(path).map(|file| file.imports.clone()) else {
+            return Vec::new();
+        };
+        let mut targets = Vec::new();
+        for entry in entries.iter().filter(|entry| {
+            entry
+                .names
+                .iter()
+                .any(|name| name.as_str() == call || name == "*")
+        }) {
+            for resolved in self.resolver.resolve(entry, path) {
+                let target = imports::relative(&self.root, &resolved.target);
+                if target != path && !targets.contains(&target) {
+                    targets.push(target);
+                }
+            }
+        }
+        targets
     }
 
     /// Specifiers this file imports, one target per import entry they resolve to.
@@ -143,7 +207,8 @@ impl Neighborhood {
         targets
     }
 
-    /// The Definition in `target` that `call` reaches, as a node for this graph.
+    /// The Definition in `target` (or in a file it re-exports from) that `call`
+    /// reaches, as a node for this graph.
     fn external_node(
         &mut self,
         target: &str,
@@ -151,15 +216,16 @@ impl Neighborhood {
         imported: &BTreeSet<String>,
         used: &BTreeSet<&str>,
     ) -> Option<GraphNode> {
-        let file = self.file(target)?;
+        let declaring = self.declaring_file(target, call)?;
+        let file = self.file(&declaring)?;
         let index = *file.by_name.get(call)?;
         let def = &file.defs[index];
         if !reachable(def, call, imported, used) {
             return None;
         }
         let mut node = to_node(def);
-        node.id = external_id(target, &def.id);
-        node.parent = Some(target.to_string());
+        node.id = external_id(&declaring, &def.id);
+        node.parent = Some(declaring);
         Some(node)
     }
 
@@ -199,9 +265,12 @@ impl Neighborhood {
                     let Some(node) = self.external_node(&path, call, &target.names, &used) else {
                         continue;
                     };
+                    // A re-export puts the Definition in the file that declares
+                    // it, which is the block it must appear under.
+                    let owner = node.parent.clone().unwrap_or_else(|| path.clone());
                     let external = node.id.clone();
                     self.push_edge(&def.id, &external);
-                    self.add_external(&path, node);
+                    self.add_external(&owner, node);
                     self.drawn.insert(target.entry);
                 }
             }
@@ -692,6 +761,117 @@ mod tests {
         let graph = function_graph(&root.to_string_lossy(), "main.py").unwrap();
         assert!(graph.truncated);
         assert_eq!(graph.externals.len(), MAX_EXTERNAL_FILES);
+    }
+
+    #[test]
+    fn a_name_re_exported_through_a_barrel_reaches_its_declaring_file() {
+        let root = temp_project("barrel");
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        std::fs::write(
+            root.join("core/__init__.py"),
+            "from .path import Path\n\n__all__ = ['Path']\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("core/path.py"),
+            "class Path:\n    def __init__(self, nodes):\n        self.nodes = nodes\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("pathfinder.py"),
+            "from core import Path\n\ndef build():\n    return Path([1])\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "pathfinder.py").unwrap();
+
+        assert_eq!(
+            graph.cross_edges,
+            vec![GraphEdge {
+                source: "build".into(),
+                target: "core/path.py::Path".into(),
+            }]
+        );
+        let block = external(&graph, "core/path.py");
+        assert_eq!(block.nodes.len(), 1);
+        assert_eq!(block.nodes[0].name, "Path");
+        // The barrel itself draws nothing, and the import is not left over.
+        assert!(!graph
+            .externals
+            .iter()
+            .any(|file| file.path == "core/__init__.py"));
+        assert!(graph.residual_imports.is_empty());
+    }
+
+    #[test]
+    fn a_name_re_exported_through_two_barrels_still_resolves() {
+        let root = temp_project("barrel-deep");
+        std::fs::create_dir_all(root.join("pkg/api")).unwrap();
+        std::fs::write(root.join("pkg/__init__.py"), "from .api import thing\n").unwrap();
+        std::fs::write(root.join("pkg/api/__init__.py"), "from .impl import thing\n").unwrap();
+        std::fs::write(
+            root.join("pkg/api/impl.py"),
+            "def thing():\n    return 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("app.py"),
+            "from pkg import thing\n\ndef go():\n    return thing()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "app.py").unwrap();
+        assert_eq!(
+            graph.cross_edges,
+            vec![GraphEdge {
+                source: "go".into(),
+                target: "pkg/api/impl.py::thing".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_wildcard_re_export_is_followed_too() {
+        let root = temp_project("barrel-star");
+        std::fs::create_dir_all(root.join("pkg")).unwrap();
+        std::fs::write(root.join("pkg/__init__.py"), "from .impl import *\n").unwrap();
+        std::fs::write(
+            root.join("pkg/impl.py"),
+            "def helper():\n    return 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("app.py"),
+            "from pkg import helper\n\ndef go():\n    return helper()\n",
+        )
+        .unwrap();
+
+        let graph = function_graph(&root.to_string_lossy(), "app.py").unwrap();
+        assert_eq!(
+            graph.cross_edges,
+            vec![GraphEdge {
+                source: "go".into(),
+                target: "pkg/impl.py::helper".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn following_a_re_export_terminates_on_a_cycle() {
+        let root = temp_project("barrel-cycle");
+        std::fs::write(root.join("a.py"), "from b import Ghost\n").unwrap();
+        std::fs::write(root.join("b.py"), "from a import Ghost\n").unwrap();
+        std::fs::write(
+            root.join("app.py"),
+            "from a import Ghost\n\ndef go():\n    return Ghost()\n",
+        )
+        .unwrap();
+
+        // Neither file declares it, so the walk must stop rather than spin.
+        let graph = function_graph(&root.to_string_lossy(), "app.py").unwrap();
+        assert!(graph.externals.is_empty());
+        assert!(graph.cross_edges.is_empty());
+        assert_eq!(graph.residual_imports.len(), 1);
     }
 
     #[test]

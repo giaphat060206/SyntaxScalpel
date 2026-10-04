@@ -138,9 +138,11 @@ GLOSSARY.md              domain vocabulary
 - Node ids: `name`, `ClassName`, `ClassName.method`, `varName.method`, `modName.item` (item inside an inline Rust
   `mod`), `path::ClassName.method` (a Definition shown from another file). A `parent` must always name a **class**
   node that is top-level in the same payload — the frontend drops a child whose parent it cannot find.
-- **Reachability**: a file-level Definition is reached only when its own name was imported; a Method is reached
-  when its Container was imported **and** the calling Definition references it. Blocks cap at 12 files / 40
-  Definitions and the payload reports `truncated`.
+- **Reachability**: a file-level Definition — including a **Class**, reached by a constructor call — is reached
+  only when its own name was imported; a Method is reached when its Container was imported **and** the calling
+  Definition references it; a **Variable** is never a target. A name imported from a re-exporting barrel is
+  followed to its declaring file (up to three hops), so a block can be labelled with a file the caller never named.
+  Blocks cap at 12 files / 40 Definitions and the payload reports `truncated`.
 - **Endpoints are extracted statically** from declared contracts only; never run/query the backend (ADR-0004).
 - **Rust maps onto the same four kinds** — containers instead of classes, one container level deep (ADR-0005).
 - **No layout persistence** (ADR-0002); **ELK owns layout** (ADR-0003).
@@ -168,9 +170,9 @@ GLOSSARY.md              domain vocabulary
 - The Endpoints view always scans the Project Root, not the current scope.
 - No component tests for the graph integrations beyond the canvas/adapters; ELK worker/fallback branches are
   unit-untested.
-- Cross-file resolution misses: a specifier resolving to a barrel that only re-exports (that file declares nothing,
-  so it stays text); namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`), which need
-  receiver tracking; and anything beyond one hop.
+- Cross-file resolution misses: namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`),
+  which need receiver tracking; a name re-exported through more than three barrels; a Definition used only as a
+  type annotation, which is never called; and anything beyond one hop.
 - `parse_python` / `parse_js_ts` / `parse_rust` / `analyze_imports` are registered but no longer called by the
   frontend. Retiring them needs `parse_file` rerouted first, or `parse_source` becomes a dead-code warning.
 - Rust: calls written inside a macro invocation's arguments produce no edge (macro arguments are unexpanded token

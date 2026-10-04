@@ -148,16 +148,20 @@ Applies to every parsed language via `parser/neighborhood.rs` and the `function_
 
 - For each Definition in the file, its call names are matched against the names its Imports bring in, resolved to a
   target file by the same `Resolver` the Project Graph uses.
-- A file-level Definition is reached only when its **own** name was imported; a Method is reached when its
-  Container was imported **and** the calling Definition references it.
+- A file-level Definition — function or class, the latter reached by a constructor call — is reached only when its
+  **own** name was imported; a Method is reached when its Container was imported **and** the calling Definition
+  references it; a module-level binding is never a target. Cross-file is asymmetric with in-file on purpose:
+  `Thing()` draws an edge across files, never within one.
+- A name imported from a re-exporting barrel (Python `__init__.py`, TS `index.ts`, Rust `mod.rs`) is followed to the
+  file that declares it, up to three hops with a visited set, so the block is labelled with the declaring file.
 - Reached Definitions are materialised in one dashed block per file (ADR-0006's Cross-file Block), giving ids
   `path::Container.method`; the block is the only Container, so nesting stays one level deep.
 - The reverse direction holds too: a Definition in another file that calls into this one is reached from that
   file's Imports of this one.
 - Imports nothing could be drawn for are reported as `residualImports` / `residualImportedBy` for the Function
   Graph to list as text. Blocks cap at 12 files / 40 Definitions and report `truncated`.
-- Not resolved: namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`), specifiers
-  resolving to a barrel that only re-exports, and anything beyond one hop.
+- Not resolved: namespace-qualified calls (`import file2` then `file2.func2()`, `import * as f2`), a Definition
+  used only as a type annotation, names re-exported through more than three barrels, and anything beyond one hop.
 
 ### Extraction rules (Rust)
 

@@ -60,6 +60,11 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   Cross-file is deliberately asymmetric with in-file: `Thing()` draws an edge across files but never within one,
   because a cross-file construction is a real file dependency. Blocks are capped (12 files, 40 Definitions) and
   `truncated` is surfaced. See ADR-0006.
+- A name imported from a file that only re-exports (a Python `__init__.py`, a TS `index.ts`, a Rust `mod.rs`) is
+  followed to the file that declares it — up to three hops, with a visited set so a re-export cycle terminates.
+  The dashed block is then labelled with the **declaring** file, which can differ from the specifier written and
+  from the file `project.rs` draws its Import Edge to (that still resolves the specifier, so the two views can name
+  different files for one import line).
 - `function_graph` is the one command the UI calls for a file, returning the file's graph, its Import Analysis, and
   the neighbourhood from a single project scan. `parse_python` / `parse_js_ts` / `parse_rust` / `analyze_imports`
   are still registered but no longer called by the frontend; retiring them means rerouting `parse_file` first.
