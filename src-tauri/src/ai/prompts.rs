@@ -18,6 +18,8 @@ const IMPACT: &str = "You report the impact of changing the given code. Use the 
 
 const DOC_DRIFT: &str = "You compare documentation against code. Using the documentation and the code structure given, report where the documentation is wrong, out of date, or silent about something that matters. Quote the specific claim that no longer holds.";
 
+const RELATIONSHIP: &str = "You explain how two parts of a codebase depend on each other. From the signatures, the import and the exact call sites given, say what passes between them, what each expects of the other, and what would have to change together. Quote a call site when it is the evidence for a claim.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Task {
@@ -26,15 +28,17 @@ pub enum Task {
     ProjectOverview,
     Impact,
     DocDrift,
+    Relationship,
 }
 
 impl Task {
-    pub const ALL: [Task; 5] = [
+    pub const ALL: [Task; 6] = [
         Task::ExplainSelection,
         Task::ExplainArchitecture,
         Task::ProjectOverview,
         Task::Impact,
         Task::DocDrift,
+        Task::Relationship,
     ];
 
     pub fn id(self) -> &'static str {
@@ -44,6 +48,7 @@ impl Task {
             Task::ProjectOverview => "project-overview",
             Task::Impact => "impact",
             Task::DocDrift => "doc-drift",
+            Task::Relationship => "relationship",
         }
     }
 
@@ -58,6 +63,7 @@ impl Task {
             Task::ProjectOverview => PROJECT_OVERVIEW,
             Task::Impact => IMPACT,
             Task::DocDrift => DOC_DRIFT,
+            Task::Relationship => RELATIONSHIP,
         };
         body
     }
@@ -73,6 +79,7 @@ pub fn default_options(task: Task) -> Options {
         Task::ProjectOverview => Options { signatures: false, bodies: false, docs: true },
         Task::Impact => Options { signatures: true, bodies: false, docs: false },
         Task::DocDrift => Options { signatures: true, bodies: false, docs: true },
+        Task::Relationship => Options { signatures: true, bodies: false, docs: false },
     }
 }
 
@@ -129,8 +136,8 @@ mod tests {
         unique.sort_unstable();
         unique.dedup();
 
-        assert_eq!(instructions.len(), 5);
-        assert_eq!(unique.len(), 5);
+        assert_eq!(instructions.len(), 6);
+        assert_eq!(unique.len(), 6);
     }
 
     #[test]
@@ -144,6 +151,17 @@ mod tests {
     #[test]
     fn rejects_an_empty_digest() {
         assert!(render(Task::Impact, "   \n ").is_err());
+    }
+
+    #[test]
+    fn the_relationship_task_asks_for_evidence_not_bodies() {
+        let options = default_options(Task::Relationship);
+
+        assert_eq!(Task::Relationship.id(), "relationship");
+        assert!(Task::Relationship.instruction().contains("call sites"));
+        assert!(options.signatures);
+        assert!(!options.bodies);
+        assert!(!options.docs);
     }
 
     #[test]

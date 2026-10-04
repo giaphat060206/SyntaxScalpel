@@ -493,6 +493,45 @@ mod tests {
     }
 
     #[test]
+    fn a_connection_summary_is_answered_once_and_then_reused() {
+        let root = fixture("connection-reuse");
+        write(&root, "a.py", "from b import two\n\n\ndef one():\n    two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+        let target = Target::Connection {
+            source: "a.py::one".into(),
+            target: "b.py::two".into(),
+        };
+
+        let run = |force: bool| {
+            tauri::async_runtime::block_on(summarize(
+                root.to_str().unwrap(),
+                &target,
+                None,
+                "relationship",
+                "openrouter",
+                "",
+                force,
+                &store,
+                &transport,
+            ))
+            .unwrap()
+        };
+
+        let first = run(false);
+        let second = run(false);
+
+        assert_eq!(first.task, "relationship");
+        assert!(!first.cached);
+        assert!(second.cached);
+        assert_eq!(second.text, first.text);
+        assert_eq!(transport.call_count(), 1);
+        let sent = transport.calls.lock().unwrap().last().unwrap().clone();
+        assert!(sent.contains("calls at 5: two()"), "{sent}");
+    }
+
+    #[test]
     fn reports_that_the_digest_was_truncated() {
         let root = fixture("truncated");
         let mut source = String::new();

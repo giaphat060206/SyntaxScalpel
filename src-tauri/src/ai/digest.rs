@@ -14,14 +14,20 @@ pub const MAX_BODY_BYTES: usize = 96 * 1024;
 pub const MAX_DOC_BYTES: usize = 8 * 1024;
 pub const MAX_DOC_FILE_CHARS: usize = 1_200;
 
-/// What a Digest explains: a whole Scope, chosen files in it, or chosen
-/// Definitions in one Code File.
+/// What a Digest explains: a whole Scope, chosen files in it, chosen Definitions
+/// in one Code File, or one Connection between two ends.
+///
+/// A Connection's ends are caller-first and each qualified by its own file — a
+/// file path (`core/graph.py`) or a Definition (`core/path.py::Path`) — so both
+/// sides of the same relationship render one identical Digest, and therefore one
+/// cache key.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Target {
     Scope { scope: String },
     Files { scope: String, files: Vec<String> },
     Definitions { file: String, ids: Vec<String> },
+    Connection { source: String, target: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,7 +97,200 @@ pub fn build(root: &str, target: &Target, options: &Options) -> Result<Digest, S
         Target::Scope { scope } => build_scope(root, scope, &[], options),
         Target::Files { scope, files } => build_scope(root, scope, files, options),
         Target::Definitions { file, ids } => build_definitions(root, file, ids, options),
+        Target::Connection { source, target } => {
+            build_connection(root, source, target, options)
+        }
     }
+}
+
+/// The declaration an end names: always the file, and the Definition inside it
+/// when the end names one.
+fn connection_end(id: &str) -> (String, Option<String>) {
+    match id.split_once(EXTERNAL_SEPARATOR) {
+        Some((file, local)) if !file.is_empty() && !local.is_empty() => {
+            (file.to_string(), Some(local.to_string()))
+        }
+        _ => (id.to_string(), None),
+    }
+}
+
+fn define<'a>(defs: &'a [Def], local: &str, file: &str) -> Result<&'a Def, String> {
+    defs.iter()
+        .find(|def| def.id == local)
+        .ok_or_else(|| format!("{file} declares no {local}"))
+}
+
+/// One line per matching call site of `caller` into the Definition named `callee`.
+fn render_call_sites(
+    writer: &mut Writer,
+    caller: &Def,
+    callee_name: &str,
+    source: &str,
+    caller_id: &str,
+    callee_id: &str,
+) -> Result<(), String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let mut found = 0;
+    for call in &caller.calls {
+        if call.name != callee_name {
+            continue;
+        }
+        let text = lines
+            .get(call.line.saturating_sub(1))
+            .map(|line| line.trim())
+            .unwrap_or("");
+        writer.line(&format!("calls at {}: {text}", call.line));
+        found += 1;
+    }
+    if found == 0 {
+        return Err(format!("{caller_id} does not call {callee_id}"));
+    }
+    Ok(())
+}
+
+/// How two ends depend on each other, with the evidence that shows it: the exact
+/// call sites when both ends are Definitions, and the import when either is a
+/// file.
+fn build_connection(
+    root: &str,
+    source: &str,
+    target: &str,
+    options: &Options,
+) -> Result<Digest, String> {
+    if source == target {
+        return Err("a connection needs two different ends".to_string());
+    }
+    let (caller_file, caller_local) = connection_end(source);
+    let (callee_file, callee_local) = connection_end(target);
+
+    let caller_source = read(root, &caller_file)?;
+    let caller_defs = crate::parser::definitions(&caller_source, &caller_file)?;
+    let mut writer = Writer::new(budget(options, false));
+    writer.line(&format!("connection  {source} -> {target}"));
+
+    let mut definition_count = 0;
+    let caller = match &caller_local {
+        Some(local) => {
+            definition_count += 1;
+            let def = define(&caller_defs, local, &caller_file)?;
+            writer.line(&format!(
+                "caller  {} {}{}{}  lines {}-{}",
+                kind_word(&def.kind),
+                def.name,
+                params(def),
+                returns(def),
+                def.start_line,
+                def.end_line
+            ));
+            if !def.uses.is_empty() {
+                let mut uses: Vec<&str> = def.uses.iter().map(String::as_str).collect();
+                uses.sort_unstable();
+                uses.dedup();
+                writer.line(&format!("  uses {}", uses.join(", ")));
+            }
+            Some(def)
+        }
+        None => {
+            writer.line(&format!(
+                "caller  file {caller_file}  {}L",
+                caller_source.lines().count()
+            ));
+            None
+        }
+    };
+
+    let callee_source = if callee_file == caller_file {
+        None
+    } else {
+        Some(read(root, &callee_file)?)
+    };
+    let callee_defs = crate::parser::definitions(
+        callee_source.as_deref().unwrap_or(&caller_source),
+        &callee_file,
+    )?;
+    let callee_name = match &callee_local {
+        Some(local) => {
+            definition_count += 1;
+            let def = define(&callee_defs, local, &callee_file)?;
+            writer.line(&format!(
+                "callee  {} {}{}{}  lines {}-{}",
+                kind_word(&def.kind),
+                def.name,
+                params(def),
+                returns(def),
+                def.start_line,
+                def.end_line
+            ));
+            Some(def.name.clone())
+        }
+        None => {
+            writer.line(&format!(
+                "callee  file {callee_file}  {}L",
+                callee_source
+                    .as_deref()
+                    .unwrap_or(&caller_source)
+                    .lines()
+                    .count()
+            ));
+            None
+        }
+    };
+
+    match (caller, callee_name) {
+        (Some(caller), Some(callee_name)) => render_call_sites(
+            &mut writer,
+            caller,
+            &callee_name,
+            &caller_source,
+            source,
+            target,
+        )?,
+        _ => {
+            for line in connection_imports(root, &caller_file, &callee_file)? {
+                writer.line(&line);
+            }
+        }
+    }
+
+    let files = if caller_file == callee_file { 1 } else { 2 };
+    Ok(writer.finish(files, definition_count))
+}
+
+/// The import line that connects two files, so a file-level connection still
+/// carries its evidence rather than a bare pair of names.
+fn connection_imports(
+    root: &str,
+    caller_file: &str,
+    callee_file: &str,
+) -> Result<Vec<String>, String> {
+    let analysis = crate::parser::imports::analyze(caller_file, root)?;
+    let resolver = crate::parser::imports::resolver_for(Path::new(root));
+    let wanted = Path::new(root).join(callee_file);
+    let mut lines = Vec::new();
+    for entry in &analysis.imports {
+        if !resolver
+            .resolve(entry, caller_file)
+            .iter()
+            .any(|hit| hit.target == wanted)
+        {
+            continue;
+        }
+        let mut names = entry.names.clone();
+        names.sort();
+        names.dedup();
+        let listed = if names.is_empty() {
+            String::new()
+        } else {
+            format!(" -> {}", names.join(", "))
+        };
+        lines.push(format!("import  {}{listed}", entry.specifier));
+    }
+    if lines.is_empty() {
+        return Err(format!("{caller_file} does not import {callee_file}"));
+    }
+    lines.sort();
+    lines.dedup();
+    Ok(lines)
 }
 
 fn budget(options: &Options, bodies: bool) -> usize {
@@ -688,6 +887,121 @@ mod tests {
     }
 
     #[test]
+    fn renders_a_connection_with_both_signatures_and_the_call_site() {
+        let root = fixture("connection");
+        write(
+            &root,
+            "a.py",
+            "from b import two\n\n\ndef one():\n    return two(1)\n",
+        );
+        write(&root, "b.py", "def two(value):\n    return value\n");
+        let target = Target::Connection {
+            source: "a.py::one".into(),
+            target: "b.py::two".into(),
+        };
+
+        let digest = build(root.to_str().unwrap(), &target, &Options::default()).unwrap();
+
+        assert!(
+            digest.text.starts_with("connection  a.py::one -> b.py::two"),
+            "{}",
+            digest.text
+        );
+        assert!(digest.text.contains("caller  fn one"), "{}", digest.text);
+        assert!(digest.text.contains("lines 4-5"), "{}", digest.text);
+        assert!(digest.text.contains("callee  fn two(value)"), "{}", digest.text);
+        assert!(
+            digest.text.contains("calls at 5: return two(1)"),
+            "{}",
+            digest.text
+        );
+        assert_eq!(digest.file_count, 2);
+        assert_eq!(digest.definition_count, 2);
+        assert!(!digest.truncated);
+    }
+
+    #[test]
+    fn a_connection_is_ordered_by_direction() {
+        let root = fixture("connection-direction");
+        write(&root, "a.py", "from b import two\n\n\ndef one():\n    two()\n");
+        write(&root, "b.py", "from a import one\n\n\ndef two():\n    one()\n");
+        let forwards = Target::Connection {
+            source: "a.py::one".into(),
+            target: "b.py::two".into(),
+        };
+        let backwards = Target::Connection {
+            source: "b.py::two".into(),
+            target: "a.py::one".into(),
+        };
+
+        let forwards = build(root.to_str().unwrap(), &forwards, &Options::default()).unwrap();
+        let backwards = build(root.to_str().unwrap(), &backwards, &Options::default()).unwrap();
+
+        assert_ne!(forwards.text, backwards.text);
+        assert!(forwards.text.contains("caller  fn one"), "{}", forwards.text);
+        assert!(backwards.text.contains("caller  fn two"), "{}", backwards.text);
+    }
+
+    #[test]
+    fn renders_a_file_level_connection_as_its_import() {
+        let root = fixture("connection-files");
+        write(&root, "a.py", "from b import two\n\n\ndef one():\n    return two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+        let target = Target::Connection {
+            source: "a.py".into(),
+            target: "b.py".into(),
+        };
+
+        let digest = build(root.to_str().unwrap(), &target, &Options::default()).unwrap();
+
+        assert!(digest.text.contains("caller  file a.py"), "{}", digest.text);
+        assert!(digest.text.contains("callee  file b.py"), "{}", digest.text);
+        assert!(
+            digest.text.contains("import  b -> two"),
+            "{}",
+            digest.text
+        );
+        assert_eq!(digest.file_count, 2);
+        assert_eq!(digest.definition_count, 0);
+    }
+
+    #[test]
+    fn refuses_a_connection_that_does_not_hold() {
+        let root = fixture("connection-missing");
+        write(&root, "a.py", "from b import two\n\n\ndef one():\n    return 1\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+
+        let no_call = Target::Connection {
+            source: "a.py::one".into(),
+            target: "b.py::two".into(),
+        };
+        let no_definition = Target::Connection {
+            source: "a.py::ghost".into(),
+            target: "b.py::two".into(),
+        };
+        let same = Target::Connection {
+            source: "a.py::one".into(),
+            target: "a.py::one".into(),
+        };
+        let no_import = Target::Connection {
+            source: "b.py".into(),
+            target: "a.py".into(),
+        };
+
+        let error = build(root.to_str().unwrap(), &no_call, &Options::default()).unwrap_err();
+        assert!(error.contains("does not call"), "{error}");
+
+        let error = build(root.to_str().unwrap(), &no_definition, &Options::default()).unwrap_err();
+        assert!(error.contains("declares no"), "{error}");
+
+        let error = build(root.to_str().unwrap(), &same, &Options::default()).unwrap_err();
+        assert!(error.contains("two different ends"), "{error}");
+
+        let error = build(root.to_str().unwrap(), &no_import, &Options::default()).unwrap_err();
+        assert!(error.contains("does not import"), "{error}");
+    }
+
+    #[test]
     fn fence_language_follows_the_extension() {
         assert_eq!(fence_language("a.py"), "python");
         assert_eq!(fence_language("a.jsx"), "javascript");
@@ -696,4 +1010,3 @@ mod tests {
         assert_eq!(fence_language("Makefile"), "");
     }
 }
-
