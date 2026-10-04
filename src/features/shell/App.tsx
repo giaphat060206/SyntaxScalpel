@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
 import { ContentPane } from "./ContentPane";
 import { Breadcrumb } from "./Breadcrumb";
@@ -55,6 +55,22 @@ export default function App() {
     nonce: number;
   } | null>(null);
   const { recents, remember, clear } = useRecents();
+
+  const explorerPanel = usePanelRef();
+  useEffect(() => {
+    if (explorerCollapsed) {
+      explorerPanel.current?.collapse();
+    } else {
+      explorerPanel.current?.expand();
+    }
+  }, [explorerCollapsed, explorerPanel]);
+
+  // Dragging the separator can also collapse or reopen the panel, so follow the
+  // panel's own state back rather than trusting the two buttons alone.
+  const handleLayoutChanged = useCallback(() => {
+    const collapsed = explorerPanel.current?.isCollapsed() ?? false;
+    setExplorerCollapsed((previous) => (previous === collapsed ? previous : collapsed));
+  }, [explorerPanel]);
 
   const codeFile = location.kind === "code" ? location.path : null;
 
@@ -184,14 +200,19 @@ export default function App() {
         />
       ) : (
       <div className="h-full bg-bg">
-      <Group orientation="horizontal">
-        {explorerCollapsed ? (
-          <Panel
-            defaultSize="40px"
-            minSize="40px"
-            maxSize="40px"
-            className="border-r border-white/10"
-          >
+      <Group orientation="horizontal" onLayoutChanged={handleLayoutChanged}>
+        {/* One collapsible panel rather than a swap, so collapsing and showing
+            again returns to the width the user dragged it to. */}
+        <Panel
+          id="explorer"
+          panelRef={explorerPanel}
+          collapsible
+          collapsedSize="40px"
+          defaultSize="20%"
+          minSize="10%"
+          className="border-r border-white/10"
+        >
+          {explorerCollapsed ? (
             <div className="flex h-full justify-center pt-2">
               <button
                 type="button"
@@ -202,16 +223,8 @@ export default function App() {
                 <Chevron direction="right" />
               </button>
             </div>
-          </Panel>
-        ) : (
-          <>
-            <Panel
-              defaultSize="20%"
-              minSize="12%"
-              maxSize="40%"
-              className="border-r border-white/10"
-            >
-              <div className="flex h-full flex-col">
+          ) : (
+            <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 px-2 py-1">
                   <button
                     type="button"
@@ -252,11 +265,10 @@ export default function App() {
                     revealFolder={revealRequest}
                   />
                 </div>
-              </div>
-            </Panel>
-            <Separator className="w-1 bg-white/10" />
-          </>
-        )}
+            </div>
+          )}
+        </Panel>
+        <Separator className="w-1 bg-white/10 transition-colors hover:bg-accent/50" />
 
         <Panel minSize="20%" className="relative">
           {location.kind !== "empty" && (
@@ -310,8 +322,8 @@ export default function App() {
 
         {showDocs && (
           <>
-            <Separator className="w-1 bg-white/10" />
-            <Panel defaultSize="40%" minSize="20%">
+            <Separator className="w-1 bg-white/10 transition-colors hover:bg-accent/50" />
+            <Panel defaultSize="40%" minSize="15%">
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 px-2 py-1">
                   <span className="text-[10px] uppercase tracking-wider text-dimmed">

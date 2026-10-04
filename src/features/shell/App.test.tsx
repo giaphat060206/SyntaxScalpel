@@ -20,6 +20,7 @@ vi.mock("react-resizable-panels", () => ({
   Group: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Panel: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   Separator: () => <div />,
+  usePanelRef: () => ({ current: null }),
 }));
 
 vi.mock("../project/ProjectGraph", () => ({
