@@ -27,3 +27,6 @@ dist-ssr
 .worktrees/
 .superpowers/
 .scalpel/
+
+# Misc
+docs/misc/
