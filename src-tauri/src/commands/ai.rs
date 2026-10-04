@@ -192,6 +192,58 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_payload_the_panel_actually_sends() {
+        let root = fixture("marks-payload");
+        std::fs::write(root.join("a.py"), "def one():\n    return 1\n").unwrap();
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        // Stored by a run where the model box was left empty, so the entry holds
+        // the provider's default. The probe must resolve an empty model the same
+        // way, or a mark would never match what the user generated.
+        let key = key_for(&root, &target, "explain-selection", "openrouter", "deepseek/deepseek-chat");
+        SummaryCache::new(root.to_str().unwrap())
+            .put(&CachedSummary {
+                key,
+                task: "explain-selection".into(),
+                provider: "openrouter".into(),
+                model: "deepseek/deepseek-chat".into(),
+                prompt_version: crate::ai::prompts::PROMPT_VERSION,
+                created_at_ms: 1,
+                input_tokens: 1,
+                output_tokens: 1,
+                text: "## Answer".into(),
+            })
+            .unwrap();
+
+        // Exactly what `invoke("ai_cached", { root, requests })` puts on the wire:
+        // whole `AiRequest`s, carrying fields the probe has no use for.
+        let payload = serde_json::json!([
+            {
+                "root": root.to_str().unwrap(),
+                "target": { "kind": "files", "scope": "", "files": ["a.py"] },
+                "task": "explain-selection",
+                "provider": "openrouter",
+                "model": ""
+            },
+            {
+                "root": root.to_str().unwrap(),
+                "target": { "kind": "scope", "scope": "" },
+                "task": "project-overview",
+                "provider": "openrouter",
+                "model": ""
+            }
+        ]);
+        let requests: Vec<CachedRequest> = serde_json::from_value(payload).unwrap();
+
+        let marks = tauri::async_runtime::block_on(ai_cached(
+            root.to_str().unwrap().to_string(),
+            requests,
+        ))
+        .unwrap();
+
+        assert_eq!(marks, vec![true, false]);
+    }
+
+    #[test]
     fn refuses_to_export_something_that_is_not_cached() {
         let root = fixture("missing");
         let target = root.join("exported.md");
