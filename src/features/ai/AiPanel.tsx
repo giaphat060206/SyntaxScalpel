@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
 import { DefinitionPicker } from "./DefinitionPicker";
 import { FilePicker } from "./FilePicker";
+import { isConfirmed, rememberConfirmed } from "./egress";
 import { AI_TASKS } from "./tasks";
 import { useAiSettings, PROVIDERS } from "./useAiSettings";
 
@@ -39,6 +40,7 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
   const [mode, setMode] = useState<Mode>("scope");
   const [files, setFiles] = useState<string[]>([]);
   const [definitions, setDefinitions] = useState<string[]>([]);
+  const [pending, setPending] = useState<{ task: string; request: AiRequest } | null>(null);
 
   const target = useMemo<AiTarget | null>(() => {
     if (!root) {
@@ -77,6 +79,14 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
       provider: settings.provider,
       model: settings.model,
     };
+    if (!isConfirmed(root)) {
+      setPending({ task, request });
+      return;
+    }
+    await send(task, request);
+  };
+
+  const send = async (task: string, request: AiRequest) => {
     setRunning(task);
     setError(null);
     try {
@@ -87,6 +97,19 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
       setRunning(null);
     }
   };
+
+  const confirmEgress = async () => {
+    if (!pending) {
+      return;
+    }
+    rememberConfirmed(pending.request.root);
+    const { task, request } = pending;
+    setPending(null);
+    await send(task, request);
+  };
+
+  const providerLabel =
+    PROVIDERS.find((entry) => entry.id === settings.provider)?.label ?? settings.provider;
 
   const save = async () => {
     if (!keyDraft.trim()) {
@@ -222,6 +245,23 @@ export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
           </li>
         ))}
       </ul>
+
+      {pending && (
+        <div className="mt-2 rounded border border-yellow-500/40 bg-panel p-2 text-xs text-yellow-200">
+          <p className="m-0">
+            This sends a summary of the selected code to <strong>{providerLabel}</strong>. It
+            leaves this machine.
+          </p>
+          <div className="mt-1 flex gap-1">
+            <button type="button" onClick={confirmEgress} className={action}>
+              Send to {providerLabel}
+            </button>
+            <button type="button" onClick={() => setPending(null)} className={action}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {(error ?? settings.error) && (
         <p className="mt-2 break-words text-red-400">{error ?? settings.error}</p>

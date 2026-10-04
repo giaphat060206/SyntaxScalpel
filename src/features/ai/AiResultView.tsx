@@ -24,7 +24,7 @@ export function cacheLabel(result: AiSummary, now: number): string {
           ? `${Math.floor(minutes / 60)} h ago`
           : `${Math.floor(minutes / (60 * 24))} d ago`;
   const tokens = result.inputTokens + result.outputTokens;
-  return `${result.cached ? "cached" : "fresh"} · ${result.model} · ${when}${
+  return `${result.cached ? "cached" : "fresh"} · ${result.provider} · ${result.model} · ${when}${
     tokens > 0 ? ` · ${tokens} tokens` : ""
   }${result.truncated ? " · digest truncated" : ""}`;
 }

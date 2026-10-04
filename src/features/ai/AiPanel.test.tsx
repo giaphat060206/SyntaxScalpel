@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { aiSettings, aiSummary, setAiKey } from "../../shared/ipc";
 import { AiPanel } from "./AiPanel";
 import { cacheLabel } from "./AiResultView";
+import { rememberConfirmed } from "./egress";
 
 vi.mock("../../shared/ipc", () => ({
   aiSettings: vi.fn(),
@@ -99,12 +100,13 @@ describe("AiPanel running a task", () => {
     vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
   });
 
-  it("asks with the chosen task and hands the answer back", async () => {
+  it("asks with the chosen task and hands the answer back, once egress is agreed", async () => {
     const { onResult } = renderPanel();
     const task = await findTask(/Project overview/);
     await waitFor(() => expect(task.disabled).toBe(false));
 
     fireEvent.click(task);
+    fireEvent.click(await screen.findByRole("button", { name: /Send to OpenRouter/ }));
 
     await waitFor(() => expect(onResult).toHaveBeenCalled());
     expect(vi.mocked(aiSummary)).toHaveBeenCalledWith({
@@ -124,8 +126,10 @@ describe("AiPanel running a task", () => {
     await waitFor(() => expect(task.disabled).toBe(false));
 
     fireEvent.click(task);
+    fireEvent.click(await screen.findByRole("button", { name: /Send to OpenRouter/ }));
 
     await screen.findByText(/refused the key/);
+    expect(screen.queryByText(/leaves this machine/)).toBeNull();
   });
 
   it("asks nothing and says why when no folder is open", async () => {
@@ -165,18 +169,82 @@ describe("AiPanel preferences", () => {
   });
 });
 
+describe("AiPanel egress", () => {
+  beforeEach(() => {
+    vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
+  });
+
+  it("names the provider and asks before the first summary for a project", async () => {
+    renderPanel();
+    const task = await findTask(/Project overview/);
+    await waitFor(() => expect(task.disabled).toBe(false));
+
+    fireEvent.click(task);
+
+    const notice = await screen.findByText(/leaves this machine/);
+    expect(notice.textContent).toContain("OpenRouter");
+    expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing when the notice is cancelled", async () => {
+    renderPanel();
+    const task = await findTask(/Project overview/);
+    await waitFor(() => expect(task.disabled).toBe(false));
+
+    fireEvent.click(task);
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText(/leaves this machine/)).toBeNull();
+    expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+
+  it("does not ask again for a project already agreed to", async () => {
+    const first = renderPanel();
+    const task = await findTask(/Project overview/);
+    await waitFor(() => expect(task.disabled).toBe(false));
+    fireEvent.click(task);
+    fireEvent.click(await screen.findByRole("button", { name: /Send to OpenRouter/ }));
+    await waitFor(() => expect(vi.mocked(aiSummary)).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPanel();
+    const again = await findTask(/Report impact/);
+    await waitFor(() => expect(again.disabled).toBe(false));
+    fireEvent.click(again);
+
+    await waitFor(() => expect(vi.mocked(aiSummary)).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/leaves this machine/)).toBeNull();
+  });
+
+  it("asks again for a different project", async () => {
+    rememberConfirmed("/project");
+    render(
+      <AiPanel root="/other" scope="" file={null} onResult={vi.fn()} onClose={vi.fn()} />
+    );
+    const task = await findTask(/Project overview/);
+    await waitFor(() => expect(task.disabled).toBe(false));
+
+    fireEvent.click(task);
+
+    await screen.findByText(/leaves this machine/);
+    expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+});
+
 describe("cacheLabel", () => {
   const cached = { ...answer, cached: true, inputTokens: 800, outputTokens: 200 };
 
-  it("says cached, which model, how long ago, and what it cost", () => {
+  it("says cached, which provider and model, how long ago, and what it cost", () => {
     const label = cacheLabel(cached, 1_000_000 + 2 * 60_000);
 
-    expect(label).toContain("cached · m · 2 min ago");
+    expect(label).toContain("cached · openrouter · m · 2 min ago");
     expect(label).toContain("1000 tokens");
   });
 
   it("says fresh for an answer just generated", () => {
-    expect(cacheLabel({ ...cached, cached: false }, 1_000_000)).toContain("fresh · m · just now");
+    expect(cacheLabel({ ...cached, cached: false }, 1_000_000)).toContain(
+      "fresh · openrouter · m · just now"
+    );
   });
 
   it("counts hours and days", () => {
