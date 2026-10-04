@@ -11,7 +11,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { FunctionGraph } from "../../shared/types";
-import { buildFunctionNodes, decorateFunctionNodes } from "./nodes";
+import { buildFunctionNodes, crossFileNodeIdForName, crossFileNodeIdForPath, decorateFunctionNodes } from "./nodes";
 import { CodeNode, type CodeNodeData } from "./CodeNode";
 import { useSearchRegistration, type SearchItem } from "../shell/SearchContext";
 import { GraphSearch } from "./GraphSearch";
@@ -210,7 +210,31 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
             Uses imports
           </div>
           <div className="break-words font-mono text-white/85">
-            {activeUses.length > 0 ? activeUses.join(", ") : "none"}
+            {activeUses.length > 0 ? (
+              activeUses.map((name, index) => {
+                // A name a dashed block shows can be jumped to; the rest is text.
+                const target = crossFileNodeIdForName(canvas.nodes, name);
+                return (
+                  <span key={name}>
+                    {index > 0 && ", "}
+                    {target ? (
+                      <button
+                        type="button"
+                        title={`Go to ${target}`}
+                        onClick={() => canvas.focusNode(target)}
+                        className="text-accent hover:underline"
+                      >
+                        {name}
+                      </button>
+                    ) : (
+                      name
+                    )}
+                  </span>
+                );
+              })
+            ) : (
+              "none"
+            )}
           </div>
           <div className="mt-2 text-[10px] uppercase tracking-wider text-dimmed">
             Imported by
@@ -220,19 +244,49 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
               <div>none</div>
             ) : (
               <>
-                {activeImporters.map((entry) => (
-                  <div key={entry.path} className="break-words">
-                    {entry.path}:{" "}
-                    {entry.names
-                      .filter((name) => name === activeGraph.name)
-                      .join(", ")}
-                  </div>
-                ))}
-                {moduleImporters.map((entry) => (
-                  <div key={entry.path} className="break-words text-white/60">
-                    {entry.path} (module)
-                  </div>
-                ))}
+                {activeImporters.map((entry) => {
+                  const target = crossFileNodeIdForPath(canvas.nodes, entry.path);
+                  return (
+                    <div key={entry.path} className="break-words">
+                      {target ? (
+                        <button
+                          type="button"
+                          title={`Go to ${target}`}
+                          onClick={() => canvas.focusNode(target)}
+                          className="text-accent hover:underline"
+                        >
+                          {entry.path}
+                        </button>
+                      ) : (
+                        entry.path
+                      )}
+                      :{" "}
+                      {entry.names
+                        .filter((name) => name === activeGraph.name)
+                        .join(", ")}
+                    </div>
+                  );
+                })}
+                {moduleImporters.map((entry) => {
+                  const target = crossFileNodeIdForPath(canvas.nodes, entry.path);
+                  return (
+                    <div key={entry.path} className="break-words text-white/60">
+                      {target ? (
+                        <button
+                          type="button"
+                          title={`Go to ${target}`}
+                          onClick={() => canvas.focusNode(target)}
+                          className="text-accent hover:underline"
+                        >
+                          {entry.path}
+                        </button>
+                      ) : (
+                        entry.path
+                      )}{" "}
+                      (module)
+                    </div>
+                  );
+                })}
               </>
             )}
           </div>

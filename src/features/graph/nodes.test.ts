@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFunctionNodes, decorateFunctionNodes } from "./nodes";
+import { buildFunctionNodes, crossFileNodeIdForName, crossFileNodeIdForPath, decorateFunctionNodes } from "./nodes";
 import {
   CONSTANTS_NODE_ID,
   IMPORTED_BY_NODE_ID,
@@ -151,6 +151,33 @@ describe("decorateFunctionNodes", () => {
     expect((nodes.find((n) => n.id === "f")?.data as { highlighted: boolean }).highlighted).toBe(true);
     expect((nodes.find((n) => n.id === "Cls.m")?.data as { highlighted: boolean }).highlighted).toBe(true);
     expect((nodes.find((n) => n.id === "V")?.data as { dimmed: boolean }).dimmed).toBe(true);
+  });
+});
+
+describe("cross-file jump targets", () => {
+  const nodes = buildFunctionNodes(graph(result, { externals: [externalFile] }));
+
+  it("points a used name at the definition a dashed block holds", () => {
+    expect(crossFileNodeIdForName(nodes, "run")).toBe("pkg/file2.py::Thing.run");
+  });
+
+  it("points a used name at the block holding a member of it", () => {
+    // `Thing` itself is not drawn here, only `Thing.run`.
+    expect(crossFileNodeIdForName(nodes, "Thing")).toBe("pkg/file2.py");
+  });
+
+  it("has no target for a name or path no block shows", () => {
+    expect(crossFileNodeIdForName(nodes, "os")).toBeNull();
+    expect(crossFileNodeIdForPath(nodes, "pkg/other.py")).toBeNull();
+  });
+
+  it("points an importer path at its dashed block", () => {
+    expect(crossFileNodeIdForPath(nodes, "pkg/file2.py")).toBe("pkg/file2.py");
+  });
+
+  it("never points at this file's own definitions", () => {
+    expect(crossFileNodeIdForName(nodes, "f")).toBeNull();
+    expect(crossFileNodeIdForPath(nodes, "a.py")).toBeNull();
   });
 });
 

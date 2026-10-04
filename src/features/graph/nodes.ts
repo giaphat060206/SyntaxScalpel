@@ -274,6 +274,38 @@ export function buildFunctionNodes(graph: FunctionGraph): Node[] {
   ];
 }
 
+/**
+ * The node a dashed block shows for an imported `name`, so the info card can
+ * jump to it. A Definition the block holds wins; failing that, the block that
+ * holds a Member of it (`path::Thing.run` answers for `Thing`).
+ */
+export function crossFileNodeIdForName(nodes: Node[], name: string): string | null {
+  for (const node of nodes) {
+    const data = node.data as CodeNodeData;
+    if (data.crossFile === "definition" && data.node?.name === name) {
+      return node.id;
+    }
+  }
+  for (const node of nodes) {
+    const data = node.data as CodeNodeData;
+    if (data.crossFile !== "definition" || !node.parentId) {
+      continue;
+    }
+    if (data.node?.id.includes(`::${name}.`)) {
+      return node.parentId;
+    }
+  }
+  return null;
+}
+
+/** The dashed block standing for `path`, when the graph holds one. */
+export function crossFileNodeIdForPath(nodes: Node[], path: string): string | null {
+  const block = nodes.find(
+    (node) => node.id === path && (node.data as CodeNodeData).crossFile === "file"
+  );
+  return block ? path : null;
+}
+
 export function decorateFunctionNodes(
   nodes: Node[],
   edges: GraphEdge[],
