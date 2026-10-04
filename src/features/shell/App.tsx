@@ -13,7 +13,7 @@ import { ProjectGraph } from "../project/ProjectGraph";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
 import { AiResultView } from "../ai/AiResultView";
-import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
+import { aiSummary, type AiRequest, type AiSummary } from "../../shared/ipc";
 
 type Location =
   | { kind: "empty" }
@@ -183,25 +183,19 @@ export default function App() {
   const mainFile = showDocs && !aiResult ? codeFile : (codeFile ?? docFile);
   const isPathLocation = location.kind === "folder" || location.kind === "code";
 
-  // What a Task is offered to explain. Until the pickers land this is the whole
-  // current Scope, or the file being read.
-  const aiTarget = useMemo<AiTarget | null>(() => {
-    if (!root) {
-      return null;
+  // What a Task may be pointed at. Which of it is chosen happens in the panel:
+  // the Scope, a set of files in it, or Definitions in the open file.
+  const aiScope = useMemo(() => {
+    if (location.kind === "folder") {
+      return location.path;
     }
     if (location.kind === "code") {
       const slash = location.path.lastIndexOf("/");
-      return {
-        kind: "files",
-        scope: slash > 0 ? location.path.slice(0, slash) : "",
-        files: [location.path],
-      };
+      return slash > 0 ? location.path.slice(0, slash) : "";
     }
-    if (location.kind === "folder") {
-      return { kind: "scope", scope: location.path };
-    }
-    return null;
-  }, [root, location]);
+    return "";
+  }, [location]);
+  const aiFile = location.kind === "code" ? location.path : null;
 
   const handleAiResult = useCallback((request: AiRequest, result: AiSummary) => {
     setAiRequest(request);
@@ -243,7 +237,8 @@ export default function App() {
       {aiOpen && (
         <AiPanel
           root={root}
-          target={aiTarget}
+          scope={aiScope}
+          file={aiFile}
           onResult={handleAiResult}
           onClose={() => setAiOpen(false)}
         />

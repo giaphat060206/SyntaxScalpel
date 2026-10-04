@@ -449,6 +449,46 @@ mod tests {
     }
 
     #[test]
+    fn picking_a_definition_from_the_caller_reuses_the_answer_from_its_own_file() {
+        let root = fixture("reuse");
+        write(&root, "a.py", "def one():\n    two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+
+        let in_its_own_file = tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            &Target::Definitions { file: "b.py".into(), ids: vec!["two".into()] },
+            Some(&options()),
+            "explain-selection",
+            "openrouter",
+            "",
+            false,
+            &store,
+            &transport,
+        ))
+        .unwrap();
+        // The id a Cross-file Block carries in a.py, reaching the same Definition.
+        let from_the_caller = tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            &Target::Definitions { file: "a.py".into(), ids: vec!["b.py::two".into()] },
+            Some(&options()),
+            "explain-selection",
+            "openrouter",
+            "",
+            false,
+            &store,
+            &transport,
+        ))
+        .unwrap();
+
+        assert!(!in_its_own_file.cached);
+        assert!(from_the_caller.cached, "should have reused the answer");
+        assert_eq!(from_the_caller.text, in_its_own_file.text);
+        assert_eq!(transport.call_count(), 1);
+    }
+
+    #[test]
     fn reports_that_the_digest_was_truncated() {
         let root = fixture("truncated");
         let mut source = String::new();

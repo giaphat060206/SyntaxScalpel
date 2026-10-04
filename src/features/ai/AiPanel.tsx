@@ -1,14 +1,25 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
+import { DefinitionPicker } from "./DefinitionPicker";
+import { FilePicker } from "./FilePicker";
 import { AI_TASKS } from "./tasks";
 import { useAiSettings, PROVIDERS } from "./useAiSettings";
 
+type Mode = "scope" | "files" | "definitions";
+
 interface Props {
   root: string | null;
-  target: AiTarget | null;
+  scope: string;
+  file: string | null;
   onResult: (request: AiRequest, result: AiSummary) => void;
   onClose: () => void;
 }
+
+const MODES: { id: Mode; label: string }[] = [
+  { id: "scope", label: "Whole scope" },
+  { id: "files", label: "Files" },
+  { id: "definitions", label: "Definitions" },
+];
 
 const field =
   "w-full rounded border border-white/15 bg-bg px-2 py-1 text-xs text-white outline-none focus:border-accent";
@@ -20,18 +31,40 @@ const action =
  * key entry itself always stays reachable — otherwise the app dead-ends with no
  * way to satisfy the gate.
  */
-export function AiPanel({ root, target, onResult, onClose }: Props) {
+export function AiPanel({ root, scope, file, onResult, onClose }: Props) {
   const settings = useAiSettings();
   const [keyDraft, setKeyDraft] = useState("");
   const [running, setRunning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("scope");
+  const [files, setFiles] = useState<string[]>([]);
+  const [definitions, setDefinitions] = useState<string[]>([]);
+
+  const target = useMemo<AiTarget | null>(() => {
+    if (!root) {
+      return null;
+    }
+    if (mode === "definitions" && file) {
+      return { kind: "definitions", file, ids: definitions };
+    }
+    if (mode === "files") {
+      return { kind: "files", scope, files };
+    }
+    return { kind: "scope", scope };
+  }, [root, mode, file, scope, files, definitions]);
 
   const choice = settings.provider;
   const blocked = !settings.ready
     ? "Add an API key"
-    : !root || !target
-      ? "Open a folder and pick what to explain"
-      : undefined;
+    : !root
+      ? "Open a folder first"
+      : mode === "definitions" && !file
+        ? "Open a code file to pick its definitions"
+        : mode === "files" && files.length === 0
+          ? "Pick at least one file"
+          : mode === "definitions" && definitions.length === 0
+            ? "Pick at least one definition"
+            : undefined;
 
   const run = async (task: string) => {
     if (!root || !target) {
@@ -119,6 +152,52 @@ export function AiPanel({ root, target, onResult, onClose }: Props) {
           <button type="button" onClick={settings.clearKey} className={action}>
             Clear
           </button>
+        )}
+      </div>
+
+      <div className="mt-3 text-[10px] uppercase tracking-wider text-dimmed">
+        What to explain
+      </div>
+      <div className="mt-1 flex gap-1">
+        {MODES.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            onClick={() => setMode(entry.id)}
+            className={`flex-1 rounded border px-1 py-1 text-[11px] ${
+              mode === entry.id
+                ? "border-accent/60 text-accent"
+                : "border-white/10 text-white/85 hover:text-accent"
+            }`}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-1">
+        {mode === "files" && root && (
+          <FilePicker
+            root={root}
+            scope={scope}
+            selected={files}
+            onChange={setFiles}
+          />
+        )}
+        {mode === "definitions" &&
+          (root && file ? (
+            <DefinitionPicker
+              root={root}
+              file={file}
+              selected={definitions}
+              onChange={setDefinitions}
+            />
+          ) : (
+            <p className="m-0 text-xs text-dimmed">no code file is open</p>
+          ))}
+        {mode === "scope" && (
+          <p className="m-0 text-xs text-dimmed">
+            the whole scope, whatever it contains
+          </p>
         )}
       </div>
 

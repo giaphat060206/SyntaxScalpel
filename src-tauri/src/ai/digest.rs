@@ -1,10 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::models::NodeKind;
 use crate::parser::function_graph::Def;
+use crate::parser::neighborhood::EXTERNAL_SEPARATOR;
 use crate::parser::project::{project_graph, ProjectFile};
 
 pub const MAX_STRUCTURE_BYTES: usize = 24 * 1024;
@@ -294,86 +295,139 @@ fn build_scope(
     ))
 }
 
+/// A selected Definition, resolved to the file that declares it. A Cross-file
+/// Block id is `path::local` (the separator the parser already uses), so a
+/// Definition reached from another file resolves to that file and renders
+/// exactly as if it had been picked there — which is what lets the Summary Cache
+/// serve the same answer on both routes instead of buying it twice.
+fn declaring_file(default_file: &str, id: &str) -> (String, String) {
+    match id.split_once(EXTERNAL_SEPARATOR) {
+        Some((file, local)) if !file.is_empty() && !local.is_empty() => {
+            (file.to_string(), local.to_string())
+        }
+        _ => (default_file.to_string(), id.to_string()),
+    }
+}
+
 fn build_definitions(
     root: &str,
     file: &str,
     ids: &[String],
     options: &Options,
 ) -> Result<Digest, String> {
-    let source = read(root, file)?;
-    let defs = crate::parser::definitions(&source, file)?;
-    let wanted: BTreeSet<&str> = ids.iter().map(String::as_str).collect();
-    let selected: Vec<&Def> = in_source_order(&defs)
-        .into_iter()
-        .filter(|def| wanted.is_empty() || wanted.contains(def.id.as_str()))
-        .collect();
-    let peers: BTreeSet<&str> = selected.iter().map(|def| def.name.as_str()).collect();
-    if selected.is_empty() {
+    let mut wanted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    if ids.is_empty() {
+        wanted.insert(file.to_string(), BTreeSet::new());
+    }
+    for id in ids {
+        let (owner, local) = declaring_file(file, id);
+        wanted.entry(owner).or_default().insert(local);
+    }
+
+    // Selected ids are resolved per file first, because `calls` is filtered
+    // against every selected name whichever file it came from — that filter is
+    // what shows how pieces interact across a boundary.
+    let mut groups: Vec<(String, Vec<String>)> = Vec::new();
+    let mut peers: BTreeSet<String> = BTreeSet::new();
+    for (owner, locals) in &wanted {
+        let source = read(root, owner)?;
+        let defs = crate::parser::definitions(&source, owner)?;
+        let selected: Vec<String> = in_source_order(&defs)
+            .into_iter()
+            .filter(|def| locals.is_empty() || locals.contains(&def.id))
+            .map(|def| {
+                peers.insert(def.name.clone());
+                def.id.clone()
+            })
+            .collect();
+        if !selected.is_empty() {
+            groups.push((owner.clone(), selected));
+        }
+    }
+
+    let definition_count: usize = groups.iter().map(|(_, ids)| ids.len()).sum();
+    if definition_count == 0 {
         return Err(if ids.is_empty() {
             format!("{file} declares no definitions")
         } else {
-            format!("none of the selected definitions are in {file}")
+            "none of the selected definitions were found".to_string()
         });
     }
 
     let mut writer = Writer::new(budget(options, true));
-    let language = fence_language(file);
-    writer.line(&format!(
-        "{}  {} definitions",
-        file,
-        selected.len()
-    ));
-    for def in &selected {
-        if !writer.line(&format!(
-            "{} {}{}{}  lines {}-{}",
-            kind_word(&def.kind),
-            def.name,
-            params(def),
-            returns(def),
-            def.start_line,
-            def.end_line
-        )) {
+    let mut full = false;
+    for (owner, selected) in &groups {
+        if full {
             break;
         }
-        if !def.uses.is_empty() {
-            let mut uses: Vec<&str> = def.uses.iter().map(String::as_str).collect();
-            uses.sort_unstable();
-            uses.dedup();
-            if !writer.line(&format!("  uses {}", uses.join(", "))) {
-                break;
-            }
-        }
-        let mut calls: Vec<&str> = def
-            .calls
-            .iter()
-            .map(String::as_str)
-            .filter(|name| peers.contains(name))
+        // Re-parsed rather than carried: `Def` is not `Clone`, and a Target
+        // names only the Definitions a person picked, so this is a handful.
+        let source = read(root, owner)?;
+        let defs = crate::parser::definitions(&source, owner)?;
+        let picked: Vec<&Def> = in_source_order(&defs)
+            .into_iter()
+            .filter(|def| selected.contains(&def.id))
             .collect();
-        calls.sort_unstable();
-        calls.dedup();
-        if !calls.is_empty() && !writer.line(&format!("  calls {}", calls.join(", "))) {
+        let language = fence_language(owner);
+        if !writer.line(&format!("{}  {} definitions", owner, picked.len())) {
             break;
         }
-        if options.bodies {
-            if !writer.line(&format!("```{language}")) {
+        for def in picked {
+            if !writer.line(&format!(
+                "{} {}{}{}  lines {}-{}",
+                kind_word(&def.kind),
+                def.name,
+                params(def),
+                returns(def),
+                def.start_line,
+                def.end_line
+            )) {
+                full = true;
                 break;
             }
-            let lines: Vec<&str> = source.lines().collect();
-            let start = def.start_line.saturating_sub(1);
-            let end = def.end_line.min(lines.len());
-            let mut refused = false;
-            for line in lines.iter().take(end).skip(start) {
-                if !writer.line(line) {
-                    refused = true;
+            if !def.uses.is_empty() {
+                let mut uses: Vec<&str> = def.uses.iter().map(String::as_str).collect();
+                uses.sort_unstable();
+                uses.dedup();
+                if !writer.line(&format!("  uses {}", uses.join(", "))) {
+                    full = true;
                     break;
                 }
             }
-            if refused || !writer.line("```") {
+            let mut calls: Vec<&str> = def
+                .calls
+                .iter()
+                .map(String::as_str)
+                .filter(|name| peers.contains(*name))
+                .collect();
+            calls.sort_unstable();
+            calls.dedup();
+            if !calls.is_empty() && !writer.line(&format!("  calls {}", calls.join(", "))) {
+                full = true;
                 break;
+            }
+            if options.bodies {
+                if !writer.line(&format!("```{language}")) {
+                    full = true;
+                    break;
+                }
+                let lines: Vec<&str> = source.lines().collect();
+                let start = def.start_line.saturating_sub(1);
+                let end = def.end_line.min(lines.len());
+                for line in lines.iter().take(end).skip(start) {
+                    if !writer.line(line) {
+                        full = true;
+                        break;
+                    }
+                }
+                if full || !writer.line("```") {
+                    full = true;
+                    break;
+                }
             }
         }
     }
-    Ok(writer.finish(1, selected.len()))
+    Ok(writer.finish(groups.len(), definition_count))
 }
 
 fn fence_language(rel: &str) -> &'static str {
@@ -575,17 +629,62 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_definition_that_belongs_to_another_file() {
+    fn resolves_a_definition_reached_from_another_file() {
         let root = fixture("digest-cross-file-id");
-        write(&root, "a.py", "def one():\n    return 1\n");
-        write(&root, "b.py", "def two():\n    return 2\n");
+        write(&root, "a.py", "def one():\n    two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n\n\ndef three():\n    return 3\n");
 
+        // The id a Cross-file Block carries is `declaring file::local id`.
         let target = Target::Definitions {
             file: "a.py".into(),
             ids: vec!["b.py::two".into()],
         };
+        let digest = build(root.to_str().unwrap(), &target, &Options::default()).unwrap();
 
-        assert!(build(root.to_str().unwrap(), &target, &Options::default()).is_err());
+        assert!(digest.text.contains("b.py  1 definitions"), "{}", digest.text);
+        assert!(digest.text.contains("fn two"), "{}", digest.text);
+        assert!(!digest.text.contains("three"), "{}", digest.text);
+        assert!(!digest.text.contains("a.py"), "{}", digest.text);
+    }
+
+    #[test]
+    fn a_mixed_selection_renders_in_file_order_and_shows_the_call_across_it() {
+        let root = fixture("digest-mixed");
+        write(&root, "a.py", "def one():\n    two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+
+        let target = Target::Definitions {
+            file: "a.py".into(),
+            ids: vec!["b.py::two".into(), "one".into()],
+        };
+        let digest = build(root.to_str().unwrap(), &target, &Options::default()).unwrap();
+
+        assert!(digest.text.find("a.py").unwrap() < digest.text.find("b.py").unwrap());
+        assert_eq!(digest.file_count, 2);
+        assert_eq!(digest.definition_count, 2);
+        assert!(digest.text.contains("calls two"), "{}", digest.text);
+    }
+
+    #[test]
+    fn picking_the_same_definition_either_way_is_the_same_digest() {
+        let root = fixture("digest-same-answer");
+        write(&root, "a.py", "def one():\n    two()\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+
+        let from_its_file = Target::Definitions { file: "b.py".into(), ids: vec!["two".into()] };
+        let from_the_caller = Target::Definitions {
+            file: "a.py".into(),
+            ids: vec!["b.py::two".into()],
+        };
+
+        assert_eq!(
+            build(root.to_str().unwrap(), &from_its_file, &Options::default())
+                .unwrap()
+                .text,
+            build(root.to_str().unwrap(), &from_the_caller, &Options::default())
+                .unwrap()
+                .text
+        );
     }
 
     #[test]

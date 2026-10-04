@@ -9,6 +9,14 @@ vi.mock("../../shared/ipc", () => ({
   setAiKey: vi.fn(),
   clearAiKey: vi.fn(),
   aiSummary: vi.fn(),
+  projectGraph: vi.fn(async () => ({
+    root: "/project",
+    folders: [],
+    files: [],
+    edges: [],
+    truncated: false,
+  })),
+  functionGraph: vi.fn(),
 }));
 
 const answer = {
@@ -27,12 +35,7 @@ function renderPanel() {
   const onResult = vi.fn();
   const onClose = vi.fn();
   const view = render(
-    <AiPanel
-      root="/project"
-      target={{ kind: "scope", scope: "" }}
-      onResult={onResult}
-      onClose={onClose}
-    />
+    <AiPanel root="/project" scope="" file={null} onResult={onResult} onClose={onClose} />
   );
   return { onResult, onClose, unmount: view.unmount };
 }
@@ -125,14 +128,27 @@ describe("AiPanel running a task", () => {
     await screen.findByText(/refused the key/);
   });
 
-  it("asks nothing when there is no target yet", async () => {
+  it("asks nothing and says why when no folder is open", async () => {
     render(
-      <AiPanel root="/project" target={null} onResult={vi.fn()} onClose={vi.fn()} />
+      <AiPanel root={null} scope="" file={null} onResult={vi.fn()} onClose={vi.fn()} />
     );
     const task = await findTask(/Explain selection/);
 
     await waitFor(() => expect(task.disabled).toBe(true));
-    expect(task.getAttribute("title")).toContain("pick what to explain");
+    expect(task.getAttribute("title")).toBe("Open a folder first");
+  });
+
+  it("sends the whole scope until a narrower target is chosen", async () => {
+    const { onResult } = renderPanel();
+    const task = await findTask(/Project overview/);
+    await waitFor(() => expect(task.disabled).toBe(false));
+
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    await waitFor(() => expect(task.disabled).toBe(true));
+    expect(task.getAttribute("title")).toBe("Pick at least one file");
+
+    fireEvent.click(task);
+    expect(onResult).not.toHaveBeenCalled();
   });
 });
 
