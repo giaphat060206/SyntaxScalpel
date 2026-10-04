@@ -218,7 +218,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     };
   }, [sizeSignature, layoutRun, layoutKey, layout, setNodes]);
 
-  const centerOn = useCallback(
+  const centerOnRaw = useCallback(
     (id: string, zoom: number, duration: number): boolean => {
       const internals = getInternalNode(id);
       if (!internals) {
@@ -234,6 +234,16 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       return true;
     },
     [getInternalNode, setCenter]
+  );
+
+  // Navigation the user asked for; a layout that lands later must not undo it.
+  const userMoved = useRef(false);
+  const centerOn = useCallback(
+    (id: string, zoom: number, duration: number) => {
+      userMoved.current = true;
+      return centerOnRaw(id, zoom, duration);
+    },
+    [centerOnRaw]
   );
 
   const focusNode = useCallback(
@@ -253,6 +263,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       if (width === 0 || height === 0) {
         return false;
       }
+      userMoved.current = true;
       fitBounds(
         { x: positionAbsolute.x, y: positionAbsolute.y, width, height },
         { padding: 0.2, duration: 400 }
@@ -262,17 +273,29 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     [fitBounds, getInternalNode]
   );
 
+  const fittedToken = useRef("");
+  useEffect(() => {
+    userMoved.current = false;
+  }, [fit.token]);
+
   const fitKey = `${fit.token}|${layoutVersion}`;
   useEffect(() => {
     if (lastFit.current === fitKey || nodes.length === 0) {
       return;
     }
+    // A layout that finishes after the user moved the viewport may refine
+    // positions, but re-centring here would yank them back to the entry file.
+    if (fittedToken.current === fit.token && userMoved.current) {
+      return;
+    }
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
-      const focused = fit.target && attempts >= 2 ? centerOn(fit.target, 1.1, 0) : false;
+      const focused = fit.target && attempts >= 2 ? centerOnRaw(fit.target, 1.1, 0) : false;
       if (focused || attempts >= 40) {
         lastFit.current = fitKey;
+        fittedToken.current = fit.token;
+        userMoved.current = false;
         if (!focused) {
           fitView({ padding: fit.padding ?? 0.2, duration: 0 });
         }
@@ -280,7 +303,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
       }
     }, 150);
     return () => window.clearInterval(timer);
-  }, [fitKey, fit.target, fit.padding, sizeSignature, nodes.length, centerOn, fitView]);
+  }, [fitKey, fit.target, fit.padding, sizeSignature, nodes.length, centerOnRaw, fitView]);
 
   const closeMenu = useCallback(() => {
     setMenu(null);

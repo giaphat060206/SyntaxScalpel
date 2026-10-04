@@ -8,6 +8,8 @@ interface Props {
   onSelectFolder: (relPath: string) => void;
   onFocusFolder: (relPath: string) => void;
   selectedFile: string | null;
+  /** Bumped when a folder is picked elsewhere, to open it here one level deep. */
+  revealFolder?: { path: string; nonce: number } | null;
 }
 
 export function FileExplorer({
@@ -16,6 +18,7 @@ export function FileExplorer({
   onSelectFolder,
   onFocusFolder,
   selectedFile,
+  revealFolder,
 }: Props) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -79,7 +82,39 @@ export function FileExplorer({
     if (el && typeof el.scrollIntoView === "function") {
       el.scrollIntoView({ block: "nearest" });
     }
-  }, [selectedFile, entries, expanded]);
+  }, [selectedFile, entries, expanded, revealFolder]);
+
+  /**
+   * Show a folder picked elsewhere: its ancestors open so it is visible, the
+   * folder itself opens, and nothing below it does — one level, so the click
+   * reveals what is inside without unfolding the whole subtree.
+   */
+  useEffect(() => {
+    if (!revealFolder) {
+      return;
+    }
+    const target = revealFolder.path;
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (target) {
+        const parts = target.split("/");
+        parts.pop();
+        let acc = "";
+        for (const part of parts) {
+          acc = acc ? `${acc}/${part}` : part;
+          next.add(acc);
+        }
+        next.add(target);
+      }
+      const prefix = target ? `${target}/` : "";
+      for (const path of [...next]) {
+        if (prefix && path.startsWith(prefix)) {
+          next.delete(path);
+        }
+      }
+      return next;
+    });
+  }, [revealFolder]);
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((current) => {

@@ -50,6 +50,10 @@ export default function App() {
   const [explorerCollapsed, setExplorerCollapsed] = useState(false);
   const [docsCollapsed, setDocsCollapsed] = useState(false);
   const [focusRequest, setFocusRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const [revealRequest, setRevealRequest] = useState<{
+    path: string;
+    nonce: number;
+  } | null>(null);
   const { recents, remember, clear } = useRecents();
 
   const codeFile = location.kind === "code" ? location.path : null;
@@ -134,6 +138,12 @@ export default function App() {
 
   const handleFocusFolder = useCallback(
     (relPath: string) => {
+      // Open it in the file panel too, so a folder click both shows what is
+      // inside and points the graph at it.
+      setRevealRequest((prev) => ({
+        path: relPath,
+        nonce: (prev?.nonce ?? 0) + 1,
+      }));
       const scope = location.kind === "folder" ? location.path : null;
       const inScope =
         scope !== null &&
@@ -239,6 +249,7 @@ export default function App() {
                     onSelectFolder={handleSelectFolder}
                     onFocusFolder={handleFocusFolder}
                     selectedFile={isPathLocation ? location.path : selectedFile}
+                    revealFolder={revealRequest}
                   />
                 </div>
               </div>
