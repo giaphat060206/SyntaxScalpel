@@ -2,9 +2,13 @@ import { useMemo, useState } from "react";
 import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
 import { DefinitionPicker } from "./DefinitionPicker";
 import { FilePicker } from "./FilePicker";
+import { RelationshipList } from "./RelationshipList";
 import { isConfirmed, rememberConfirmed } from "./egress";
+import type { ConnectionRow } from "./relationships";
+import { requestKey, sameRequest } from "./requests";
 import { AI_TASKS } from "./tasks";
 import { useAiSettings, PROVIDERS } from "./useAiSettings";
+import { useFunctionGraph, useRelationships } from "./useRelationships";
 
 type Mode = "scope" | "files" | "definitions";
 
@@ -12,25 +16,13 @@ interface Props {
   root: string | null;
   scope: string;
   file: string | null;
-  /** What has already been generated this session, by task id. */
+  /** What has already been generated this session, by request key. */
   results: Record<string, { request: AiRequest; result: AiSummary }>;
   onResult: (request: AiRequest, result: AiSummary) => void;
   /** Re-display something already generated, without asking anyone. */
   onShow: (request: AiRequest, result: AiSummary) => void;
+  onHover: (row: ConnectionRow | null) => void;
   onClose: () => void;
-}
-
-/** A stored answer counts only for the same question: same code, same provider,
- *  same model. The Digest is deterministic, so equal requests mean one cache key
- *  — this is a session shortcut, never a source of truth. */
-function sameRequest(stored: AiRequest, wanted: AiRequest): boolean {
-  return (
-    stored.root === wanted.root &&
-    stored.task === wanted.task &&
-    stored.provider === wanted.provider &&
-    stored.model === wanted.model &&
-    JSON.stringify(stored.target) === JSON.stringify(wanted.target)
-  );
 }
 
 const MODES: { id: Mode; label: string }[] = [
@@ -49,7 +41,16 @@ const action =
  * key entry itself always stays reachable — otherwise the app dead-ends with no
  * way to satisfy the gate.
  */
-export function AiPanel({ root, scope, file, results, onResult, onShow, onClose }: Props) {
+export function AiPanel({
+  root,
+  scope,
+  file,
+  results,
+  onResult,
+  onShow,
+  onHover,
+  onClose,
+}: Props) {
   const settings = useAiSettings();
   const [keyDraft, setKeyDraft] = useState("");
   const [running, setRunning] = useState<string | null>(null);
@@ -72,6 +73,17 @@ export function AiPanel({ root, scope, file, results, onResult, onShow, onClose 
     return { kind: "scope", scope };
   }, [root, mode, file, scope, files, definitions]);
 
+  const fileGraph = useFunctionGraph(root, mode === "definitions" ? file : null);
+  const relationships = useRelationships({
+    root,
+    mode,
+    scope,
+    file,
+    files,
+    definitions,
+    graph: fileGraph.graph,
+  });
+
   const choice = settings.provider;
   const blocked = !settings.ready
     ? "Add an API key"
@@ -85,29 +97,6 @@ export function AiPanel({ root, scope, file, results, onResult, onShow, onClose 
             ? "Pick at least one definition"
             : undefined;
 
-  const run = async (task: string) => {
-    if (!root || !target) {
-      return;
-    }
-    const request: AiRequest = {
-      root,
-      target,
-      task,
-      provider: settings.provider,
-      model: settings.model,
-    };
-    const already = results[task];
-    if (already && sameRequest(already.request, request)) {
-      onShow(already.request, already.result);
-      return;
-    }
-    if (!isConfirmed(root)) {
-      setPending({ task, request });
-      return;
-    }
-    await send(task, request);
-  };
-
   const send = async (task: string, request: AiRequest) => {
     setRunning(task);
     setError(null);
@@ -118,6 +107,45 @@ export function AiPanel({ root, scope, file, results, onResult, onShow, onClose 
     } finally {
       setRunning(null);
     }
+  };
+
+  const ask = async (request: AiRequest) => {
+    const already = results[requestKey(request)];
+    if (already && sameRequest(already.request, request)) {
+      onShow(already.request, already.result);
+      return;
+    }
+    if (!isConfirmed(request.root)) {
+      setPending({ task: request.task, request });
+      return;
+    }
+    await send(request.task, request);
+  };
+
+  const run = async (task: string) => {
+    if (!root || !target) {
+      return;
+    }
+    await ask({
+      root,
+      target,
+      task,
+      provider: settings.provider,
+      model: settings.model,
+    });
+  };
+
+  const askAbout = async (row: ConnectionRow) => {
+    if (!root) {
+      return;
+    }
+    await ask({
+      root,
+      target: { kind: "connection", source: row.source, target: row.target },
+      task: "relationship",
+      provider: settings.provider,
+      model: settings.model,
+    });
   };
 
   const confirmEgress = async () => {
@@ -231,8 +259,8 @@ export function AiPanel({ root, scope, file, results, onResult, onShow, onClose 
         {mode === "definitions" &&
           (root && file ? (
             <DefinitionPicker
-              root={root}
-              file={file}
+              graph={fileGraph.graph}
+              error={fileGraph.error}
               selected={definitions}
               onChange={setDefinitions}
             />
@@ -243,6 +271,28 @@ export function AiPanel({ root, scope, file, results, onResult, onShow, onClose 
           <p className="m-0 text-xs text-dimmed">
             the whole scope, whatever it contains
           </p>
+        )}
+      </div>
+
+      <div className="mt-3 text-[10px] uppercase tracking-wider text-dimmed">
+        Relationship
+      </div>
+      <div className="mt-1">
+        {root ? (
+          <RelationshipList
+            root={root}
+            rows={relationships.rows}
+            loading={relationships.loading}
+            error={relationships.error}
+            results={results}
+            provider={settings.provider}
+            model={settings.model}
+            onGenerate={askAbout}
+            onShow={onShow}
+            onHover={onHover}
+          />
+        ) : (
+          <p className="m-0 text-xs text-dimmed">open a folder to see what connects</p>
         )}
       </div>
 

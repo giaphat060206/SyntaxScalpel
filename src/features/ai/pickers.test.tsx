@@ -120,9 +120,7 @@ describe("DefinitionPicker", () => {
     vi.mocked(functionGraph).mockResolvedValue(graph);
     const onChange = vi.fn();
     render(
-      <DefinitionPicker
-        root="/project"
-        file="algorithms/pathfinder.py"
+      <DefinitionPicker graph={graph} error={null}
         selected={[]}
         onChange={onChange}
       />
@@ -141,9 +139,7 @@ describe("DefinitionPicker", () => {
     vi.mocked(functionGraph).mockResolvedValue(graph);
     const onChange = vi.fn();
     render(
-      <DefinitionPicker
-        root="/project"
-        file="algorithms/pathfinder.py"
+      <DefinitionPicker graph={graph} error={null}
         selected={["main"]}
         onChange={onChange}
       />
@@ -159,7 +155,7 @@ describe("DefinitionPicker", () => {
   it("reports a failure to read the file", async () => {
     vi.mocked(functionGraph).mockRejectedValue(new Error("no such file"));
     render(
-      <DefinitionPicker root="/project" file="gone.py" selected={[]} onChange={vi.fn()} />
+      <DefinitionPicker graph={null} error="no such file" selected={[]} onChange={vi.fn()} />
     );
 
     await waitFor(() => expect(screen.getByText(/no such file/)).toBeTruthy());

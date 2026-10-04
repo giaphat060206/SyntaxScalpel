@@ -78,7 +78,9 @@ export interface AiSummary {
 export type AiTarget =
   | { kind: "scope"; scope: string }
   | { kind: "files"; scope: string; files: string[] }
-  | { kind: "definitions"; file: string; ids: string[] };
+  | { kind: "definitions"; file: string; ids: string[] }
+  /** One relationship, caller first, each end qualified by its own file. */
+  | { kind: "connection"; source: string; target: string };
 
 export interface AiRequest {
   root: string;

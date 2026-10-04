@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { aiSettings, aiSummary, setAiKey, type AiRequest, type AiSummary } from "../../shared/ipc";
+import {
+  aiSettings,
+  aiSummary,
+  functionGraph,
+  setAiKey,
+  type AiRequest,
+  type AiSummary,
+} from "../../shared/ipc";
+import type { FunctionGraph } from "../../shared/types";
 import { AiPanel } from "./AiPanel";
 import { cacheLabel } from "./AiResultView";
 import { rememberConfirmed } from "./egress";
@@ -17,6 +25,7 @@ vi.mock("../../shared/ipc", () => ({
     edges: [],
     truncated: false,
   })),
+  analyzeImports: vi.fn(async () => ({ imports: [], importedBy: [] })),
   functionGraph: vi.fn(),
 }));
 
@@ -34,23 +43,26 @@ const answer = {
 };
 
 function renderPanel(
-  results: Record<string, { request: AiRequest; result: AiSummary }> = {}
+  results: Record<string, { request: AiRequest; result: AiSummary }> = {},
+  file: string | null = null
 ) {
   const onResult = vi.fn();
   const onShow = vi.fn();
+  const onHover = vi.fn();
   const onClose = vi.fn();
   const view = render(
     <AiPanel
       root="/project"
       scope=""
-      file={null}
+      file={file}
       results={results}
       onResult={onResult}
       onShow={onShow}
+      onHover={onHover}
       onClose={onClose}
     />
   );
-  return { onResult, onShow, onClose, unmount: view.unmount };
+  return { onResult, onShow, onHover, onClose, unmount: view.unmount };
 }
 
 const scopeRequest: AiRequest = {
@@ -161,6 +173,7 @@ describe("AiPanel running a task", () => {
         results={{}}
         onResult={vi.fn()}
         onShow={vi.fn()}
+        onHover={vi.fn()}
         onClose={vi.fn()}
       />
     );
@@ -254,6 +267,7 @@ describe("AiPanel egress", () => {
         results={{}}
         onResult={vi.fn()}
         onShow={vi.fn()}
+        onHover={vi.fn()}
         onClose={vi.fn()}
       />
     );
@@ -333,6 +347,109 @@ describe("AiPanel remembering what is done", () => {
 
     expect((await findTask(/Project overview/)).getAttribute("aria-pressed")).toBe("true");
     expect((await findTask(/Report impact/)).getAttribute("aria-pressed")).toBe("false");
+  });
+});
+
+describe("AiPanel relationships", () => {
+  const graph: FunctionGraph = {
+    file: {
+      filePath: "algorithms/pathfinder.py",
+      edges: [],
+      nodes: [{ id: "dijkstra", kind: "function", name: "dijkstra", params: [], returns: [] }],
+    },
+    imports: { imports: [], importedBy: [] },
+    externals: [
+      {
+        path: "utils/helpers.py",
+        nodes: [{ id: "push", kind: "function", name: "push", params: [], returns: [] }],
+      },
+    ],
+    crossEdges: [{ source: "dijkstra", target: "utils/helpers.py::push" }],
+    residualImports: [],
+    residualImportedBy: [],
+    truncated: false,
+  };
+  const connectionRequest: AiRequest = {
+    root: "/project",
+    target: {
+      kind: "connection",
+      source: "algorithms/pathfinder.py::dijkstra",
+      target: "utils/helpers.py::push",
+    },
+    task: "relationship",
+    provider: "openrouter",
+    model: "",
+  };
+
+  beforeEach(() => {
+    vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
+    vi.mocked(functionGraph).mockResolvedValue(graph);
+  });
+
+  async function pickTheCaller() {
+    const view = renderPanel({}, "algorithms/pathfinder.py");
+    fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
+    fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+    return view;
+  }
+
+  it("lists a connection once its end is picked, with no summary in the row", async () => {
+    await pickTheCaller();
+
+    expect(await screen.findByText("utils/helpers.py::push")).toBeTruthy();
+    expect(screen.getByText("calls")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeTruthy();
+    expect(screen.queryByText(/It returns a path/)).toBeNull();
+  });
+
+  it("asks about the canonical pair, caller first", async () => {
+    rememberConfirmed("/project");
+    await pickTheCaller();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Generate" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(aiSummary)).toHaveBeenCalledWith(connectionRequest)
+    );
+  });
+
+  it("shows a connection that is already generated without asking again", async () => {
+    const { onShow } = renderPanel(
+      {
+        "relationship:algorithms/pathfinder.py::dijkstra->utils/helpers.py::push": {
+          request: connectionRequest,
+          result: { ...answer, task: "relationship" },
+        },
+      },
+      "algorithms/pathfinder.py"
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
+    fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+
+    fireEvent.click(await screen.findByRole("button", { name: "✓ Show" }));
+
+    expect(onShow).toHaveBeenCalledWith(connectionRequest, {
+      ...answer,
+      task: "relationship",
+    });
+    expect(vi.mocked(aiSummary)).not.toHaveBeenCalled();
+  });
+
+  it("raises and clears the pair a row is hovering", async () => {
+    const { onHover } = await pickTheCaller();
+    const row = (await screen.findByText("utils/helpers.py::push")).closest("li")!;
+
+    fireEvent.mouseEnter(row);
+    expect(onHover).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "algorithms/pathfinder.py::dijkstra",
+        target: "utils/helpers.py::push",
+        counterpart: "utils/helpers.py::push",
+      })
+    );
+
+    fireEvent.mouseLeave(row);
+    expect(onHover).toHaveBeenLastCalledWith(null);
   });
 });
 

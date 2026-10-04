@@ -13,6 +13,7 @@ import { ProjectGraph } from "../project/ProjectGraph";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
 import { AiResultView } from "../ai/AiResultView";
+import { requestKey } from "../ai/requests";
 import { aiSummary, type AiRequest, type AiSummary } from "../../shared/ipc";
 
 type Location =
@@ -63,6 +64,8 @@ export default function App() {
   const [aiResults, setAiResults] = useState<
     Record<string, { request: AiRequest; result: AiSummary }>
   >({});
+  // Emphasising a hovered connection's ends in the graphs arrives next.
+  const noHover = useCallback(() => {}, []);
   const { recents, remember, clear } = useRecents();
 
   const explorerPanel = usePanelRef();
@@ -203,9 +206,9 @@ export default function App() {
   const handleAiResult = useCallback((request: AiRequest, result: AiSummary) => {
     setAiRequest(request);
     setAiResult(result);
-    // Remember it per task, so the panel can highlight what is already generated
-    // and show it again without asking anyone.
-    setAiResults((previous) => ({ ...previous, [request.task]: { request, result } }));
+    // Remember it per request, so the panel can highlight what is already
+    // generated and show it again without asking anyone.
+    setAiResults((previous) => ({ ...previous, [requestKey(request)]: { request, result } }));
     setDocsCollapsed(false);
   }, []);
 
@@ -254,6 +257,7 @@ export default function App() {
           results={aiResults}
           onResult={handleAiResult}
           onShow={showAiResult}
+          onHover={noHover}
           onClose={() => setAiOpen(false)}
         />
       )}

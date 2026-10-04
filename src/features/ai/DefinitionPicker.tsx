@@ -1,10 +1,9 @@
-import { Fragment, useEffect, useState } from "react";
-import { functionGraph } from "../../shared/ipc";
+import { Fragment } from "react";
 import type { FunctionGraph, GraphNode } from "../../shared/types";
 
 interface Props {
-  root: string;
-  file: string;
+  graph: FunctionGraph | null;
+  error: string | null;
   selected: string[];
   onChange: (ids: string[]) => void;
 }
@@ -32,30 +31,7 @@ function kindWord(kind: GraphNode["kind"]): string {
  *  An imported Definition keeps the qualified id the parser gave it, so picking
  *  it here and picking it in its own file produce the same Digest — and so the
  *  same cached answer. */
-export function DefinitionPicker({ root, file, selected, onChange }: Props) {
-  const [graph, setGraph] = useState<FunctionGraph | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setGraph(null);
-    setError(null);
-    functionGraph(file, root)
-      .then((next) => {
-        if (!cancelled) {
-          setGraph(next);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled) {
-          setError(String(reason));
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [root, file]);
-
+export function DefinitionPicker({ graph, error, selected, onChange }: Props) {
   const chosen = new Set(selected);
   const toggle = (id: string) => {
     const next = new Set(chosen);
