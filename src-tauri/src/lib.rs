@@ -1,3 +1,4 @@
+pub mod ai;
 mod commands;
 mod models;
 mod parser;
