@@ -81,7 +81,9 @@ export async function runElkLayout(
     const layoutFn = await getLayoutFn();
     const result = await withTimeout(layoutFn(graph), LAYOUT_TIMEOUT_MS);
     return applyElkResult(nodes, result);
-  } catch {
+  } catch (error) {
+    // Silent failure hid a stalling worker behind a 15s wait, so say so.
+    console.warn("elk layout failed; falling back to the grid", error);
     return null;
   }
 }

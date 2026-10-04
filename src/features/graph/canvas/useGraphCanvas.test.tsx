@@ -97,6 +97,27 @@ describe("useGraphCanvas", () => {
     expect(result.current.edges).toHaveLength(0);
   });
 
+  it("seeds a readable grid before any layout answers", () => {
+    // A pending layout must not leave every block stacked on the origin.
+    const { result } = renderHook(
+      () =>
+        useGraphCanvas({
+          nodes: [node("a"), node("b"), node("c")],
+          edges: [],
+          selection: null,
+          layoutKey: "file",
+          fit: { token: "file" },
+          edgeVisibility: () => "active",
+          layout: () => new Promise(() => {}),
+        }),
+      { wrapper }
+    );
+    const positions = result.current.nodes.map(
+      (n) => `${n.position.x},${n.position.y}`
+    );
+    expect(new Set(positions).size).toBe(positions.length);
+  });
+
   it("ignores a stale layout result after the layoutKey changes", async () => {
     let release: () => void = () => {};
     const first = new Promise<void>((resolve) => (release = resolve));

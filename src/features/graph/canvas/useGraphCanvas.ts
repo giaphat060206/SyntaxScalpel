@@ -123,7 +123,12 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     lastBuiltSignature.current = signature;
     setNodes((current) => {
       const byId = new Map(current.map((node) => [node.id, node]));
-      return builtNodes.map((incoming) => mergeNode(incoming, byId.get(incoming.id)));
+      // Seed the grid rather than the builders' raw positions: every container
+      // is built at the origin, so until a layout answers the whole graph would
+      // paint stacked on one point (and ELK is allowed up to 15s to answer).
+      return reflowLayout(
+        builtNodes.map((incoming) => mergeNode(incoming, byId.get(incoming.id)))
+      );
     });
   }, [builtNodes, setNodes]);
 
