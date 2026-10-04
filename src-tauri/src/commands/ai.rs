@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::ai::cache::{self, SummaryCache};
 use crate::ai::digest::{Options, Target};
 use crate::ai::providers::HttpTransport;
@@ -42,6 +44,41 @@ pub async fn ai_summary(
         &transport,
     )
     .await
+}
+
+/// One request as a panel would ask it, for the mark probe. It deliberately omits
+/// the Digest layers: a panel asks for the defaults, so a mark and the click that
+/// follows it resolve to the same layers.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedRequest {
+    pub target: Target,
+    pub task: String,
+    pub provider: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+/// Which of these requests the store can already answer, so the panel's marks
+/// survive a restart without the panel keeping state of its own. A request that
+/// cannot be resolved is simply not marked: marks are a hint, and a probe must
+/// never be the reason the panel shows nothing.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn ai_cached(root: String, requests: Vec<CachedRequest>) -> Result<Vec<bool>, String> {
+    Ok(requests
+        .into_iter()
+        .map(|request| {
+            summary::is_cached(
+                &root,
+                &request.target,
+                None,
+                &request.task,
+                &request.provider,
+                &request.model,
+            )
+            .unwrap_or(false)
+        })
+        .collect())
 }
 
 /// Writes one cached summary to a path the user picked. The text comes from the
@@ -103,6 +140,55 @@ mod tests {
         assert!(written.starts_with("---\n"), "{written}");
         assert!(written.contains(&format!("key: {key}")), "{written}");
         assert!(written.ends_with("It returns a path.\n"), "{written}");
+    }
+
+    fn key_for(root: &std::path::Path, target: &Target, task: &str, provider: &str, model: &str) -> String {
+        use crate::ai::prompts;
+
+        let task_id = prompts::Task::from_id(task).unwrap();
+        let options = prompts::default_options(task_id);
+        let digest = crate::ai::digest::build(root.to_str().unwrap(), target, &options).unwrap();
+        let prompt = prompts::render(task_id, &digest.text).unwrap();
+        SummaryCache::key_for(&prompts::cache_input(provider, model, &prompt))
+    }
+
+    #[test]
+    fn marks_the_requests_the_store_can_answer_and_no_others() {
+        let root = fixture("marks");
+        std::fs::write(root.join("a.py"), "def one():\n    return 1\n").unwrap();
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        let key = key_for(&root, &target, "explain-selection", "openrouter", "deepseek/deepseek-chat");
+        SummaryCache::new(root.to_str().unwrap())
+            .put(&CachedSummary {
+                key,
+                task: "explain-selection".into(),
+                provider: "openrouter".into(),
+                model: "deepseek/deepseek-chat".into(),
+                prompt_version: crate::ai::prompts::PROMPT_VERSION,
+                created_at_ms: 1,
+                input_tokens: 1,
+                output_tokens: 1,
+                text: "## Answer\n\nIt returns a path.".into(),
+            })
+            .unwrap();
+        let openrouter = |task: &str, model: &str| CachedRequest {
+            target: target.clone(),
+            task: task.to_string(),
+            provider: "openrouter".into(),
+            model: model.to_string(),
+        };
+
+        let marks = tauri::async_runtime::block_on(ai_cached(
+            root.to_str().unwrap().to_string(),
+            vec![
+                openrouter("explain-selection", "deepseek/deepseek-chat"),
+                openrouter("impact", "deepseek/deepseek-chat"),
+                openrouter("not-a-task", ""),
+            ],
+        ))
+        .unwrap();
+
+        assert_eq!(marks, vec![true, false, false]);
     }
 
     #[test]

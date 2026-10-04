@@ -33,6 +33,57 @@ fn resolved_model<'a>(provider: &providers::ProviderSpec, model: &'a str) -> &'a
     }
 }
 
+/// What a request settles to before any provider is involved: the Digest it would
+/// send, the prompt rendered from it, and the store key the answer lives under.
+struct Resolved {
+    task: Task,
+    provider: &'static providers::ProviderSpec,
+    model: String,
+    digest: Digest,
+    prompt: prompts::RenderedPrompt,
+    key: String,
+}
+
+/// One place that decides what a request means. `summarize` and `is_cached` both
+/// go through it, which is what makes a mark in the panel agree with the click it
+/// invites: same Target, same layers, same key.
+fn resolve(
+    root: &str,
+    target: &Target,
+    options: Option<&Options>,
+    task_id: &str,
+    provider_id: &str,
+    model: &str,
+) -> Result<Resolved, String> {
+    let task = Task::from_id(task_id).ok_or_else(|| format!("unknown AI task: {task_id}"))?;
+    let provider =
+        providers::spec(provider_id).ok_or_else(|| format!("unknown provider: {provider_id}"))?;
+    let model = resolved_model(provider, model).to_string();
+    let options = options.cloned().unwrap_or_else(|| prompts::default_options(task));
+    let digest = digest::build(root, target, &options)?;
+    let prompt = prompts::render(task, &digest.text)?;
+    let key = SummaryCache::key_for(&prompts::cache_input(provider.id, &model, &prompt));
+    Ok(Resolved { task, provider, model, digest, prompt, key })
+}
+
+/// Whether the store already holds the answer this request would be served.
+///
+/// The mark a panel shows has to be the same question as the click it invites, so
+/// this recomputes the key rather than remembering that something was generated:
+/// after an edit the code no longer hashes the same, and the mark goes away by
+/// itself. It reads the store and nothing else — no key, no provider, no network.
+pub fn is_cached(
+    root: &str,
+    target: &Target,
+    options: Option<&Options>,
+    task_id: &str,
+    provider_id: &str,
+    model: &str,
+) -> Result<bool, String> {
+    let resolved = resolve(root, target, options, task_id, provider_id, model)?;
+    Ok(SummaryCache::new(root).get(&resolved.key).is_some())
+}
+
 /// Digest, then cache, then provider — in that order, so a cached answer costs
 /// nothing and needs no key.
 #[allow(clippy::too_many_arguments)]
@@ -47,33 +98,31 @@ pub async fn summarize(
     secrets: &dyn SecretStore,
     transport: &dyn Transport,
 ) -> Result<AiSummary, String> {
-    let task = Task::from_id(task_id).ok_or_else(|| format!("unknown AI task: {task_id}"))?;
-    let provider = providers::spec(provider_id)
-        .ok_or_else(|| format!("unknown provider: {provider_id}"))?;
-    let model = resolved_model(provider, model);
-    let options = options.cloned().unwrap_or_else(|| prompts::default_options(task));
-
-    let digest = digest::build(root, target, &options)?;
-    let prompt = prompts::render(task, &digest.text)?;
-    let key = SummaryCache::key_for(&prompts::cache_input(provider.id, model, &prompt));
+    let resolved = resolve(root, target, options, task_id, provider_id, model)?;
     let store = SummaryCache::new(root);
 
     if !force {
-        if let Some(entry) = store.get(&key) {
-            return Ok(answer(&entry, &digest, true));
+        if let Some(entry) = store.get(&resolved.key) {
+            return Ok(answer(&entry, &resolved.digest, true));
         }
     }
 
     let api_key = secrets
-        .get(provider.id)
-        .ok_or_else(|| format!("add an API key for {}", provider.label))?;
-    let completion: Completion =
-        providers::complete(transport, provider, model, &api_key, &prompt).await?;
+        .get(resolved.provider.id)
+        .ok_or_else(|| format!("add an API key for {}", resolved.provider.label))?;
+    let completion: Completion = providers::complete(
+        transport,
+        resolved.provider,
+        &resolved.model,
+        &api_key,
+        &resolved.prompt,
+    )
+    .await?;
     let entry = CachedSummary {
-        key,
-        task: task.id().to_string(),
-        provider: provider.id.to_string(),
-        model: model.to_string(),
+        key: resolved.key,
+        task: resolved.task.id().to_string(),
+        provider: resolved.provider.id.to_string(),
+        model: resolved.model,
         prompt_version: prompts::PROMPT_VERSION,
         created_at_ms: cache::now_ms(),
         input_tokens: completion.input_tokens,
@@ -85,7 +134,7 @@ pub async fn summarize(
     if store.put(&entry).is_ok() {
         let _ = store.evict(cache::MAX_ENTRIES, cache::MAX_BYTES);
     }
-    Ok(answer(&entry, &digest, false))
+    Ok(answer(&entry, &resolved.digest, false))
 }
 
 fn answer(entry: &CachedSummary, digest: &Digest, cached: bool) -> AiSummary {
@@ -159,6 +208,37 @@ mod tests {
         status: u16,
         body: String,
         calls: Mutex<Vec<String>>,
+    }
+
+    /// Asks exactly the way the panel does: default layers, no forcing, and any
+    /// Target rather than the module's fixture one.
+    fn ask(
+        root: &Path,
+        target: &Target,
+        args: (&str, &str, &str),
+        force: bool,
+        store: &FakeStore,
+        transport: &FakeTransport,
+    ) -> AiSummary {
+        let (task, provider, model) = args;
+        tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            target,
+            None,
+            task,
+            provider,
+            model,
+            force,
+            store,
+            transport,
+        ))
+        .unwrap()
+    }
+
+    /// The mark the panel would show, derived from the store alone.
+    fn cached(root: &Path, target: &Target, args: (&str, &str, &str)) -> Result<bool, String> {
+        let (task, provider, model) = args;
+        is_cached(root.to_str().unwrap(), target, None, task, provider, model)
     }
 
     impl FakeTransport {
@@ -529,6 +609,92 @@ mod tests {
         assert_eq!(transport.call_count(), 1);
         let sent = transport.calls.lock().unwrap().last().unwrap().clone();
         assert!(sent.contains("calls at 5: two()"), "{sent}");
+    }
+
+    #[test]
+    fn the_mark_agrees_with_the_click_it_invites() {
+        let root = fixture("marks-match");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        write(&root, "b.py", "def two():\n    return 2\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        let args = ("explain-selection", "openrouter", "deepseek/deepseek-chat");
+
+        // Nothing generated yet: no mark, and a click would have to pay.
+        assert!(!cached(&root, &target, args).unwrap());
+
+        let first = ask(&root, &target, args, false, &store, &transport);
+        assert!(!first.cached);
+
+        // Now the mark holds, and a click is served from the store instead.
+        assert!(cached(&root, &target, args).unwrap());
+        let second = ask(&root, &target, args, false, &store, &transport);
+        assert!(second.cached);
+        assert_eq!(second.text, first.text);
+        assert_eq!(transport.call_count(), 1);
+    }
+
+    #[test]
+    fn changing_what_the_digest_covers_takes_the_mark_away() {
+        let root = fixture("marks-stale");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        let args = ("explain-selection", "openrouter", "deepseek/deepseek-chat");
+
+        ask(&root, &target, args, false, &store, &transport);
+        assert!(cached(&root, &target, args).unwrap());
+
+        write(&root, "a.py", "def one():\n    return 1\n\n\ndef two():\n    return 2\n");
+
+        assert!(!cached(&root, &target, args).unwrap());
+    }
+
+    #[test]
+    fn an_edit_the_digest_ignores_keeps_the_mark() {
+        // A File Target is answered from structure and signatures, so a body-only
+        // edit leaves the question — and so the answer — exactly as it was. Only
+        // what the Task pays for can invalidate it.
+        let root = fixture("marks-body");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        let args = ("explain-selection", "openrouter", "deepseek/deepseek-chat");
+
+        ask(&root, &target, args, false, &store, &transport);
+        write(&root, "a.py", "def one():\n    return 99\n");
+
+        assert!(cached(&root, &target, args).unwrap());
+    }
+
+    #[test]
+    fn the_mark_needs_no_key() {
+        let root = fixture("marks-keyless");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+        let args = ("explain-selection", "openrouter", "deepseek/deepseek-chat");
+        ask(&root, &target, args, false, &with_key("openrouter"), &transport);
+
+        // A stored answer is readable with no key held at all: reading it is local.
+        assert!(cached(&root, &target, args).unwrap());
+        assert!(cached(&root, &target, args).is_ok());
+    }
+
+    #[test]
+    fn a_mark_needs_a_task_and_a_provider_that_exist() {
+        let root = fixture("marks-unknown");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let target = Target::Files { scope: "".into(), files: vec!["a.py".into()] };
+
+        let error = cached(&root, &target, ("not-a-task", "openrouter", "")).unwrap_err();
+        assert!(error.contains("unknown AI task"), "{error}");
+
+        let error = cached(&root, &target, ("impact", "not-a-provider", "")).unwrap_err();
+        assert!(error.contains("unknown provider"), "{error}");
     }
 
     #[test]
