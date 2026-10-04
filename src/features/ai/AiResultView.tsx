@@ -1,8 +1,10 @@
 import { useState } from "react";
-import type { AiSummary } from "../../shared/ipc";
+import { save } from "@tauri-apps/plugin-dialog";
+import { exportSummary, type AiSummary } from "../../shared/ipc";
 import { MarkdownView } from "../markdown/MarkdownView";
 
 interface Props {
+  root: string | null;
   result: AiSummary;
   onRegenerate: () => Promise<void>;
   onClose: () => void;
@@ -29,8 +31,15 @@ export function cacheLabel(result: AiSummary, now: number): string {
   }${result.truncated ? " · digest truncated" : ""}`;
 }
 
-export function AiResultView({ result, onRegenerate, onClose }: Props) {
+/** A readable default filename; the model id carries slashes, which no path may. */
+export function exportName(result: AiSummary): string {
+  return `${result.task}-${result.model.replace(/[^a-zA-Z0-9.-]+/g, "-")}.md`;
+}
+
+export function AiResultView({ root, result, onRegenerate, onClose }: Props) {
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const regenerate = async () => {
@@ -42,6 +51,30 @@ export function AiResultView({ result, onRegenerate, onClose }: Props) {
       setError(String(reason));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const exportAs = async () => {
+    if (!root) {
+      return;
+    }
+    setError(null);
+    setNote(null);
+    try {
+      const chosen = await save({
+        defaultPath: exportName(result),
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (typeof chosen !== "string") {
+        return;
+      }
+      setExporting(true);
+      await exportSummary(root, result.key, chosen);
+      setNote(`Exported to ${chosen.split(/[\\/]/).pop()}`);
+    } catch (reason: unknown) {
+      setError(String(reason));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -61,11 +94,21 @@ export function AiResultView({ result, onRegenerate, onClose }: Props) {
           >
             {busy ? "Asking…" : "Regenerate"}
           </button>
+          <button
+            type="button"
+            onClick={exportAs}
+            disabled={exporting || root === null}
+            title="Save this summary as Markdown"
+            className={action}
+          >
+            {exporting ? "Saving…" : "Export"}
+          </button>
           <button type="button" onClick={onClose} title="Dismiss" className={action}>
             Dismiss
           </button>
         </span>
       </div>
+      {note && <p className="m-0 px-2 py-1 text-xs text-dimmed">{note}</p>}
       {error && <p className="m-0 px-2 py-1 text-xs text-red-400">{error}</p>}
       <div className="min-h-0 flex-1">
         <MarkdownView content={result.text} />

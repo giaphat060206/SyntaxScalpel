@@ -30,6 +30,7 @@ pub fn run() {
             commands::ai::set_ai_key,
             commands::ai::clear_ai_key,
             commands::ai::ai_summary,
+            commands::ai::export_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

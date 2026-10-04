@@ -384,6 +384,7 @@ export default function App() {
                 <div className="min-h-0 flex-1">
                   {aiResult ? (
                     <AiResultView
+                      root={root}
                       result={aiResult}
                       onRegenerate={regenerateAi}
                       onClose={() => setAiResult(null)}
