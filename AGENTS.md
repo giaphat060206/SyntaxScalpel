@@ -65,6 +65,11 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   Cross-file is deliberately asymmetric with in-file: `Thing()` draws an edge across files but never within one,
   because a cross-file construction is a real file dependency. Blocks are capped (12 files, 40 Definitions) and
   `truncated` is surfaced. See ADR-0006.
+- A Cross-file Call Edge to a **member** implies its Container, so a caller that both constructs a class and calls
+  a method on it keeps only the member edge — one arrow onto the Definition the call actually names, instead of two
+  onto the same dashed block. The rule is per caller: another Definition that only constructs the class keeps its
+  own edge, and a Container left with no arrows is dropped from the block rather than drawn as an empty box.
+  `neighborhood::prune_implied_containers` owns this, and two tests pin both halves of it.
 - A name imported from a file that only re-exports (a Python `__init__.py`, a TS `index.ts`, a Rust `mod.rs`) is
   followed to the file that declares it — up to three hops, with a visited set so a re-export cycle terminates.
   The dashed block is then labelled with the **declaring** file, which can differ from the specifier written and
@@ -172,11 +177,28 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   store, so a mark survives a restart and cannot go stale — an edit the Task's own Digest layers do not read leaves
   the answer (and the mark) valid, and one that changes them takes the mark away. Because a stored answer is read
   from this machine, asking for one skips the egress notice; only a request that would reach the provider asks.
+- An external Definition's id arrives **already qualified** as `path::local` (`neighborhood::external_id`), and the
+  Cross-file Call Edges use that same string. The picker must pass it through, not prefix the block's path again:
+  a double-qualified id resolves to nothing and the Digest answers `none of the selected definitions were found`.
+- Selecting a Definition in the file graph **focuses** the panel's Relationship section on it, so the section shows
+  that one Definition's relationships whichever target the Tasks are set to. The selection arrives from
+  `ContentPane` → `App` → `AiPanel` as `selectedDefinitionId`; the panel accepts it only once it can check the id
+  against the loaded graph, and a dashed file block (a path, not a Definition) is ignored. The focus **sticks**:
+  panning the canvas clear does not empty the section.
 - The panel's **Relationship** section lists what the current target connects to — `calls` / `called by` for
-  selected Definitions, `imports` / `imported by` for files, a Scope's outbound imports — one row per counterpart,
-  each with a **Generate** button that becomes `✓ Show`. A row carries no summary; the answer goes to the side
-  panel like any other Task's. Rows are keyed `relationship:{source}->{target}` in the session map, so a
-  relationship generated from one file shows as done from the other.
+  selected Definitions, `imports` / `imported by` for files. A Scope turns every edge with an end inside it into
+  **two** rows, `a` importing `b` and `b` imported by `a`: one row per pair tags every row `imports` and never names
+  the file on the receiving end, which is the half a reader asks about. **Inbound rows sit above outbound ones** —
+  what reaches this side, then what it reaches — and within a half the rows stay grouped by the file they describe.
+  An outside module being imported gets no `imported by` row of its own — that is the importing file's row. The
+  listing is bounded by `MAX_SCOPE_ROWS` and **says** how many it left out rather than quietly showing a prefix.
+  Both rows of a pair carry the same pair, so they share one probe, one cache key and one mark. Tags are
+  colour-coded through `directionKind`: accent for what this side reaches, mint for what reaches it. A listing that
+  is empty because nothing is selected says so, rather than reading as "no relationships".
+- A relationship label **wraps** (`break-all`) and is never truncated: a path is one unbroken token, so truncating
+  it hides the only thing the row is for. `AiPanel.test.tsx` guards the class, because no DOM assertion can see
+  layout, and it also asserts a row's text contains no `//` or `/*` — a comment written among JSX children is not a
+  comment, it is text, and it renders. `tsc` and the build both accept it.
 - Hovering a relationship row, or an imports/imported-by row in either graph's info card, sets the emphasis in
   `features/graph/emphasis.tsx`: the two ends highlight, the edge between them stays bright and the rest dim. It is
   **visual only** — never a Selection, never a code pane, never a request. `App` owns the one piece of state and the

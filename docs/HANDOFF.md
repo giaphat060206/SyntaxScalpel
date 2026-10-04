@@ -244,10 +244,22 @@ GLOSSARY.md              domain vocabulary
   layers in `ai/prompts.rs`. Adding a Task means touching both, and an id present only in TypeScript fails loudly as
   `unknown AI task`. `relationship` is deliberately not in `tasks.ts`: it needs a pair, so it is only reachable from
   a Relationship row.
+- AI: selecting a Definition in the file graph focuses the Relationship section on it — the section follows the
+  canvas, not the target picker, and the focus sticks when the canvas is cleared. A dashed file block (a path, not a
+  Definition) is ignored. An external Definition's id is already `path::local` when it arrives; the picker passes it
+  through, and prefixing the block path again makes an id nothing can resolve (that was a live bug, not a
+  hypothetical).
 - AI: the Relationship list is only as complete as the graph. Namespace-qualified calls (`file2.func2()`) and
-  type-annotation-only imports produce no edge, so no row. A Scope lists only **outbound** boundary imports: a file
-  outside the project root is never parsed, so scope-wide "imported by" is not derivable — per file it is, via
-  `analyze_imports`, which the Files mode now uses.
+  type-annotation-only imports produce no edge, so no row. A Scope turns every edge with an **end** inside it into
+  two rows — `a` imports `b`, and `b` imported by `a` — because one row per pair tags everything `imports` and never
+  names the receiving file. Inbound rows sit above outbound ones, and within a half the rows stay grouped by the file
+  they describe. Capped at `MAX_SCOPE_ROWS` (160) with the shortfall stated, and an outside module gets no
+  `imported by` row of its own. Two files both outside the scope are the only edges dropped. Labels wrap rather than
+  truncate (`break-all`); tags are colour-coded, accent outbound / mint inbound.
+- Graph: a Cross-file Call Edge to a member implies its container, so `Thing()` plus `thing.run()` from one
+  Definition draws **one** arrow, onto `Thing.run`, and the class box is dropped when nothing else points at it.
+  Per caller: a Definition that only constructs the class keeps its class edge
+  (`neighborhood::prune_implied_containers`).
 - AI: hover emphasis reaches the info cards and the Relationship rows but not the residual **IMPORTS / IMPORTERS
   NOT DRAWN** blocks. That is structural, not an omission: ADR-0006 made those rows residuals, so every counterpart
   they name is one with no node to highlight.

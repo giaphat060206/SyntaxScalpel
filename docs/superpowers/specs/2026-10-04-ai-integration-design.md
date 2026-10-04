@@ -230,13 +230,27 @@ egress notice in §8 has to be honest in the meantime.
   an edit that changes what the Task reads takes the mark away on its own. The store remains the authority on what
   is reused, and reading a stored answer needs no Provider Key and no egress notice, because nothing leaves the
   machine.
+- **The Relationship section follows the file graph.** Selecting a Definition on the canvas — a function, a method,
+  a class, or one shown in a dashed block — makes that Definition the subject of the section, whatever target the
+  Tasks are set to; the Tasks keep their own target so a whole-scope overview is not silently re-pointed. The
+  selection sticks: clearing the canvas to pan does not empty the section. A dashed **file** block names a path
+  rather than a Definition, so it is ignored. An imported Definition's id reaches the frontend already qualified
+  (`path::local`) — the same string the Cross-file Call Edges use — and must be passed through unchanged.
 - **The Relationship section** sits under the target choice and lists the counterparts of what is selected, grouped
   by how they connect: `calls` and `called by` for Definitions from the Function Graph's Cross-file Call Edges,
-  `imports` and `imported by` for files, and a Scope's outbound boundary imports. A row carries no summary — it
+  `imports` and `imported by` for files. A Scope lists every edge with an end inside it as **two** rows — `a`
+  imports `b`, and `b` imported by `a` — because a pair describes one direction, and tagging every row `imports`
+  leaves the receiving file unnamed. Inbound rows sit above outbound ones (`imported by` / `called by` first, then
+  `imports` / `calls`), and within each half the rows stay grouped by the file they describe, so the list reads as
+  what reaches this side and then what it reaches; the tags are colour-coded accent outbound, mint inbound. That
+  listing is capped (`MAX_SCOPE_ROWS`) and it says how many it left out rather than quietly showing a prefix; both
+  rows of a pair carry the same pair, so they share one probe and one cache entry. A row carries no summary — it
   names one counterpart and offers **Generate**, which becomes `✓ Show` once that pair has an answer — and hovering
-  it emphasises the two ends and the arrow between them in the graph. The same hover works from the info cards'
-  existing imports/imported-by rows. The residual **IMPORTS / IMPORTERS NOT DRAWN** blocks are excluded, and by
-  construction rather than by omission: every row in them names a counterpart with no node to light up.
+  it emphasises the two ends and the arrow between them in the graph. Labels wrap rather
+  than truncate: a path is one unbroken token, so cutting it off hides the file the row exists to name. The same
+  hover works from the info cards' existing imports/imported-by rows. The residual **IMPORTS / IMPORTERS NOT DRAWN**
+  blocks are excluded, and by construction rather than by omission: every row in them names a counterpart with no
+  node to light up.
 - **Streaming** is deferred: it is the one requirement that forces chunked events across IPC, and summaries are
   short.
 
