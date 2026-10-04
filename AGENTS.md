@@ -36,11 +36,12 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   App Router route conventions).
 - `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`, `ai.rs` (settings, key,
   `ai_summary`).
-- `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse), `cache.rs` (prompt-hash store, one Markdown
-  document per summary), `prompts.rs` (Task templates + `PROMPT_VERSION`), `providers/` (one OpenAI-compatible
-  client, `Transport` seam), `settings.rs` (keyring behind `SecretStore`), `summary.rs` (digest → cache → provider).
-- `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
-  `endpoints/`, `ai/` (panel, pickers, egress notice), `shell/`.
+- `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse, incl. Connection targets), `cache.rs`
+  (prompt-hash store, one Markdown document per summary), `prompts.rs` (Task templates + `PROMPT_VERSION`),
+  `providers/` (one OpenAI-compatible client, `Transport` seam), `settings.rs` (keyring behind `SecretStore`),
+  `summary.rs` (digest → cache → provider).
+- `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`, `emphasis.tsx`), `markdown/`, `code/`,
+  `project/`, `endpoints/`, `ai/` (panel, pickers, relationship rows, egress notice), `shell/`.
 - `src/shared/` — `types.ts`, `ipc.ts`, `extensions.ts`, `StateViews.tsx`, `ErrorBoundary.tsx`.
 - Design docs: `docs/superpowers/specs/`, plans: `docs/superpowers/plans/`, session handoff: `docs/HANDOFF.md`.
 
@@ -109,6 +110,11 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - Provider wire formats, Digest layers, cache layout and the deferred local option:
   `docs/adr/0007-ai-summaries-and-caching.md` and
   `docs/superpowers/specs/2026-10-04-ai-integration-design.md`.
+- A **Connection** Target is a pair, written caller first with each end qualified by its own file
+  (`algorithms/pathfinder.py::dijkstra` → `utils/helpers.py::push`), so both sides of one relationship render an
+  identical Digest and share one cache entry. Its evidence is both ends' signatures plus the exact call sites: the
+  parser records a line with every call (`CallSite` in `function_graph.rs`), and the three language modules fill it.
+  Direction is identity, so mutual recursion is two Connections, each true.
 
 ## Frontend rules
 
@@ -158,6 +164,16 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   request at all. The mark holds only while the stored request still matches the one on screen — same target,
   provider and model — so changing the selection or the model clears it and the Task generates again. This is a
   session shortcut: the store, not the panel, decides whether a summary is reused.
+- The panel's **Relationship** section lists what the current target connects to — `calls` / `called by` for
+  selected Definitions, `imports` / `imported by` for files, a Scope's outbound imports — one row per counterpart,
+  each with a **Generate** button that becomes `✓ Show`. A row carries no summary; the answer goes to the side
+  panel like any other Task's. Rows are keyed `relationship:{source}->{target}` in the session map, so a
+  relationship generated from one file shows as done from the other.
+- Hovering a relationship row, or an imports/imported-by row in either graph's info card, sets the emphasis in
+  `features/graph/emphasis.tsx`: the two ends highlight, the edge between them stays bright and the rest dim. It is
+  **visual only** — never a Selection, never a code pane, never a request. `App` owns the one piece of state and the
+  provider is controlled, so both sources drive it. The residual Imports and Imported-By Blocks do not participate:
+  the counterpart they name is the one with no node.
 
 ## Style and workflow
 

@@ -233,3 +233,8 @@ _Avoid_: token, secret, API key (unqualified)
 The store of AI Summaries keyed by the exact input they were generated from, so code that has not changed is never
 sent again.
 _Avoid:_ cache, memo
+
+**Relationship Summary**:
+An AI Summary of one Edge's two ends together — how the caller and the callee interact — keyed by the pair rather
+than by the file it was asked from, so it is the same summary from either end.
+_Avoid:_ connection summary, edge summary

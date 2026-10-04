@@ -40,6 +40,16 @@ file and an exported file cannot drift apart. Considered a JSON blob (unreadable
 would then have to be reproduced for export) and a separate export-only format (two sources of truth for one
 document).
 
+**A connection is summarised as a pair, not as a file's view of it.** The Relationship Task's Target is two ends,
+written caller first and each qualified by its own file, so the same relationship renders one identical Digest
+whichever file it was asked from — and therefore one cache entry. Asking from the callee's side shows the answer
+already bought from the caller's side, which is the property that makes a relationship summary worth generating at
+all: it belongs to the relationship, not to the screen it was requested from. Direction is part of the identity, so
+mutual recursion is two summaries, each true. The evidence is both signatures plus the exact call sites, which is
+why the parser now records a line with every call. Considered keying by the viewed file (two entries for one
+relationship, and a duplicate bill) and deriving the pair from a single canonical sort (wrong for a directed edge,
+where who calls whom is the whole point).
+
 **The local option is deferred, deliberately.** Ollama is the only provider consistent with a local-first claim,
 but it cannot be tested on the machine this feature is being built on, and an untestable provider path is worse
 than an absent one. v1 ships keyed cloud providers; because they share a wire format, Ollama is later an entry in a
@@ -74,3 +84,12 @@ table rather than a rewrite.
   across IPC.
 - A per-project cache means the same code summarised in two checkouts is paid for twice. A content-keyed global
   cache is the natural follow-up and is out of scope.
+- The parser carries a line with every call site, so a Relationship Summary can quote the call that makes its claim
+  true. That costs three language modules a slightly richer call record, and nothing in the IPC payloads.
+- The Relationship list is only as complete as the graph: namespace-qualified calls (`file2.func2()`) and
+  type-annotation-only imports produce no edge, and so no row. A Scope's inbound relationships are not derivable
+  either — a file outside the project root is never parsed — so a Scope lists what it imports, while a file lists
+  both directions.
+- Hover emphasis is visual only: it never changes Selection, never opens the code pane and never triggers a request.
+  The residual Imports and Imported-By Blocks cannot respond to it, because the counterpart they name is precisely
+  the one with no node.

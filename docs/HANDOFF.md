@@ -140,14 +140,21 @@ GLOSSARY.md              domain vocabulary
 
 ### AI panel
 - The top-bar **AI** button (visible when a folder is open) opens the panel beside **API**. It holds the provider,
-  model and key entry, then the five AI Tasks; every Task is disabled with an `Add an API key` reason until a key is
-  held, and the key field stays reachable throughout.
+  model and key entry, then what to explain, its relationships, and the five AI Tasks; every Task is disabled with
+  an `Add an API key` reason until a key is held, and the key field stays reachable throughout.
 - What to explain is an explicit choice: **Whole scope**, **Files** (a checkbox tree, where a folder picks every
   file beneath it) or **Definitions** (the open file's own Definitions plus the ones its Cross-file Blocks show).
   Choosing a selection mode with nothing selected disables every Task rather than quietly widening the question.
+- **Relationship** sits under that choice and lists the counterparts of what is selected: `calls` / `called by`
+  from the Function Graph's Cross-file Call Edges for the chosen Definitions, `imports` / `imported by` for chosen
+  files, and a Scope's outbound boundary imports. Each row names one counterpart and offers **Generate**, which
+  becomes `✓ Show` once that pair has an answer; the row carries no summary, because the answer goes to the side
+  panel like any other Task's. Hovering a row — or an imports/imported-by row in either graph's info card —
+  highlights the two ends and the arrow between them.
+- A Relationship is keyed by the **pair** (`relationship:{caller}->{callee}`, caller first, both ends qualified by
+  their own file), so asking from either end shows the same stored answer: `cached: true`, no second request.
 - An imported Definition is sent with the qualified id its Cross-file Block carries (`path::local`), which resolves
-  to the declaring file, so picking it there and picking it in its own file produce the same Digest and the second
-  is a cache hit.
+  to the declaring file, so picking it there and picking it in its own file produce the same Digest.
 - The first Task run for a project stops at an egress notice naming the Provider, remembered per project root. The
   result header carries cached/fresh, provider, model, age, token total and a digest-truncated marker, with
   Regenerate (which forces), Export and Dismiss. Answers render through `MarkdownView` in the side panel.
@@ -228,4 +235,15 @@ GLOSSARY.md              domain vocabulary
   same expensive question about a huge scope repeatedly with Regenerate. Per-project spend accounting is not built.
 - AI: the Task list exists twice in intent — ids and labels in `src/features/ai/tasks.ts`, instructions and Digest
   layers in `ai/prompts.rs`. Adding a Task means touching both, and an id present only in TypeScript fails loudly as
-  `unknown AI task`.
+  `unknown AI task`. `relationship` is deliberately not in `tasks.ts`: it needs a pair, so it is only reachable from
+  a Relationship row.
+- AI: the Relationship list is only as complete as the graph. Namespace-qualified calls (`file2.func2()`) and
+  type-annotation-only imports produce no edge, so no row. A Scope lists only **outbound** boundary imports: a file
+  outside the project root is never parsed, so scope-wide "imported by" is not derivable — per file it is, via
+  `analyze_imports`, which the Files mode now uses.
+- AI: hover emphasis reaches the info cards and the Relationship rows but not the residual **IMPORTS / IMPORTERS
+  NOT DRAWN** blocks. That is structural, not an omission: ADR-0006 made those rows residuals, so every counterpart
+  they name is one with no node to highlight.
+- AI: nothing renders the graph's hover emphasis in a test — `emphasis.test.ts`, the two decorator suites and the
+  panel's row-hover test cover the logic, but no `GraphView`/`ProjectGraph` render test exists in this repo, so the
+  card hover is verified only by inspection.

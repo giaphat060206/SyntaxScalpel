@@ -55,9 +55,16 @@ A **Summary Target** says what to explain; an **AI Task** says what to ask about
 | F3 | Project overview | the root Scope | L0 + L3 | 4 — purpose, architecture, tech stack on first open |
 | F4 | Impact | Definition Target or File Target | L0 + L1 | "what depends on this, and what breaks if I change it?" |
 | F5 | Doc drift | a Doc File + the code it documents | L1 + L3 | "is this README still true?" |
+| F6 | Relationship | a Connection between two ends | L1 + call sites | "how do these two depend on each other?" |
 
 F1 and F2 are the same request at two scopes, which is exactly 5.2 and 5.1. F1 ships first because it is the
 smallest complete slice: pick Definitions, get an answer.
+
+F6 is the only Task whose Target is not a set of things to read but a **pair**: a Connection, written caller first
+with each end qualified by its own file (`algorithms/pathfinder.py::dijkstra` → `utils/helpers.py::push`). Both
+sides of the same relationship therefore render one identical Digest and share one cache entry, which is what makes
+a Relationship Summary persist across files — generate it from either end and the other end shows it. Its evidence
+is both signatures plus the exact call sites, so a claim can be checked against the line that makes it true.
 
 Deliberately **not** in v1: free chat, code generation or refactors, test generation, commit messages,
 embeddings/RAG. Chat needs tool orchestration and unbounded cost; generation raises the stakes of a wrong answer in
@@ -74,6 +81,10 @@ Four layers, cheapest first. Each layer is optional per Task, deterministic, and
 | **L1** signatures | per Definition in scope: `kind name(params) -> returns` with its line range | 64 KB | the owned `Def` |
 | **L2** bodies | source sliced by `startLine..endLine`, for selected Definitions only | 96 KB | the file read |
 | **L3** docs | Doc File text, head-truncated | 8 KB | the file read |
+
+A Connection adds no layer: it renders the two ends' signatures and, for each call the caller makes to the callee,
+`calls at {line}: {source line}` — the parser records a line with every call site for exactly this. When either end
+is a file rather than a Definition, the evidence is the import that connects them.
 
 Measured on the project above: L0 alone 9,211 B, L0 + L1 14,970 B, and adding L3 27,772 B — the last figure
 dominated by data fixtures rather than documentation, which is why the L3 rules below exist.
@@ -218,6 +229,13 @@ egress notice in §8 has to be honest in the meantime.
   the one on screen — same target, provider and model — because an answer to a different question is not an answer
   to this one. The panel remembers what it has shown; the store remains the authority on what is reused, so a
   restart simply means the first click is a cache hit instead of a redisplay.
+- **The Relationship section** sits under the target choice and lists the counterparts of what is selected, grouped
+  by how they connect: `calls` and `called by` for Definitions from the Function Graph's Cross-file Call Edges,
+  `imports` and `imported by` for files, and a Scope's outbound boundary imports. A row carries no summary — it
+  names one counterpart and offers **Generate**, which becomes `✓ Show` once that pair has an answer — and hovering
+  it emphasises the two ends and the arrow between them in the graph. The same hover works from the info cards'
+  existing imports/imported-by rows. The residual **IMPORTS / IMPORTERS NOT DRAWN** blocks are excluded, and by
+  construction rather than by omission: every row in them names a counterpart with no node to light up.
 - **Streaming** is deferred: it is the one requirement that forces chunked events across IPC, and summaries are
   short.
 
