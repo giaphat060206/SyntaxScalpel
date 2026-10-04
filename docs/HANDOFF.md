@@ -225,6 +225,10 @@ GLOSSARY.md              domain vocabulary
 - Rust: calls written inside a macro invocation's arguments produce no edge (macro arguments are unexpanded token
   trees), which also hides a Cross-file Call Edge; a type declared inside an inline `mod` has no Container of its
   own — its methods group under the module; nested containers are not modelled beyond one level.
+- Rendering: how the AI answers and Doc Files look is owned by the typography theme in `tailwind.config.js`
+  (`prose prose-invert`), not by `MarkdownView`. The plugin draws backticks around inline code with CSS `content`,
+  which is **invisible to `MarkdownView.test.tsx`** — that test asserts DOM text only — so styling has no automated
+  guard and has to be checked by eye.
 - Languages covered are Python, JS/TS, and Rust; Go, C, C++, Java, and C# are roadmap.
 - AI: **no test performs network I/O**, so the live round-trip is unverified — the provider base URLs
   (`https://openrouter.ai/api/v1`, `https://api.deepseek.com`), the `Bearer` header, and the

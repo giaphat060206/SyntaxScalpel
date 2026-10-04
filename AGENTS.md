@@ -152,6 +152,9 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   shapes stay language-agnostic. See ADR-0005.
 - The frontend renders whatever the backend sends, but `graph/nodes.ts` attaches a child to its parent only when
   that parent is a top-level node; a language module must never emit a `parent` that has no container node.
+- Markdown renders through `MarkdownView` with `prose prose-invert`, and how it looks is owned by the typography
+  theme in `tailwind.config.js` — including that inline code carries **no backticks**, which the plugin draws with
+  CSS `content` that no DOM test can see. Change the styling there, not in the component.
 - AI lives in `features/ai/`: the top-bar **AI** button opens the panel beside **API**. Task entries carry labels
   only, because the instructions and the Digest layers they pay for live in Rust. Every Task stays disabled with an
   `Add an API key` reason until a key is held, while the key field itself stays reachable. The panel offers what to
