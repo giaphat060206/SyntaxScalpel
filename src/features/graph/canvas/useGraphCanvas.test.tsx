@@ -97,6 +97,53 @@ describe("useGraphCanvas", () => {
     expect(result.current.edges).toHaveLength(0);
   });
 
+  it("leaves placed nodes where they are when only their data changes", async () => {
+    // Clearing a selection reskins the same nodes; it must not re-grid them.
+    const layout = async () => ({
+      positions: { a: { x: 10, y: 20 }, b: { x: 30, y: 40 } },
+      sizes: {},
+      sections: {},
+    });
+    const { result, rerender } = renderHook(
+      ({ active }: { active: boolean }) =>
+        useGraphCanvas({
+          nodes: [
+            { ...node("a"), data: { highlighted: active } },
+            node("b"),
+          ],
+          edges: [],
+          selection: active ? "a" : null,
+          layoutKey: "file",
+          fit: { token: "file" },
+          edgeVisibility: () => "active",
+          layout,
+        }),
+      { wrapper, initialProps: { active: true } }
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(result.current.nodes.find((n) => n.id === "a")?.position).toEqual({
+      x: 10,
+      y: 20,
+    });
+
+    // Same nodes, different `data` — as a pane click produces.
+    rerender({ active: false });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    });
+    expect(result.current.nodes.find((n) => n.id === "a")?.position).toEqual({
+      x: 10,
+      y: 20,
+    });
+    expect(result.current.nodes.find((n) => n.id === "b")?.position).toEqual({
+      x: 30,
+      y: 40,
+    });
+  });
+
   it("seeds a readable grid before any layout answers", () => {
     // A pending layout must not leave every block stacked on the origin.
     const { result } = renderHook(

@@ -123,12 +123,17 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     lastBuiltSignature.current = signature;
     setNodes((current) => {
       const byId = new Map(current.map((node) => [node.id, node]));
-      // Seed the grid rather than the builders' raw positions: every container
-      // is built at the origin, so until a layout answers the whole graph would
-      // paint stacked on one point (and ELK is allowed up to 15s to answer).
-      return reflowLayout(
-        builtNodes.map((incoming) => mergeNode(incoming, byId.get(incoming.id)))
+      const merged = builtNodes.map((incoming) =>
+        mergeNode(incoming, byId.get(incoming.id))
       );
+      // Seed the grid only for a genuinely different graph: every container is
+      // built at the origin, so a fresh graph would otherwise paint stacked on
+      // one point. A selection change only reskins the same nodes (new
+      // `data`), and re-gridding those would visibly jump them off the layout.
+      const sameNodes =
+        current.length === merged.length &&
+        merged.every((node) => byId.has(node.id));
+      return sameNodes ? merged : reflowLayout(merged);
     });
   }, [builtNodes, setNodes]);
 
