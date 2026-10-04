@@ -59,7 +59,7 @@ export function GraphSearch({ items, onPick, placeholder }: Props) {
         type="button"
         onClick={() => setOpen(true)}
         title="Search (Ctrl+F)"
-        className="absolute bottom-3 right-3 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
+        className="absolute bottom-12 right-3 z-30 rounded border border-accent/40 bg-panel px-2 py-1 text-xs text-accent hover:bg-accent/10"
       >
         Search
       </button>
@@ -67,7 +67,7 @@ export function GraphSearch({ items, onPick, placeholder }: Props) {
   }
 
   return (
-    <div className="absolute bottom-3 right-3 z-30 w-72 rounded border border-accent/40 bg-panel p-2 shadow-lg">
+    <div className="absolute bottom-12 right-3 z-30 w-72 rounded border border-accent/40 bg-panel p-2 shadow-lg">
       <input
         ref={inputRef}
         value={query}
