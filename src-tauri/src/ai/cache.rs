@@ -7,6 +7,9 @@ use sha2::{Digest as _, Sha256};
 pub const MAX_ENTRIES: usize = 200;
 pub const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
+/// One summary of one project. The metadata above the body is what makes a
+/// stored file readable on its own, so the store doubles as somewhere a person
+/// can browse — and edit, since a hand-written body is served like any other.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CachedSummary {
@@ -18,7 +21,46 @@ pub struct CachedSummary {
     pub created_at_ms: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub text: String,
+}
+
+const FRONT_MATTER: &str = "---";
+
+/// The one place an entry is turned into text, so a stored file and an exported
+/// file cannot drift apart.
+pub fn render(entry: &CachedSummary) -> Result<String, String> {
+    let metadata = CachedSummary { text: String::new(), ..entry.clone() };
+    let header = serde_norway::to_string(&metadata).map_err(|error| error.to_string())?;
+    Ok(format!("{FRONT_MATTER}\n{header}{FRONT_MATTER}\n\n{}\n", entry.text.trim_end()))
+}
+
+/// Reads what `render` wrote. Anything else — a legacy JSON entry, a hand-edited
+/// file whose header no longer parses — is simply not an entry.
+pub fn parse(raw: &str) -> Option<CachedSummary> {
+    let mut header = String::new();
+    let mut offset = 0;
+    let mut closed = false;
+    for line in raw.split_inclusive('\n') {
+        if offset == 0 {
+            if line.trim_end() != FRONT_MATTER {
+                return None;
+            }
+        } else if line.trim_end() == FRONT_MATTER {
+            closed = true;
+            offset += line.len();
+            break;
+        } else {
+            header.push_str(line);
+        }
+        offset += line.len();
+    }
+    if !closed {
+        return None;
+    }
+    let mut entry: CachedSummary = serde_norway::from_str(&header).ok()?;
+    entry.text = raw[offset..].trim_matches('\n').to_string();
+    Some(entry)
 }
 
 pub fn now_ms() -> u64 {
@@ -49,21 +91,20 @@ impl SummaryCache {
 
     pub fn path_for(&self, key: &str) -> PathBuf {
         let safe: String = key.chars().filter(char::is_ascii_hexdigit).collect();
-        self.dir.join(format!("{safe}.json"))
+        self.dir.join(format!("{safe}.md"))
     }
 
     pub fn get(&self, key: &str) -> Option<CachedSummary> {
         let raw = std::fs::read_to_string(self.path_for(key)).ok()?;
-        let entry: CachedSummary = serde_json::from_str(&raw).ok()?;
+        let entry = parse(&raw)?;
         (entry.key == key).then_some(entry)
     }
 
     pub fn put(&self, entry: &CachedSummary) -> Result<(), String> {
         std::fs::create_dir_all(&self.dir)
             .map_err(|error| format!("{}: {error}", self.dir.display()))?;
-        let json = serde_json::to_string_pretty(entry).map_err(|error| error.to_string())?;
         let path = self.path_for(&entry.key);
-        std::fs::write(&path, json).map_err(|error| format!("{}: {error}", path.display()))
+        std::fs::write(&path, render(entry)?).map_err(|error| format!("{}: {error}", path.display()))
     }
 
     pub fn len(&self) -> usize {
@@ -99,12 +140,17 @@ impl SummaryCache {
         };
         dir.filter_map(|item| item.ok())
             .map(|item| item.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .filter(|path| {
+                matches!(
+                    path.extension().and_then(|ext| ext.to_str()),
+                    Some("md") | Some("json")
+                )
+            })
             .map(|path| {
                 let size = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
                 let created_at = std::fs::read_to_string(&path)
                     .ok()
-                    .and_then(|raw| serde_json::from_str::<CachedSummary>(&raw).ok())
+                    .and_then(|raw| parse(&raw))
                     .map(|entry| entry.created_at_ms)
                     .unwrap_or(0);
                 (path, created_at, size)
@@ -136,6 +182,71 @@ mod tests {
             output_tokens: 20,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn stores_markdown_a_person_can_open() {
+        let root = fixture("markdown");
+        let cache = SummaryCache::new(root.to_str().unwrap());
+        let key = SummaryCache::key_for("prompt text");
+
+        cache.put(&entry(&key, "## What it does\n\nIt returns a path.")).unwrap();
+        let raw = std::fs::read_to_string(cache.path_for(&key)).unwrap();
+
+        assert!(cache.path_for(&key).extension().unwrap() == "md");
+        assert!(raw.starts_with("---\n"), "{raw}");
+        assert!(raw.contains("task: explain-selection"), "{raw}");
+        assert!(raw.contains(&format!("key: {key}")), "{raw}");
+        assert!(raw.contains("promptVersion: 1"), "{raw}");
+        assert!(raw.ends_with("It returns a path.\n"), "{raw}");
+        assert!(!raw.contains("text:"), "the body is not repeated in the header: {raw}");
+    }
+
+    #[test]
+    fn keeps_a_body_that_contains_a_delimiter() {
+        let root = fixture("delimiter");
+        let cache = SummaryCache::new(root.to_str().unwrap());
+        let key = SummaryCache::key_for("prompt text");
+        let body = "before\n\n---\n\nafter";
+
+        cache.put(&entry(&key, body)).unwrap();
+
+        assert_eq!(cache.get(&key).unwrap().text, body);
+    }
+
+    #[test]
+    fn round_trips_every_field() {
+        let root = fixture("fields");
+        let cache = SummaryCache::new(root.to_str().unwrap());
+        let key = SummaryCache::key_for("prompt text");
+        let mut original = entry(&key, "body");
+        original.created_at_ms = 1_790_000_000_000;
+        original.input_tokens = 812;
+        original.output_tokens = 431;
+
+        cache.put(&original).unwrap();
+
+        assert_eq!(cache.get(&key).unwrap(), original);
+    }
+
+    #[test]
+    fn a_legacy_json_entry_is_swept_before_a_current_one() {
+        let root = fixture("legacy");
+        let cache = SummaryCache::new(root.to_str().unwrap());
+        let key = SummaryCache::key_for("prompt text");
+        let mut current = entry(&key, "body");
+        current.created_at_ms = 5_000;
+        cache.put(&current).unwrap();
+        std::fs::write(
+            cache.dir.join("deadbeef.json"),
+            r#"{"key":"deadbeef","createdAtMs":1}"#,
+        )
+        .unwrap();
+
+        assert_eq!(cache.len(), 2);
+        assert_eq!(cache.evict(1, u64::MAX).unwrap(), 1);
+        assert!(cache.get(&key).is_some());
+        assert!(!cache.dir.join("deadbeef.json").exists());
     }
 
     #[test]

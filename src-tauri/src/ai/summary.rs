@@ -11,6 +11,9 @@ use super::settings::SecretStore;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiSummary {
+    /// The content-addressed key, so the answer can be exported from the store
+    /// rather than from a copy the frontend happens to hold.
+    pub key: String,
     pub text: String,
     pub task: String,
     pub provider: String,
@@ -87,6 +90,7 @@ pub async fn summarize(
 
 fn answer(entry: &CachedSummary, digest: &Digest, cached: bool) -> AiSummary {
     AiSummary {
+        key: entry.key.clone(),
         text: entry.text.clone(),
         task: entry.task.clone(),
         provider: entry.provider.clone(),

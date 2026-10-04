@@ -21,6 +21,7 @@ vi.mock("../../shared/ipc", () => ({
 }));
 
 const answer = {
+  key: "a".repeat(64),
   text: "It returns a path.",
   task: "explain-selection",
   provider: "openrouter",

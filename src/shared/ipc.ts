@@ -62,6 +62,8 @@ export interface AiSettings {
 }
 
 export interface AiSummary {
+  /** Content-addressed key, so an export reads the stored document. */
+  key: string;
   text: string;
   task: string;
   provider: string;
@@ -109,4 +111,9 @@ export function aiSummary(request: AiRequest): Promise<AiSummary> {
     force: false,
     ...request,
   });
+}
+
+/** Writes one stored summary to a path the user picked, header and all. */
+export function exportSummary(root: string, key: string, path: string): Promise<void> {
+  return invoke<void>("export_summary", { root, key, path });
 }
