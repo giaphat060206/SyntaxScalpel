@@ -27,8 +27,18 @@ WebView.
 **Caching is keyed by the exact prompt.** The key is `sha256(rendered prompt)` — task instruction, prompt version,
 provider, model, and Digest. Hashing the text actually sent makes a stale summary structurally impossible: change
 one line of one selected function and the Digest changes, so the key changes. There is no mtime comparison and no
-separate invalidation pass. Summaries live one JSON file per key under `<root>/.scalpel/ai/`, so a partial write
-cannot corrupt the set, and an unreadable entry is a miss rather than an error.
+separate invalidation pass. Summaries live one file per key under `<root>/.scalpel/ai/`, so a partial write cannot
+corrupt the set, and an unreadable entry is a miss rather than an error.
+
+**A stored summary is a Markdown document, not a cache blob.** Each entry is Markdown with a YAML front-matter
+header carrying its task, provider, model, prompt version, tokens and timestamp, and the store keeps the same shape
+the answer was generated in. A cache nobody can read is a cache nobody trusts: the header makes a stored file
+self-describing, the body can be grepped like any other document, and because a summary is keyed by content rather
+than by freshness, a hand-edited body is served like any other. The store therefore doubles as the place a person
+reads summaries, and `Export` writes one entry to a path the user picks through the *same* renderer, so a stored
+file and an exported file cannot drift apart. Considered a JSON blob (unreadable without the app, and the format
+would then have to be reproduced for export) and a separate export-only format (two sources of truth for one
+document).
 
 **The local option is deferred, deliberately.** Ollama is the only provider consistent with a local-first claim,
 but it cannot be tested on the machine this feature is being built on, and an untestable provider path is worse
@@ -50,9 +60,16 @@ table rather than a rewrite.
   Token counts are recorded per summary for display, never used for keying.
 - Truncation is reported rather than silent, so a bounded Digest never looks like a complete one. The Project Graph
   already set this precedent with its file cap.
-- Nothing a model returns is executed or written. v1 has no write path, answers are rendered as Markdown, and
-  repository content is passed as data — a README addressed at a model is a prompt-injection attempt, not an
-  instruction the app may follow.
+- Nothing a model returns is executed, and nothing is written into the project tree. Answers are rendered as
+  Markdown, the text persists only in the app's own `<root>/.scalpel/ai/` store, and `Export` writes only where the
+  user points a save dialog. Repository content is passed as data — a README addressed at a model is a
+  prompt-injection attempt, not an instruction the app may follow.
+- Because the store is readable and keyed by content, it is also editable: someone who rewrites a body by hand gets
+  their version back, with no token spent and no invalidation. Breaking the front-matter turns the entry into a
+  miss, and eviction still applies, so the store remains a cache as well as a document.
+- Eviction (200 entries or 4 MiB, oldest first) can drop a summary that was expensive to generate; content
+  addressing means regenerating it is possible, not free. Entries from before this format are `.json` and are
+  swept by the next eviction rather than read.
 - Streaming is deferred, so summaries arrive whole; that is the one requirement that would force chunked events
   across IPC.
 - A per-project cache means the same code summarised in two checkouts is paid for twice. A content-keyed global

@@ -67,7 +67,8 @@ src-tauri/src/
     fs_cmds.rs           list_directory, read_markdown, read_file
   ai/
     digest.rs            the layered projection of the parse (structure, signatures, bodies, docs)
-    cache.rs             content-addressed summaries under <root>/.scalpel/ai/, keyed by prompt hash
+    cache.rs             content-addressed summaries under <root>/.scalpel/ai/, keyed by prompt hash,
+                         each one a Markdown file with a YAML front-matter header
     prompts.rs           PROMPT_VERSION, one template per AI Task, default_options per Task
     providers/           one OpenAI-compatible client + the provider table + the Transport seam
     settings.rs          Provider Key in the OS keyring behind a SecretStore trait
@@ -149,7 +150,11 @@ GLOSSARY.md              domain vocabulary
   is a cache hit.
 - The first Task run for a project stops at an egress notice naming the Provider, remembered per project root. The
   result header carries cached/fresh, provider, model, age, token total and a digest-truncated marker, with
-  Regenerate (which forces) and Dismiss. Answers render through `MarkdownView` in the side panel.
+  Regenerate (which forces), Export and Dismiss. Answers render through `MarkdownView` in the side panel.
+- A summary is stored as Markdown with a YAML front-matter header at `<root>/.scalpel/ai/<key>.md`, so the store can
+  be read, grepped or hand-edited in place; a hand-written body is served like any other, and a broken header is
+  just a miss. **Export** writes the stored document to a path chosen in a save dialog, header and all, using the
+  same renderer as the store.
 
 ### Layout (ELK)
 - ELK owns placement and orthogonal routing, in a worker with a fallback; >1500 nodes or any error falls back to

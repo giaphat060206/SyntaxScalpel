@@ -36,9 +36,9 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   App Router route conventions).
 - `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`, `ai.rs` (settings, key,
   `ai_summary`).
-- `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse), `cache.rs` (prompt-hash store),
-  `prompts.rs` (Task templates + `PROMPT_VERSION`), `providers/` (one OpenAI-compatible client, `Transport` seam),
-  `settings.rs` (keyring behind `SecretStore`), `summary.rs` (digest → cache → provider).
+- `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse), `cache.rs` (prompt-hash store, one Markdown
+  document per summary), `prompts.rs` (Task templates + `PROMPT_VERSION`), `providers/` (one OpenAI-compatible
+  client, `Transport` seam), `settings.rs` (keyring behind `SecretStore`), `summary.rs` (digest → cache → provider).
 - `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
   `endpoints/`, `ai/` (panel, pickers, egress notice), `shell/`.
 - `src/shared/` — `types.ts`, `ipc.ts`, `extensions.ts`, `StateViews.tsx`, `ErrorBoundary.tsx`.
@@ -99,9 +99,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - A **Digest** is projected from the parse (`ai/digest.rs`) and is never an IPC payload — the graph payloads run
   1.1–3.6× the size of the source they describe, so sending one costs more than pasting the file. Layers are
   budgeted in characters, and a spent budget sets `truncated` rather than dropping content silently.
-- Summaries are content-addressed at `<root>/.scalpel/ai/<sha256 of the rendered prompt>`, the one writer under
-  `.scalpel/`; ADR-0002 still governs layout. A missing key, a corrupt entry and an unwritable directory each stay
-  non-fatal so an answer still arrives.
+- Summaries are content-addressed at `<root>/.scalpel/ai/<sha256 of the rendered prompt>.md`, the one writer under
+  `.scalpel/`; ADR-0002 still governs layout. Each entry is Markdown with a YAML front-matter header, so the store
+  is readable and hand-editable and `export_summary` writes it through the same renderer. A missing key, a corrupt
+  entry and an unwritable directory each stay non-fatal so an answer still arrives.
 - `PROMPT_VERSION` in `ai/prompts.rs` is inside the hashed input, so bumping it invalidates cached answers when a
   Task template changes. Which Digest layers a Task pays for is `prompts::default_options`, so the frontend never
   restates them.
@@ -151,7 +152,8 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   explain as Whole scope, Files or Definitions, and picking an imported Definition sends the id its Cross-file
   Block carries (`path::local`), which resolves to that file and reuses the answer already cached there.
 - The first Task run for a project stops at an egress notice naming the Provider and is remembered per project
-  root; the result header keeps naming the Provider. Answers render through `MarkdownView` in the side panel.
+  root; the result header keeps naming the Provider and carries Regenerate, Export (a save dialog, then
+  `exportSummary`) and Dismiss. Answers render through `MarkdownView` in the side panel.
 
 ## Style and workflow
 

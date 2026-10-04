@@ -120,20 +120,24 @@ pass, no risk of serving a summary of code that no longer exists.
 A `PROMPT_VERSION` constant sits inside the hashed text, so editing a task template invalidates every entry it
 affects.
 
-Stored one file per summary at `<root>/.scalpel/ai/<key>.json`, so a partial write cannot corrupt the set:
+Stored one file per summary at `<root>/.scalpel/ai/<key>.md` — a Markdown document with a YAML front-matter
+header, so a partial write cannot corrupt the set and the store is legible to a person:
 
-```json
-{
-  "key": "9f2c…",
-  "task": "explain-selection",
-  "provider": "openrouter",
-  "model": "deepseek/deepseek-chat",
-  "promptVersion": 1,
-  "createdAtMs": 1790000000000,
-  "inputTokens": 812,
-  "outputTokens": 431,
-  "text": "…"
-}
+```markdown
+---
+key: 9f2c…
+task: explain-selection
+provider: openrouter
+model: deepseek/deepseek-chat
+promptVersion: 1
+createdAtMs: 1790000000000
+inputTokens: 812
+outputTokens: 431
+---
+
+## What it does
+
+It returns a path.
 ```
 
 - **Misses are free of failure.** An unreadable, corrupt, or truncated entry is a miss and is ignored; a cache
@@ -141,6 +145,11 @@ Stored one file per summary at `<root>/.scalpel/ai/<key>.json`, so a partial wri
 - **Eviction** is by entry count (default 200) and total bytes (default 4 MB), oldest `createdAtMs` first.
 - **Observability.** Token counts and `createdAtMs` are stored so the UI can say "cached, 2 days ago" instead of
   silently reusing something. A **Regenerate** action bypasses the cache but still writes it.
+- **Readable and editable.** The body can be grepped, and a hand-written body is served like any other, because the
+  key answers "was this generated from exactly this input", not "is this fresh". Breaking the header turns the
+  entry into a miss.
+- **Export** writes one stored entry to a path chosen in a save dialog, using the same renderer as the store, so an
+  exported file and a stored file are the same document. Nothing is ever written into the project tree.
 - **The Provider Key is never stored here.**
 - Per-project is the default. A second, content-keyed global cache is a possible follow-up (summarising the same
   code in two checkouts would then cost once) and is out of scope for v1.
