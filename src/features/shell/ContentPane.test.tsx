@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ContentPane } from "./ContentPane";
 import type { FunctionGraph } from "../../shared/types";
 
@@ -10,9 +10,16 @@ const sourceArgs = vi.fn();
 const state = vi.hoisted(() => ({ payload: null as unknown }));
 
 vi.mock("../graph/GraphView", () => ({
-  GraphView: (props: { selectedId: string | null }) => {
+  GraphView: (props: {
+    selectedId: string | null;
+    onSelect: (id: string | null) => void;
+  }) => {
     graphProps(props.selectedId);
-    return <div />;
+    return (
+      <button type="button" onClick={() => props.onSelect("GET")}>
+        select-stub
+      </button>
+    );
   },
 }));
 
@@ -85,6 +92,16 @@ describe("ContentPane initial selection", () => {
     state.payload = payload([]);
     render(<ContentPane root="proj" filePath="a.py" />);
     expect(graphProps).toHaveBeenCalledWith(null);
+  });
+
+  it("tells the shell which definition the graph selected", () => {
+    const onSelect = vi.fn();
+    state.payload = payload([]);
+    render(<ContentPane root="proj" filePath="a.py" onSelect={onSelect} />);
+
+    fireEvent.click(screen.getByText("select-stub"));
+
+    expect(onSelect).toHaveBeenCalledWith("GET");
   });
 });
 

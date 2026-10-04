@@ -12,6 +12,9 @@ interface Props {
   root: string | null;
   filePath: string | null;
   initialSelectedId?: string | null;
+  /** Told whenever the graph's selection changes, so the AI panel can follow it
+   *  without owning the canvas. */
+  onSelect?: (id: string | null) => void;
 }
 
 /** A selected Definition and the file it was declared in. */
@@ -24,6 +27,7 @@ export function ContentPane({
   root,
   filePath,
   initialSelectedId = null,
+  onSelect,
 }: Props) {
   const state = useFileContent(root, filePath);
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
@@ -32,7 +36,8 @@ export function ContentPane({
   useEffect(() => {
     setSelectedId(initialSelectedId);
     setCodePaneOpen(true);
-  }, [filePath, initialSelectedId]);
+    onSelect?.(initialSelectedId);
+  }, [filePath, initialSelectedId, onSelect]);
 
   const graph = state.status === "graph" ? state.graph : null;
 
@@ -57,13 +62,17 @@ export function ContentPane({
 
   const source = useSource(root, selected?.path ?? null, graph !== null);
 
-  const handleSelect = useCallback((id: string | null) => {
-    setSelectedId(id);
-    // Picking a definition (single or double click) reopens the code pane.
-    if (id) {
-      setCodePaneOpen(true);
-    }
-  }, []);
+  const handleSelect = useCallback(
+    (id: string | null) => {
+      setSelectedId(id);
+      // Picking a definition (single or double click) reopens the code pane.
+      if (id) {
+        setCodePaneOpen(true);
+      }
+      onSelect?.(id);
+    },
+    [onSelect]
+  );
 
   if (state.status === "idle") {
     return <EmptyState message="Select a file to begin." />;

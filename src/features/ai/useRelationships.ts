@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { analyzeImports, functionGraph, projectGraph } from "../../shared/ipc";
 import type { FunctionGraph } from "../../shared/types";
-import { definitionRows, fileRows, scopeRows, type ConnectionRow } from "./relationships";
+import { definitionRows, fileRows, scopeRows, MAX_SCOPE_ROWS, type ConnectionRow } from "./relationships";
 
 export type RelationshipMode = "scope" | "files" | "definitions";
 
@@ -45,6 +45,8 @@ interface Params {
   files: string[];
   definitions: string[];
   graph: FunctionGraph | null;
+  /** A Definition picked in the graph, whose relationships replace the mode's. */
+  focus: string | null;
 }
 
 /** The counterparts the current target connects to, fetched per mode. */
@@ -56,8 +58,10 @@ export function useRelationships({
   files,
   definitions,
   graph,
-}: Params): { rows: ConnectionRow[]; loading: boolean; error: string | null } {
+  focus,
+}: Params): { rows: ConnectionRow[]; loading: boolean; error: string | null; note: string | null } {
   const [rows, setRows] = useState<ConnectionRow[]>([]);
+  const [note, setNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const filesKey = files.join("|");
@@ -66,37 +70,58 @@ export function useRelationships({
   useEffect(() => {
     let cancelled = false;
     setError(null);
+    setNote(null);
 
     const load = async () => {
       if (!root) {
-        return [];
+        return { rows: [] as ConnectionRow[], note: null };
+      }
+      // What the graph is pointing at wins: it is the most recent thing the user
+      // asked about, and the section is about one Definition then.
+      if (focus && graph && file) {
+        return { rows: definitionRows(graph, file, [focus]), note: null };
       }
       if (mode === "definitions") {
-        return file && graph ? definitionRows(graph, file, definitions) : [];
+        return {
+          rows: file && graph ? definitionRows(graph, file, definitions) : [],
+          note: null,
+        };
       }
       if (mode === "files") {
         if (files.length === 0) {
-          return [];
+          return { rows: [] as ConnectionRow[], note: null };
         }
         const [project, ...analyses] = await Promise.all([
           projectGraph(root, scope),
           ...files.map((selected) => analyzeImports(selected, root).catch(() => null)),
         ]);
-        return files.flatMap((selected, index) => fileRows(selected, project, analyses[index]));
+        return {
+          rows: files.flatMap((selected, index) => fileRows(selected, project, analyses[index])),
+          note: null,
+        };
       }
-      return scopeRows(await projectGraph(root, ""), scope);
+      const listing = scopeRows(await projectGraph(root, ""), scope);
+      return {
+        rows: listing.rows,
+        note:
+          listing.dropped > 0
+            ? `showing ${MAX_SCOPE_ROWS} of ${MAX_SCOPE_ROWS + listing.dropped} — open a folder to narrow it`
+            : null,
+      };
     };
 
     setLoading(true);
     load()
-      .then((next) => {
+      .then((found) => {
         if (!cancelled) {
-          setRows(next);
+          setRows(found.rows);
+          setNote(found.note);
         }
       })
       .catch((reason: unknown) => {
         if (!cancelled) {
           setRows([]);
+          setNote(null);
           setError(String(reason));
         }
       })
@@ -109,7 +134,7 @@ export function useRelationships({
     return () => {
       cancelled = true;
     };
-  }, [root, mode, scope, file, filesKey, definitionsKey, graph]);
+  }, [root, mode, scope, file, filesKey, definitionsKey, graph, focus]);
 
-  return { rows, loading, error };
+  return { rows, loading, error, note };
 }

@@ -54,7 +54,8 @@ const graph: FunctionGraph = {
   externals: [
     {
       path: "core/path.py",
-      nodes: [{ id: "Path", kind: "class", name: "Path", params: [], returns: [] }],
+      // The parser qualifies an external Definition's id itself.
+      nodes: [{ id: "core/path.py::Path", kind: "class", name: "Path", params: [], returns: [] }],
     },
   ],
   crossEdges: [],

@@ -5,14 +5,16 @@ import {
   aiSettings,
   aiSummary,
   functionGraph,
+  projectGraph,
   setAiKey,
   type AiRequest,
   type AiSummary,
 } from "../../shared/ipc";
-import type { FunctionGraph } from "../../shared/types";
+import type { FunctionGraph, ProjectGraph } from "../../shared/types";
 import { AiPanel } from "./AiPanel";
 import { cacheLabel } from "./AiResultView";
 import { rememberConfirmed } from "./egress";
+import { MAX_SCOPE_ROWS } from "./relationships";
 
 vi.mock("../../shared/ipc", () => ({
   aiSettings: vi.fn(),
@@ -46,17 +48,19 @@ const answer = {
 
 function renderPanel(
   results: Record<string, { request: AiRequest; result: AiSummary }> = {},
-  file: string | null = null
+  file: string | null = null,
+  selectedDefinitionId: string | null = null
 ) {
   const onResult = vi.fn();
   const onShow = vi.fn();
   const onHover = vi.fn();
   const onClose = vi.fn();
-  const view = render(
+  const element = (selected: string | null) => (
     <AiPanel
       root="/project"
       scope=""
       file={file}
+      selectedDefinitionId={selected}
       results={results}
       onResult={onResult}
       onShow={onShow}
@@ -64,7 +68,16 @@ function renderPanel(
       onClose={onClose}
     />
   );
-  return { onResult, onShow, onHover, onClose, unmount: view.unmount };
+  const view = render(element(selectedDefinitionId));
+  return {
+    onResult,
+    onShow,
+    onHover,
+    onClose,
+    unmount: view.unmount,
+    /** Pick another node in the graph, as the canvas would report it. */
+    select: (id: string | null) => view.rerender(element(id)),
+  };
 }
 
 const scopeRequest: AiRequest = {
@@ -81,6 +94,13 @@ function taskButton(name: RegExp): HTMLButtonElement {
 
 async function findTask(name: RegExp): Promise<HTMLButtonElement> {
   return (await screen.findByRole("button", { name })) as HTMLButtonElement;
+}
+
+/** Options stay locked until the store has been asked, so a test that clicks one
+ *  waits for it to unlock, the same as a user would. */
+async function unlocked(button: HTMLButtonElement): Promise<HTMLButtonElement> {
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
 }
 
 beforeEach(() => {
@@ -301,6 +321,7 @@ describe("AiPanel remembering what is done", () => {
       "project-overview": { request: scopeRequest, result: answer },
     });
     const task = await findTask(/Project overview/);
+    await unlocked(task);
 
     expect(task.getAttribute("aria-pressed")).toBe("true");
     expect(task.textContent).toContain("✓");
@@ -337,7 +358,7 @@ describe("AiPanel remembering what is done", () => {
     const task = await findTask(/Project overview/);
     expect(task.getAttribute("aria-pressed")).toBe("false");
 
-    fireEvent.click(task);
+    fireEvent.click(await unlocked(task));
     fireEvent.click(await screen.findByRole("button", { name: /Send to OpenRouter/ }));
 
     await waitFor(() => expect(onResult).toHaveBeenCalled());
@@ -363,7 +384,7 @@ describe("AiPanel relationships", () => {
     externals: [
       {
         path: "utils/helpers.py",
-        nodes: [{ id: "push", kind: "function", name: "push", params: [], returns: [] }],
+        nodes: [{ id: "utils/helpers.py::push", kind: "function", name: "push", params: [], returns: [] }],
       },
     ],
     crossEdges: [{ source: "dijkstra", target: "utils/helpers.py::push" }],
@@ -408,7 +429,9 @@ describe("AiPanel relationships", () => {
     rememberConfirmed("/project");
     await pickTheCaller();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Generate" }));
+    fireEvent.click(
+      await unlocked((await screen.findByRole("button", { name: "Generate" })) as HTMLButtonElement)
+    );
 
     await waitFor(() =>
       expect(vi.mocked(aiSummary)).toHaveBeenCalledWith(connectionRequest)
@@ -428,7 +451,9 @@ describe("AiPanel relationships", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
     fireEvent.click(await screen.findByLabelText("fn dijkstra"));
 
-    fireEvent.click(await screen.findByRole("button", { name: "✓ Show" }));
+    fireEvent.click(
+      await unlocked((await screen.findByRole("button", { name: "✓ Show" })) as HTMLButtonElement)
+    );
 
     expect(onShow).toHaveBeenCalledWith(connectionRequest, {
       ...answer,
@@ -446,18 +471,180 @@ describe("AiPanel relationships", () => {
       expect.objectContaining({
         source: "algorithms/pathfinder.py::dijkstra",
         target: "utils/helpers.py::push",
-        counterpart: "utils/helpers.py::push",
+        nodes: ["dijkstra", "utils/helpers.py::push"],
       })
     );
 
     fireEvent.mouseLeave(row);
     expect(onHover).toHaveBeenLastCalledWith(null);
   });
+
+  it("follows the definition selected in the graph, both ways round", async () => {
+    const view = renderPanel({}, "algorithms/pathfinder.py", "dijkstra");
+
+    // The graph's selection is the subject, so only its own relationship shows.
+    expect(await screen.findByText("utils/helpers.py::push")).toBeTruthy();
+    expect(screen.getByText("calls")).toBeTruthy();
+
+    view.select("utils/helpers.py::push");
+
+    expect(await screen.findByText("algorithms/pathfinder.py::dijkstra")).toBeTruthy();
+    expect(screen.getByText("called by")).toBeTruthy();
+  });
+
+  it("ignores a dashed file block, which is not a definition", async () => {
+    renderPanel({}, "algorithms/pathfinder.py", "utils/helpers.py");
+
+    expect(await screen.findByText("nothing connected to this yet")).toBeTruthy();
+  });
 });
 
 describe("AiPanel marks from the store", () => {
   beforeEach(() => {
     vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
+  });
+
+  it("lets a long import label wrap rather than cutting the file name off", async () => {
+    vi.mocked(projectGraph).mockResolvedValueOnce({
+      root: "/project",
+      folders: [],
+      files: [
+        {
+          id: "tests/test_algorithms.py",
+          name: "test_algorithms.py",
+          folderId: "tests",
+          kind: "code",
+          imports: [],
+        },
+        {
+          id: "algorithms/pathfinder.py",
+          name: "pathfinder.py",
+          folderId: "algorithms",
+          kind: "code",
+          imports: [],
+        },
+      ],
+      edges: [{ source: "tests/test_algorithms.py", target: "algorithms/pathfinder.py" }],
+      truncated: false,
+    });
+
+    renderPanel();
+
+    const labels = await screen.findAllByText(
+      "tests/test_algorithms.py -> algorithms/pathfinder.py"
+    );
+
+    // Both ends of one edge, so the receiving file is named as well as the
+    // importing one.
+    expect(labels).toHaveLength(2);
+    expect(screen.getByText("imports")).toBeTruthy();
+    expect(screen.getByText("imported by")).toBeTruthy();
+
+    const label = labels[0];
+    expect(label.className).not.toContain("truncate");
+    expect(label.className).toContain("break-all");
+
+    // A `//` or `/*` comment written among JSX children is not a comment: it is
+    // text, and it renders. Nothing else would notice.
+    const row = label.closest("li") as HTMLElement;
+    expect(row.textContent ?? "").not.toMatch(/\/\/|\/\*/);
+    expect(screen.getByText("imported by").className).not.toBe(
+      screen.getByText("imports").className
+    );
+  });
+
+  it("says when the scope listing was cut short instead of hiding the rest", async () => {
+    const files: ProjectGraph["files"] = Array.from(
+      { length: MAX_SCOPE_ROWS + 5 },
+      (_, index) => ({
+        id: `f${index}.py`,
+        name: `f${index}.py`,
+        folderId: "",
+        kind: "code" as const,
+        imports: [],
+      })
+    );
+    files.push({
+      id: "outside.py",
+      name: "outside.py",
+      folderId: "",
+      kind: "code" as const,
+      imports: [],
+      external: true,
+    });
+    vi.mocked(projectGraph).mockResolvedValueOnce({
+      root: "/project",
+      folders: [],
+      files,
+      edges: files
+        .filter((file) => !file.external)
+        .map((file) => ({ source: file.id, target: "outside.py" })),
+      truncated: false,
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText(
+        new RegExp(`showing ${MAX_SCOPE_ROWS} of ${MAX_SCOPE_ROWS + 5}`)
+      )
+    ).toBeTruthy();
+  });
+
+  it("puts what imports the file above what the file imports", async () => {
+    vi.mocked(projectGraph).mockResolvedValueOnce({
+      root: "/project",
+      folders: [],
+      files: ["tests/test_algorithms.py", "algorithms/pathfinder.py"].map((id) => ({
+        id,
+        name: id.split("/")[1],
+        folderId: id.split("/")[0],
+        kind: "code" as const,
+        imports: [],
+      })),
+      edges: [{ source: "tests/test_algorithms.py", target: "algorithms/pathfinder.py" }],
+      truncated: false,
+    });
+
+    renderPanel();
+
+    const list = (await screen.findByText("imported by")).closest("ul") as HTMLElement;
+    const rows = [...list.querySelectorAll("li")].map((row) => row.textContent ?? "");
+
+    expect(rows[0]).toContain("imported by");
+    expect(rows[1]).toContain("imports");
+  });
+
+  it("lists a scope's own imports, which is all a self-contained project has", async () => {
+    vi.mocked(projectGraph).mockResolvedValueOnce({
+      root: "/project",
+      folders: [],
+      files: [
+        {
+          id: "algorithms/pathfinder.py",
+          name: "pathfinder.py",
+          folderId: "algorithms",
+          kind: "code",
+          imports: [],
+        },
+        { id: "core/path.py", name: "path.py", folderId: "core", kind: "code", imports: [] },
+      ],
+      edges: [{ source: "algorithms/pathfinder.py", target: "core/path.py" }],
+      truncated: false,
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findAllByText("algorithms/pathfinder.py -> core/path.py")
+    ).toHaveLength(2);
+  });
+
+  it("asks for a definition before claiming there is nothing to show", async () => {
+    renderPanel({}, "algorithms/pathfinder.py");
+    fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
+
+    expect(await screen.findByText(/pick a definition/)).toBeTruthy();
   });
 
   it("marks a task the store can answer with no session history at all", async () => {
@@ -489,6 +676,79 @@ describe("AiPanel marks from the store", () => {
     expect(screen.queryByText(/leaves this machine/)).toBeNull();
   });
 
+  it("says it is asking while the probe is in flight, then stops", async () => {
+    const resolvers: ((found: boolean[]) => void)[] = [];
+    vi.mocked(aiCached).mockImplementation(
+      () =>
+        new Promise<boolean[]>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+
+    renderPanel();
+
+    expect(await screen.findByText(/asking the store/)).toBeTruthy();
+
+    resolvers.forEach((resolve) => resolve([]));
+
+    await waitFor(() => expect(screen.queryByText(/asking the store/)).toBeNull());
+  });
+
+  it("locks every option again whenever the question moves, until the store answers", async () => {
+    const resolvers: ((found: boolean[]) => void)[] = [];
+    vi.mocked(aiCached).mockImplementation(
+      () =>
+        new Promise<boolean[]>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+
+    renderPanel();
+    const locked = await findTask(/Explain selection/);
+
+    // Let the first round finish, so nothing but a fresh probe can lock it.
+    await waitFor(() => expect(resolvers.length).toBeGreaterThan(0));
+    resolvers.splice(0).forEach((resolve) => resolve([]));
+    await waitFor(() => expect(locked.disabled).toBe(false));
+
+    fireEvent.change(screen.getByLabelText("Model"), {
+      target: { value: "deepseek-reasoner" },
+    });
+
+    await waitFor(() => expect(locked.disabled).toBe(true));
+    expect((await findTask(/Project overview/)).disabled).toBe(true);
+
+    await waitFor(() => expect(resolvers.length).toBeGreaterThan(0));
+    resolvers.splice(0).forEach((resolve) => resolve([]));
+
+    await waitFor(() => expect(locked.disabled).toBe(false));
+  });
+
+  it("marks an option as soon as its own answer lands, without waiting for the rest", async () => {
+    const resolvers: ((found: boolean[]) => void)[] = [];
+    vi.mocked(aiCached).mockImplementation(
+      (_root, requests) =>
+        new Promise<boolean[]>((resolve) => {
+          // The first option answers at once; the rest stay in flight.
+          if (requests[0].task === "explain-selection") {
+            resolve([true]);
+          } else {
+            resolvers.push(resolve);
+          }
+        })
+    );
+
+    renderPanel();
+
+    const button = await screen.findByRole("button", { name: /Explain selection/ });
+    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
+    expect(screen.getByText(/asking the store/)).toBeTruthy();
+
+    resolvers.forEach((resolve) => resolve([]));
+
+    await waitFor(() => expect(screen.queryByText(/asking the store/)).toBeNull());
+  });
+
   it("marks a relationship row the store can answer", async () => {
     vi.mocked(aiCached).mockImplementation(async (_root, requests) =>
       requests.map((request) => request.task === "relationship")
@@ -503,7 +763,7 @@ describe("AiPanel marks from the store", () => {
       externals: [
         {
           path: "utils/helpers.py",
-          nodes: [{ id: "push", kind: "function", name: "push", params: [], returns: [] }],
+          nodes: [{ id: "utils/helpers.py::push", kind: "function", name: "push", params: [], returns: [] }],
         },
       ],
       crossEdges: [{ source: "dijkstra", target: "utils/helpers.py::push" }],

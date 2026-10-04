@@ -193,6 +193,17 @@ export default function App() {
 
   // What a Task may be pointed at. Which of it is chosen happens in the panel:
   // the Scope, a set of files in it, or Definitions in the open file.
+  /** The definition selected in the file graph, which the AI panel's
+   *  Relationship section follows. */
+  const [graphSelection, setGraphSelection] = useState<string | null>(null);
+  const handleGraphSelection = useCallback((id: string | null) => {
+    // A cleared canvas keeps the last definition: panning away should not empty
+    // the panel.
+    if (id) {
+      setGraphSelection(id);
+    }
+  }, []);
+
   const aiScope = useMemo(() => {
     if (location.kind === "folder") {
       return location.path;
@@ -257,6 +268,7 @@ export default function App() {
           root={root}
           scope={aiScope}
           file={aiFile}
+          selectedDefinitionId={graphSelection}
           results={aiResults}
           onResult={handleAiResult}
           onShow={showAiResult}
@@ -370,6 +382,7 @@ export default function App() {
                 initialSelectedId={
                   location.kind === "code" ? location.select ?? null : null
                 }
+                onSelect={handleGraphSelection}
               />
             )}
           </div>

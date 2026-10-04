@@ -96,7 +96,10 @@ export function DefinitionPicker({ graph, error, selected, onChange }: Props) {
           </div>
           {block.nodes.map((node) =>
             line({
-              id: `${block.path}::${node.id}`,
+              // Already qualified by the parser (`path::local`), so this is the
+              // id the Cross-file Call Edges use. Prefixing the path again makes
+              // an id nothing can resolve.
+              id: node.id,
               label: `${kindWord(node.kind)} ${node.name}`,
               indent: 0,
             })

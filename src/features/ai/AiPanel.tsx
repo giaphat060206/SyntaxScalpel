@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
 import { DefinitionPicker } from "./DefinitionPicker";
 import { FilePicker } from "./FilePicker";
@@ -17,6 +17,9 @@ interface Props {
   root: string | null;
   scope: string;
   file: string | null;
+  /** The Definition selected in the file graph, if any: the Relationship section
+   *  follows it. */
+  selectedDefinitionId?: string | null;
   /** What has already been generated this session, by request key. */
   results: Record<string, { request: AiRequest; result: AiSummary }>;
   onResult: (request: AiRequest, result: AiSummary) => void;
@@ -46,6 +49,7 @@ export function AiPanel({
   root,
   scope,
   file,
+  selectedDefinitionId = null,
   results,
   onResult,
   onShow,
@@ -61,6 +65,10 @@ export function AiPanel({
   const [definitions, setDefinitions] = useState<string[]>([]);
   const [pending, setPending] = useState<{ task: string; request: AiRequest } | null>(null);
 
+  /** A Definition picked in the file graph. The Relationship section follows it,
+   *  and it sticks: panning the canvas clear should not empty the panel. */
+  const [focus, setFocus] = useState<string | null>(null);
+
   const target = useMemo<AiTarget | null>(() => {
     if (!root) {
       return null;
@@ -74,7 +82,29 @@ export function AiPanel({
     return { kind: "scope", scope };
   }, [root, mode, file, scope, files, definitions]);
 
-  const fileGraph = useFunctionGraph(root, mode === "definitions" ? file : null);
+  // Loaded when the panel needs to know a file's Definitions: to list them, to
+  // check what the graph selected, or to keep serving a focus already accepted.
+  const fileGraph = useFunctionGraph(
+    root,
+    mode === "definitions" || focus || selectedDefinitionId ? file : null
+  );
+
+  useEffect(() => {
+    if (!selectedDefinitionId || !fileGraph.graph) {
+      return;
+    }
+    const graph = fileGraph.graph;
+    // Only a Definition: a dashed file block selects nothing to relate.
+    const known =
+      graph.file.nodes.some((node) => node.id === selectedDefinitionId) ||
+      graph.externals.some((file) =>
+        file.nodes.some((node) => node.id === selectedDefinitionId)
+      );
+    if (known) {
+      setFocus(selectedDefinitionId);
+    }
+  }, [selectedDefinitionId, fileGraph.graph]);
+
   const relationships = useRelationships({
     root,
     mode,
@@ -83,6 +113,7 @@ export function AiPanel({
     files,
     definitions,
     graph: fileGraph.graph,
+    focus,
   });
 
   // Everything the panel could offer to show: the Tasks for this target, and one
@@ -113,9 +144,10 @@ export function AiPanel({
       provider: settings.provider,
       model: settings.model,
     }));
-    return [...asks, ...rows];
+    // A pair described from both sides is one question, so it is asked once.
+    return [...new Map([...asks, ...rows].map((request) => [requestSignature(request), request])).values()];
   }, [root, mode, file, files, definitions, target, settings.provider, settings.model, relationships.rows]);
-  const marks = useCachedMarks(root, probes);
+  const { marks, checking } = useCachedMarks(root, probes);
 
   const choice = settings.provider;
   const blocked = !settings.ready
@@ -312,6 +344,11 @@ export function AiPanel({
       <div className="mt-3 text-[10px] uppercase tracking-wider text-dimmed">
         Relationship
       </div>
+      {checking && (
+        <p className="m-0 mt-1 text-[11px] text-dimmed">
+          asking the store what is already generated…
+        </p>
+      )}
       <div className="mt-1">
         {root ? (
           <RelationshipList
@@ -321,6 +358,17 @@ export function AiPanel({
             error={relationships.error}
             results={results}
             marks={marks}
+            busy={checking}
+            note={relationships.note}
+            empty={
+              focus
+                ? "nothing connected to this yet"
+                : mode === "definitions" && definitions.length === 0
+                  ? "pick a definition to see what it connects to"
+                  : mode === "files" && files.length === 0
+                    ? "pick files to see what they connect to"
+                    : "nothing connected to this yet"
+            }
             provider={settings.provider}
             model={settings.model}
             onGenerate={askAbout}
@@ -359,12 +407,14 @@ export function AiPanel({
             <li key={task.id}>
               <button
                 type="button"
-                disabled={(blocked !== undefined && !done) || running !== null}
+                disabled={(blocked !== undefined && !done) || running !== null || checking}
                 aria-pressed={done}
                 title={
-                  done
-                    ? "Already generated: click to show it again"
-                    : (blocked ?? task.hint)
+                  checking
+                    ? "Checking the store for what is already generated"
+                    : done
+                      ? "Already generated: click to show it again"
+                      : (blocked ?? task.hint)
                 }
                 onClick={() => run(task.id)}
                 className={`w-full rounded border px-2 py-1 text-left disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:text-white/85 ${
