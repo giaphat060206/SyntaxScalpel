@@ -34,9 +34,13 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   (one-hop cross-file Call Edges + the Import Analysis), `project.rs` (folders/files/edges/entry points/external
   nodes), `api/` (API Endpoint extraction: OpenAPI/Swagger documents, swagger-jsdoc `@openapi` comments, Next.js
   App Router route conventions).
-- `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`.
+- `src-tauri/src/commands/` — `parse.rs` (commands incl. `analyze_api`), `fs_cmds.rs`, `ai.rs` (settings, key,
+  `ai_summary`).
+- `src-tauri/src/ai/` — `digest.rs` (layered projection of the parse), `cache.rs` (prompt-hash store),
+  `prompts.rs` (Task templates + `PROMPT_VERSION`), `providers/` (one OpenAI-compatible client, `Transport` seam),
+  `settings.rs` (keyring behind `SecretStore`), `summary.rs` (digest → cache → provider).
 - `src/features/` — `explorer/`, `graph/` (incl. `canvas/`, `elk/`), `markdown/`, `code/`, `project/`,
-  `endpoints/`, `shell/`.
+  `endpoints/`, `ai/` (panel, pickers, egress notice), `shell/`.
 - `src/shared/` — `types.ts`, `ipc.ts`, `extensions.ts`, `StateViews.tsx`, `ErrorBoundary.tsx`.
 - Design docs: `docs/superpowers/specs/`, plans: `docs/superpowers/plans/`, session handoff: `docs/HANDOFF.md`.
 
@@ -90,6 +94,20 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   swagger-jsdoc `@openapi` comment blocks, and Next.js `**/api/**/route.{ts,js}` handlers — never by running or
   querying the backend. YAML is parsed with `serde_norway`. Fidelity is `full` for published contracts and
   `heuristic` for framework conventions. See ADR-0004.
+- AI Summaries live in `ai/` and are called **from Rust only**: the Provider Key is read from the OS keyring to
+  build an authorization header, and it never crosses the IPC boundary or reaches the Summary Cache.
+- A **Digest** is projected from the parse (`ai/digest.rs`) and is never an IPC payload — the graph payloads run
+  1.1–3.6× the size of the source they describe, so sending one costs more than pasting the file. Layers are
+  budgeted in characters, and a spent budget sets `truncated` rather than dropping content silently.
+- Summaries are content-addressed at `<root>/.scalpel/ai/<sha256 of the rendered prompt>`, the one writer under
+  `.scalpel/`; ADR-0002 still governs layout. A missing key, a corrupt entry and an unwritable directory each stay
+  non-fatal so an answer still arrives.
+- `PROMPT_VERSION` in `ai/prompts.rs` is inside the hashed input, so bumping it invalidates cached answers when a
+  Task template changes. Which Digest layers a Task pays for is `prompts::default_options`, so the frontend never
+  restates them.
+- Provider wire formats, Digest layers, cache layout and the deferred local option:
+  `docs/adr/0007-ai-summaries-and-caching.md` and
+  `docs/superpowers/specs/2026-10-04-ai-integration-design.md`.
 
 ## Frontend rules
 
@@ -127,6 +145,13 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   shapes stay language-agnostic. See ADR-0005.
 - The frontend renders whatever the backend sends, but `graph/nodes.ts` attaches a child to its parent only when
   that parent is a top-level node; a language module must never emit a `parent` that has no container node.
+- AI lives in `features/ai/`: the top-bar **AI** button opens the panel beside **API**. Task entries carry labels
+  only, because the instructions and the Digest layers they pay for live in Rust. Every Task stays disabled with an
+  `Add an API key` reason until a key is held, while the key field itself stays reachable. The panel offers what to
+  explain as Whole scope, Files or Definitions, and picking an imported Definition sends the id its Cross-file
+  Block carries (`path::local`), which resolves to that file and reuses the answer already cached there.
+- The first Task run for a project stops at an egress notice naming the Provider and is remembered per project
+  root; the result header keeps naming the Provider. Answers render through `MarkdownView` in the side panel.
 
 ## Style and workflow
 

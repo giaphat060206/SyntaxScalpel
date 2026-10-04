@@ -63,12 +63,22 @@ src-tauri/src/
   commands/
     parse.rs             function_graph, parse_python, parse_js_ts, parse_rust, analyze_imports,
                          project_graph, analyze_api
+    ai.rs                ai_settings, set_ai_key, clear_ai_key, ai_summary (thin wrappers over ai/)
     fs_cmds.rs           list_directory, read_markdown, read_file
+  ai/
+    digest.rs            the layered projection of the parse (structure, signatures, bodies, docs)
+    cache.rs             content-addressed summaries under <root>/.scalpel/ai/, keyed by prompt hash
+    prompts.rs           PROMPT_VERSION, one template per AI Task, default_options per Task
+    providers/           one OpenAI-compatible client + the provider table + the Transport seam
+    settings.rs          Provider Key in the OS keyring behind a SecretStore trait
+    summary.rs           the pipeline: digest -> cache -> provider -> cache
 src/
   main.tsx               entry; ErrorBoundary + global error overlay
   shared/                types.ts, ipc.ts, extensions.ts, StateViews.tsx, ErrorBoundary.tsx
   features/
     explorer/FileExplorer.tsx     tree, search box, reveal-current-location, folder click semantics
+    ai/                           AiPanel.tsx, AiResultView.tsx, FilePicker.tsx, DefinitionPicker.tsx,
+                                  useAiSettings.ts, tasks.ts, egress.ts
     graph/
       GraphView.tsx               function graph adapter over useGraphCanvas
       CodeNode.tsx                block rendering
@@ -89,7 +99,7 @@ src/
 docs/superpowers/specs/  design specs; docs/superpowers/plans/  implementation plans
 docs/adr/                ADR-0001 single-file graphs (superseded by 0006), 0002 no layout persistence,
                          0003 ELK owns layout, 0004 endpoints static extraction, 0005 Rust Function Graph
-                         mapping, 0006 Cross-file Call Edges
+                         mapping, 0006 Cross-file Call Edges, 0007 AI summaries and caching
 GLOSSARY.md              domain vocabulary
 ```
 
@@ -127,6 +137,20 @@ GLOSSARY.md              domain vocabulary
 - Tag-grouped list + detail (parameters, request body, responses, fidelity badge); Open handler jumps to the
   handler's file Function Graph. Multi-source merge prefers higher fidelity; warnings surface parse failures.
 
+### AI panel
+- The top-bar **AI** button (visible when a folder is open) opens the panel beside **API**. It holds the provider,
+  model and key entry, then the five AI Tasks; every Task is disabled with an `Add an API key` reason until a key is
+  held, and the key field stays reachable throughout.
+- What to explain is an explicit choice: **Whole scope**, **Files** (a checkbox tree, where a folder picks every
+  file beneath it) or **Definitions** (the open file's own Definitions plus the ones its Cross-file Blocks show).
+  Choosing a selection mode with nothing selected disables every Task rather than quietly widening the question.
+- An imported Definition is sent with the qualified id its Cross-file Block carries (`path::local`), which resolves
+  to the declaring file, so picking it there and picking it in its own file produce the same Digest and the second
+  is a cache hit.
+- The first Task run for a project stops at an egress notice naming the Provider, remembered per project root. The
+  result header carries cached/fresh, provider, model, age, token total and a digest-truncated marker, with
+  Regenerate (which forces) and Dismiss. Answers render through `MarkdownView` in the side panel.
+
 ### Layout (ELK)
 - ELK owns placement and orthogonal routing, in a worker with a fallback; >1500 nodes or any error falls back to
   the grid + smoothstep. No layout persistence; dragging is temporary.
@@ -146,6 +170,11 @@ GLOSSARY.md              domain vocabulary
 - **Endpoints are extracted statically** from declared contracts only; never run/query the backend (ADR-0004).
 - **Rust maps onto the same four kinds** — containers instead of classes, one container level deep (ADR-0005).
 - **No layout persistence** (ADR-0002); **ELK owns layout** (ADR-0003).
+- **AI summaries are opt-in, grounded and cached** (ADR-0007): providers are called from Rust only; the Provider
+  Key never crosses the IPC boundary and never reaches a cache entry; a Digest is projected from the parse and is
+  never an IPC payload (those run 1.1–3.6× the size of the source); summaries live at
+  `<root>/.scalpel/ai/<sha256 of the rendered prompt>`, the one writer under `.scalpel/`; and `PROMPT_VERSION`
+  sits inside the hashed input, so bumping it is what invalidates cached answers.
 - **Rules of Hooks**: every hook runs before any early return.
 - React Flow v12: controlled nodes/edges; don't pass the `fitView` prop when centring programmatically; canvas
   viewport helpers are `fitView`, `zoomToNode`, `focusNode`, `centerOn`; ignore a `selectedId` not on the canvas.
@@ -155,6 +184,9 @@ GLOSSARY.md              domain vocabulary
 ## 7. Current state
 
 - `main` is at the merge of PR #9 (Rust support) plus one follow-up refactor commit that landed directly on it.
+- AI integration lives on branch **`feature/ai-integration`** (off `main`): `src-tauri/src/ai/`, the four AI
+  commands, `src/features/ai/`, and the spec / ADR-0007 / plan under `docs/`. Slices 1–8 of issue **#10** are
+  closed; slice 9 (these docs) is the last.
 - Cross-file Call Edges live on branch **`feature/cross-file-call-edges`** (off `main`): `parser/neighborhood.rs`,
   the `function_graph` command, the `FunctionGraph` payload, dashed external blocks in the Function Graph, and the
   JS/TS `export` fix the feature depended on.
@@ -179,3 +211,13 @@ GLOSSARY.md              domain vocabulary
   trees), which also hides a Cross-file Call Edge; a type declared inside an inline `mod` has no Container of its
   own — its methods group under the module; nested containers are not modelled beyond one level.
 - Languages covered are Python, JS/TS, and Rust; Go, C, C++, Java, and C# are roadmap.
+- AI: **no test performs network I/O**, so the live round-trip is unverified — the provider base URLs
+  (`https://openrouter.ai/api/v1`, `https://api.deepseek.com`), the `Bearer` header, and the
+  `choices[0].message.content` shape should be confirmed with a real key before trusting an answer. Summarising
+  with a local model (Ollama) and streaming are deliberately deferred; both slot in behind the same client and the
+  same `Transport` seam.
+- AI: a Task's cost is bounded by character budgets and reported as `truncated`, but nothing stops a user asking the
+  same expensive question about a huge scope repeatedly with Regenerate. Per-project spend accounting is not built.
+- AI: the Task list exists twice in intent — ids and labels in `src/features/ai/tasks.ts`, instructions and Digest
+  layers in `ai/prompts.rs`. Adding a Task means touching both, and an id present only in TypeScript fails loudly as
+  `unknown AI task`.
