@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::digest::Options;
+
 /// Bumping this invalidates every cached summary whose prompt it shaped. It is
 /// the only invalidation duty the design puts on a human.
 pub const PROMPT_VERSION: u32 = 1;
@@ -58,6 +60,19 @@ impl Task {
             Task::DocDrift => DOC_DRIFT,
         };
         body
+    }
+}
+
+/// Which Digest layers a Task is worth paying for. It lives here rather than in
+/// the frontend so the layers a Task sends cannot drift from the Task itself —
+/// a drift would silently change the cache key and re-buy every answer.
+pub fn default_options(task: Task) -> Options {
+    match task {
+        Task::ExplainSelection => Options { signatures: true, bodies: true, docs: false },
+        Task::ExplainArchitecture => Options { signatures: true, bodies: false, docs: true },
+        Task::ProjectOverview => Options { signatures: false, bodies: false, docs: true },
+        Task::Impact => Options { signatures: true, bodies: false, docs: false },
+        Task::DocDrift => Options { signatures: true, bodies: false, docs: true },
     }
 }
 
@@ -129,6 +144,33 @@ mod tests {
     #[test]
     fn rejects_an_empty_digest() {
         assert!(render(Task::Impact, "   \n ").is_err());
+    }
+
+    #[test]
+    fn every_task_asks_for_the_layers_it_needs() {
+        let selection = default_options(Task::ExplainSelection);
+        assert!(selection.bodies);
+        assert!(!selection.docs);
+
+        let overview = default_options(Task::ProjectOverview);
+        assert!(!overview.signatures);
+        assert!(overview.docs);
+        assert!(!overview.bodies);
+
+        let architecture = default_options(Task::ExplainArchitecture);
+        assert!(architecture.signatures);
+        assert!(architecture.docs);
+        assert!(!architecture.bodies);
+
+        for task in Task::ALL {
+            let options = default_options(task);
+            assert!(
+                options.signatures || options.bodies || options.docs,
+                "{} asks for nothing",
+                task.id()
+            );
+            assert!(!options.bodies || options.signatures, "{}", task.id());
+        }
     }
 
     #[test]

@@ -55,3 +55,58 @@ export function projectGraph(root: string, scope: string): Promise<ProjectGraph>
 export function analyzeApi(root: string): Promise<ApiInventory> {
   return invoke<ApiInventory>("analyze_api", { root });
 }
+
+export interface AiSettings {
+  provider: string;
+  hasKey: boolean;
+}
+
+export interface AiSummary {
+  text: string;
+  task: string;
+  provider: string;
+  model: string;
+  cached: boolean;
+  truncated: boolean;
+  createdAtMs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export type AiTarget =
+  | { kind: "scope"; scope: string }
+  | { kind: "files"; scope: string; files: string[] }
+  | { kind: "definitions"; file: string; ids: string[] };
+
+export interface AiRequest {
+  root: string;
+  target: AiTarget;
+  task: string;
+  provider: string;
+  model: string;
+  force?: boolean;
+}
+
+/** Whether a Provider Key is held for this provider. The key itself never
+ *  crosses back: only Rust reads it, and only to build an authorization header. */
+export function aiSettings(provider: string): Promise<AiSettings> {
+  return invoke<AiSettings>("ai_settings", { provider });
+}
+
+export function setAiKey(provider: string, key: string): Promise<AiSettings> {
+  return invoke<AiSettings>("set_ai_key", { provider, key });
+}
+
+export function clearAiKey(provider: string): Promise<AiSettings> {
+  return invoke<AiSettings>("clear_ai_key", { provider });
+}
+
+/** Which Digest layers a task pays for is decided in Rust, so `options` is left
+ *  null here rather than restated in TypeScript. */
+export function aiSummary(request: AiRequest): Promise<AiSummary> {
+  return invoke<AiSummary>("ai_summary", {
+    options: null,
+    force: false,
+    ...request,
+  });
+}

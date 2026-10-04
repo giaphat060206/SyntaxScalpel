@@ -22,7 +22,7 @@ pub fn clear_ai_key(provider: String) -> Result<AiSettings, String> {
 pub async fn ai_summary(
     root: String,
     target: Target,
-    options: Options,
+    options: Option<Options>,
     task: String,
     provider: String,
     model: String,
@@ -32,7 +32,7 @@ pub async fn ai_summary(
     summary::summarize(
         &root,
         &target,
-        &options,
+        options.as_ref(),
         &task,
         &provider,
         &model,

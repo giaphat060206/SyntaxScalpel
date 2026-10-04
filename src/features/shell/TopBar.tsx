@@ -8,6 +8,7 @@ interface Props {
   onOpenRecent: (path: string) => void;
   onCloseFolder: () => void;
   onOpenEndpoints: () => void;
+  onOpenAi: () => void;
 }
 
 function baseName(path: string): string {
@@ -23,6 +24,7 @@ export function TopBar({
   onOpenRecent,
   onCloseFolder,
   onOpenEndpoints,
+  onOpenAi,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [recentsOpen, setRecentsOpen] = useState(false);
@@ -49,6 +51,16 @@ export function TopBar({
           className="rounded px-2 py-0.5 text-white/85 hover:bg-white/10"
         >
           API
+        </button>
+      )}
+
+      {hasFolder && (
+        <button
+          type="button"
+          onClick={onOpenAi}
+          className="rounded px-2 py-0.5 text-white/85 hover:bg-white/10"
+        >
+          AI
         </button>
       )}
 

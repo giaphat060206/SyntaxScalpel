@@ -36,7 +36,7 @@ fn resolved_model<'a>(provider: &providers::ProviderSpec, model: &'a str) -> &'a
 pub async fn summarize(
     root: &str,
     target: &Target,
-    options: &Options,
+    options: Option<&Options>,
     task_id: &str,
     provider_id: &str,
     model: &str,
@@ -48,8 +48,9 @@ pub async fn summarize(
     let provider = providers::spec(provider_id)
         .ok_or_else(|| format!("unknown provider: {provider_id}"))?;
     let model = resolved_model(provider, model);
+    let options = options.cloned().unwrap_or_else(|| prompts::default_options(task));
 
-    let digest = digest::build(root, target, options)?;
+    let digest = digest::build(root, target, &options)?;
     let prompt = prompts::render(task, &digest.text)?;
     let key = SummaryCache::key_for(&prompts::cache_input(provider.id, model, &prompt));
     let store = SummaryCache::new(root);
@@ -203,7 +204,7 @@ mod tests {
         tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &target(),
-            &options(),
+            Some(&options()),
             "explain-selection",
             "openrouter",
             "",
@@ -289,7 +290,7 @@ mod tests {
         let other = tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &target(),
-            &options(),
+            Some(&options()),
             "explain-selection",
             "openrouter",
             "some/other-model",
@@ -314,7 +315,7 @@ mod tests {
         let impact = tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &target(),
-            &options(),
+            Some(&options()),
             "impact",
             "openrouter",
             "",
@@ -363,7 +364,7 @@ mod tests {
         let task = tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &target(),
-            &options(),
+            Some(&options()),
             "explain-everything",
             "openrouter",
             "",
@@ -375,7 +376,7 @@ mod tests {
         let provider = tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &target(),
-            &options(),
+            Some(&options()),
             "impact",
             "anthropic",
             "",
@@ -408,6 +409,46 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_options_uses_what_the_task_needs() {
+        let root = fixture("default-options");
+        write(&root, "a.py", "def one(x):\n    return x\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+
+        let overview = tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            &Target::Scope { scope: String::new() },
+            None,
+            "project-overview",
+            "openrouter",
+            "",
+            false,
+            &store,
+            &transport,
+        ))
+        .unwrap();
+        let sent = transport.calls.lock().unwrap().last().unwrap().clone();
+        assert!(overview.task == "project-overview");
+        assert!(!sent.contains("one(x)"), "signatures should be off: {sent}");
+
+        let selection = tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            &Target::Definitions { file: "a.py".into(), ids: vec!["one".into()] },
+            None,
+            "explain-selection",
+            "openrouter",
+            "",
+            false,
+            &store,
+            &transport,
+        ))
+        .unwrap();
+        let sent = transport.calls.lock().unwrap().last().unwrap().clone();
+        assert!(selection.task == "explain-selection");
+        assert!(sent.contains("return x"), "bodies should be on: {sent}");
+    }
+
+    #[test]
     fn reports_that_the_digest_was_truncated() {
         let root = fixture("truncated");
         let mut source = String::new();
@@ -421,7 +462,7 @@ mod tests {
         let summary = tauri::async_runtime::block_on(summarize(
             root.to_str().unwrap(),
             &Target::Scope { scope: String::new() },
-            &Options { signatures: false, bodies: false, docs: false },
+            None,
             "project-overview",
             "openrouter",
             "",

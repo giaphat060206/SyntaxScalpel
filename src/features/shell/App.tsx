@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { FileExplorer } from "../explorer/FileExplorer";
@@ -11,6 +11,9 @@ import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
+import { AiPanel } from "../ai/AiPanel";
+import { AiResultView } from "../ai/AiResultView";
+import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
 
 type Location =
   | { kind: "empty" }
@@ -54,6 +57,9 @@ export default function App() {
     path: string;
     nonce: number;
   } | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiResult, setAiResult] = useState<AiSummary | null>(null);
+  const [aiRequest, setAiRequest] = useState<AiRequest | null>(null);
   const { recents, remember, clear } = useRecents();
 
   const explorerPanel = usePanelRef();
@@ -173,9 +179,42 @@ export default function App() {
     [location, handleSelectFolder]
   );
 
-  const showDocs = Boolean(codeFile && docFile && !docsCollapsed);
-  const mainFile = showDocs ? codeFile : (codeFile ?? docFile);
+  const showDocs = Boolean((codeFile && docFile) || aiResult) && !docsCollapsed;
+  const mainFile = showDocs && !aiResult ? codeFile : (codeFile ?? docFile);
   const isPathLocation = location.kind === "folder" || location.kind === "code";
+
+  // What a Task is offered to explain. Until the pickers land this is the whole
+  // current Scope, or the file being read.
+  const aiTarget = useMemo<AiTarget | null>(() => {
+    if (!root) {
+      return null;
+    }
+    if (location.kind === "code") {
+      const slash = location.path.lastIndexOf("/");
+      return {
+        kind: "files",
+        scope: slash > 0 ? location.path.slice(0, slash) : "",
+        files: [location.path],
+      };
+    }
+    if (location.kind === "folder") {
+      return { kind: "scope", scope: location.path };
+    }
+    return null;
+  }, [root, location]);
+
+  const handleAiResult = useCallback((request: AiRequest, result: AiSummary) => {
+    setAiRequest(request);
+    setAiResult(result);
+    setDocsCollapsed(false);
+  }, []);
+
+  const regenerateAi = useCallback(async () => {
+    if (!aiRequest) {
+      return;
+    }
+    setAiResult(await aiSummary({ ...aiRequest, force: true }));
+  }, [aiRequest]);
 
   return (
     <SearchProvider>
@@ -188,6 +227,7 @@ export default function App() {
           onOpenRecent={handleOpenFolder}
           onCloseFolder={handleCloseFolder}
           onOpenEndpoints={handleOpenEndpoints}
+          onOpenAi={() => setAiOpen((value) => !value)}
         />
         <div className="min-h-0 flex-1">
       {!root ? (
@@ -199,7 +239,15 @@ export default function App() {
           onClearRecents={clear}
         />
       ) : (
-      <div className="h-full bg-bg">
+      <div className="relative h-full bg-bg">
+      {aiOpen && (
+        <AiPanel
+          root={root}
+          target={aiTarget}
+          onResult={handleAiResult}
+          onClose={() => setAiOpen(false)}
+        />
+      )}
       <Group orientation="horizontal" onLayoutChanged={handleLayoutChanged}>
         {/* One collapsible panel rather than a swap, so collapsing and showing
             again returns to the width the user dragged it to. */}
@@ -309,7 +357,7 @@ export default function App() {
               />
             )}
           </div>
-          {codeFile && docFile && docsCollapsed && (
+          {((codeFile && docFile) || aiResult) && docsCollapsed && (
             <button
               type="button"
               onClick={() => setDocsCollapsed(false)}
@@ -327,7 +375,7 @@ export default function App() {
               <div className="flex h-full flex-col">
                 <div className="flex items-center justify-between border-b border-white/10 px-2 py-1">
                   <span className="text-[10px] uppercase tracking-wider text-dimmed">
-                    Docs
+                    {aiResult ? "AI" : "Docs"}
                   </span>
                   <button
                     type="button"
@@ -339,7 +387,15 @@ export default function App() {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1">
-                  <ContentPane root={root} filePath={docFile} />
+                  {aiResult ? (
+                    <AiResultView
+                      result={aiResult}
+                      onRegenerate={regenerateAi}
+                      onClose={() => setAiResult(null)}
+                    />
+                  ) : (
+                    <ContentPane root={root} filePath={docFile} />
+                  )}
                 </div>
               </div>
             </Panel>
