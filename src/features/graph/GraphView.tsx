@@ -193,6 +193,13 @@ function GraphViewInner({ graph, selectedId, onSelect }: Props) {
         }}
         onPaneContextMenu={(event) => canvas.openMenu(event)}
         onNodeContextMenu={(event, node) => canvas.openMenu(event, node.id)}
+        // React Flow passes no event for its own programmatic moves, so a real
+        // one means the user took over the viewport.
+        onMoveStart={(event) => {
+          if (event) {
+            canvas.noteManualMove();
+          }
+        }}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}

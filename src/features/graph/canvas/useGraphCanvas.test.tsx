@@ -4,6 +4,25 @@ import type { Node } from "@xyflow/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useGraphCanvas, type DomainEdge } from "./useGraphCanvas";
 
+/** The viewport calls, so a test can see whether the canvas reframed itself. */
+const viewport = vi.hoisted(() => ({
+  fitView: vi.fn(),
+  fitBounds: vi.fn(),
+  setCenter: vi.fn(),
+  getZoom: vi.fn(() => 1),
+  getInternalNode: vi.fn(() => ({
+    internals: {
+      positionAbsolute: { x: 0, y: 0 },
+      userNode: { measured: { width: 10, height: 10 } },
+    },
+  })),
+}));
+
+vi.mock("@xyflow/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@xyflow/react")>();
+  return { ...actual, useReactFlow: () => viewport };
+});
+
 const edge: DomainEdge = { id: "a->b", source: "a", target: "b" };
 
 function node(id: string): Node {
@@ -197,5 +216,83 @@ describe("useGraphCanvas", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     expect(result.current.nodes.find((n) => n.id === "a")?.position).toEqual({ x: 1, y: 1 });
+  });
+
+  it("does not reframe a view the user has moved when a layout lands later", async () => {
+    const layout = async () => ({ positions: { a: { x: 0, y: 0 } }, sizes: {}, sections: {} });
+    const { result, rerender } = renderHook(
+      ({ hidden }: { hidden: boolean }) =>
+        useGraphCanvas({
+          nodes: [node("a"), { ...node("b"), hidden }],
+          edges: [],
+          selection: null,
+          layoutKey: "file",
+          fit: { token: "file", target: "a" },
+          edgeVisibility: () => "active",
+          layout,
+        }),
+      { wrapper, initialProps: { hidden: false } }
+    );
+
+    // The first fit happens once the layout has answered.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(viewport.setCenter).toHaveBeenCalled();
+    viewport.setCenter.mockClear();
+
+    act(() => result.current.noteManualMove());
+
+    // A change the layout watches — a re-measure does this — so a second layout
+    // lands after the user has already taken over the viewport.
+    rerender({ hidden: true });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+
+    expect(viewport.setCenter).not.toHaveBeenCalled();
+  });
+
+  it("frames a graph with no entry target once, after the layout has placed it", async () => {
+    // The file graph fits with no target. Framing the seed grid before ELK places
+    // the blocks leaves the graph off to one side of the viewport; waiting the full
+    // timeout instead is what made it sit still then suddenly fit everything.
+    const order: string[] = [];
+    viewport.fitView.mockImplementation(() => {
+      order.push("fitView");
+    });
+    const layout = async () => {
+      order.push("layout");
+      return { positions: {}, sizes: {}, sections: {} };
+    };
+    const { rerender } = renderHook(
+      ({ hidden }: { hidden: boolean }) =>
+        useGraphCanvas({
+          nodes: [node("a"), { ...node("b"), hidden }],
+          edges: [],
+          selection: null,
+          layoutKey: "file",
+          fit: { token: "file" },
+          edgeVisibility: () => "active",
+          layout,
+        }),
+      { wrapper, initialProps: { hidden: false } }
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(viewport.fitView).toHaveBeenCalledTimes(1);
+    // The framing came after the blocks were placed, not before.
+    expect(order).toEqual(["layout", "fitView"]);
+
+    // A re-measure the layout watches, so another pass lands for the same token.
+    rerender({ hidden: true });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+
+    expect(viewport.fitView).toHaveBeenCalledTimes(1);
   });
 });

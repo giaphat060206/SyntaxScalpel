@@ -34,8 +34,12 @@ export interface GraphCanvasConfig {
   layout?: LayoutFn;
 }
 
-export interface GraphCanvas {
-  nodes: Node[];
+/** How often the first framing retries while it waits for a target to be
+ *  measurable, and how many times before it gives up and fits everything. */
+const FIT_POLL_MS = 150;
+const MAX_FIT_ATTEMPTS = 12;
+
+export interface GraphCanvas {  nodes: Node[];
   edges: Edge[];
   onNodesChange: OnNodesChange<Node>;
   showLines: boolean;
@@ -49,6 +53,8 @@ export interface GraphCanvas {
   centerOn: (id: string, zoom: number, duration: number) => boolean;
   focusNode: (id: string) => boolean;
   zoomToNode: (id: string) => boolean;
+  /** The user moved the viewport, so a late layout must not reframe it. */
+  noteManualMove: () => void;
   lastRun: number;
 }
 
@@ -256,6 +262,14 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     [centerOn, getZoom]
   );
 
+  /** The user panned or zoomed the canvas themselves. A layout that lands later —
+   *  a re-measure changes node heights, which invalidates the positions — may
+   *  refine where the blocks sit, but it must not reframe the view out from under
+   *  them. */
+  const noteManualMove = useCallback(() => {
+    userMoved.current = true;
+  }, []);
+
   const zoomToNode = useCallback(
     (id: string) => {
       const internals = getInternalNode(id);
@@ -282,33 +296,47 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
   useEffect(() => {
     userMoved.current = false;
   }, [fit.token]);
-
   const fitKey = `${fit.token}|${layoutVersion}`;
   useEffect(() => {
-    if (lastFit.current === fitKey || nodes.length === 0) {
+    if (nodes.length === 0 || userMoved.current) {
       return;
     }
-    // A layout that finishes after the user moved the viewport may refine
-    // positions, but re-centring here would yank them back to the entry file.
-    if (fittedToken.current === fit.token && userMoved.current) {
+
+    // No target: frame the whole graph, once, and only after the layout has placed
+    // the blocks. Fitting the seeded grid frames bounds that ELK is about to
+    // replace, which leaves the graph sitting off to one side of the viewport.
+    if (!fit.target) {
+      if (fittedToken.current === fit.token || layoutVersion === 0) {
+        return;
+      }
+      lastFit.current = fitKey;
+      fittedToken.current = fit.token;
+      fitView({ padding: fit.padding ?? 0.2, duration: 0 });
+      return;
+    }
+
+    // A target has to be measurable before it can be centred, so this case is worth
+    // retrying — and a framing done before the layout landed has to be redone,
+    // because it centred where the block used to be.
+    if (lastFit.current === fitKey) {
       return;
     }
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
-      const focused = fit.target && attempts >= 2 ? centerOnRaw(fit.target, 1.1, 0) : false;
-      if (focused || attempts >= 40) {
-        lastFit.current = fitKey;
-        fittedToken.current = fit.token;
-        userMoved.current = false;
-        if (!focused) {
-          fitView({ padding: fit.padding ?? 0.2, duration: 0 });
-        }
-        window.clearInterval(timer);
+      const focused = centerOnRaw(fit.target as string, 1.1, 0);
+      if (!focused && attempts < MAX_FIT_ATTEMPTS) {
+        return;
       }
-    }, 150);
+      lastFit.current = fitKey;
+      fittedToken.current = fit.token;
+      if (!focused) {
+        fitView({ padding: fit.padding ?? 0.2, duration: 0 });
+      }
+      window.clearInterval(timer);
+    }, FIT_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [fitKey, fit.target, fit.padding, sizeSignature, nodes.length, centerOnRaw, fitView]);
+  }, [fitKey, fit.target, fit.padding, sizeSignature, nodes.length, layoutVersion, centerOnRaw, fitView]);
 
   const closeMenu = useCallback(() => {
     setMenu(null);
@@ -361,6 +389,7 @@ export function useGraphCanvas(config: GraphCanvasConfig): GraphCanvas {
     centerOn,
     focusNode,
     zoomToNode,
+    noteManualMove,
     lastRun: layoutRun,
   };
 }
