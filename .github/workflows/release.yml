@@ -1,0 +1,125 @@
+name: Release
+
+# Tag a commit to build and publish the app:
+#
+#   git tag v0.1.0
+#   git push origin v0.1.0
+#
+# This runs the test suites first, then builds installers on Windows, macOS (both
+# architectures) and Linux, and opens a **draft** release with them attached. Nothing
+# is public until you press Publish on the release page.
+#
+# Before tagging, bump the version in three places: package.json,
+# src-tauri/tauri.conf.json and src-tauri/Cargo.toml.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  # Tauri needs these to compile on Linux, for the tests as well as the bundles.
+  LINUX_DEPS: >-
+    libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev
+    libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+jobs:
+  verify:
+    name: Tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  release:
+    name: Bundles (${{ matrix.platform }} ${{ matrix.args }})
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: SyntaxScalpel ${{ github.ref_name }}
+          releaseBody: |
+            Local-first codebase comprehension: a folder/file graph, a function graph
+            per file, and opt-in AI summaries grounded in a digest of the parsed code.
+
+            **Downloads** — pick the file for your platform:
+
+            | Platform | File |
+            |---|---|
+            | Windows | `*_x64-setup.exe` (NSIS) or `*_x64_en-US.msi` |
+            | macOS (Apple silicon) | `*_aarch64.dmg` |
+            | macOS (Intel) | `*_x64.dmg` |
+            | Linux | `*.AppImage` or `*.deb` |
+
+            **These builds are not code-signed.** Windows SmartScreen and macOS Gatekeeper
+            will warn on first launch; the macOS builds additionally need
+            `xattr -cr /Applications/SyntaxScalpel.app` until they are notarised.
+
+            Requirements: Windows 10/11 with WebView2, macOS 10.15+, or a Linux desktop with
+            WebKitGTK 4.1. Your provider key stays in the OS keyring, and nothing leaves your
+            machine unless you ask for an AI summary.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

@@ -17,6 +17,7 @@
 [![commit activity](https://img.shields.io/github/commit-activity/m/giaphat060206/SyntaxScalper)](https://github.com/giaphat060206/SyntaxScalper/commits)
 [![stars](https://img.shields.io/github/stars/giaphat060206/SyntaxScalper)](https://github.com/giaphat060206/SyntaxScalper/stargazers)
 [![issues](https://img.shields.io/github/issues/giaphat060206/SyntaxScalper)](https://github.com/giaphat060206/SyntaxScalper/issues)
+[![license](https://img.shields.io/github/license/giaphat060206/SyntaxScalper)](LICENSE)
 
 A local-first desktop app that dissects a source tree into interactive node graphs and renders Markdown
 documentation beside them. Built for fast onboarding onto undocumented codebases: you open a folder and get a graph
@@ -35,6 +36,7 @@ a provider you choose, and keep the key in the OS keyring.
 - [Requirements](#requirements)
 - [Development](#development)
 - [Tests](#tests)
+- [Releasing](#releasing)
 - [Privacy](#privacy)
 - [Known limits](#known-limits)
 - [Roadmap](#roadmap)
@@ -234,6 +236,29 @@ transport (no test performs network I/O), and the frontend's behaviour through T
 invisible to a unit test — CSS-generated content, a viewport that is only reframed in a real browser — the test
 asserts the thing that would regress it, with a comment saying why.
 
+## Releasing
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml), which runs on any `v*` tag: it
+runs both test suites first, then builds installers on Windows, macOS (Apple silicon and Intel) and Linux, and opens a
+**draft** GitHub Release with them attached. Nothing becomes public until you press **Publish**.
+
+1. Bump the version in three places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`.
+2. Commit that, then tag and push:
+
+   ```powershell
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. Watch the **Actions** tab. When it finishes, review the draft release and publish it.
+
+To build installers on your own machine instead, `npm run tauri build` writes them to
+`src-tauri/target/release/bundle/` — an NSIS `.exe` and an `.msi` on Windows.
+
+**The builds are unsigned.** Windows SmartScreen and macOS Gatekeeper will warn on first launch, and the macOS builds
+need `xattr -cr /Applications/SyntaxScalpel.app` until they are notarised. Signed builds would need a Windows code
+signing certificate and an Apple Developer ID, and the workflow has neither.
+
 ## Privacy
 
 - Code is parsed and cached locally. **Nothing is uploaded** unless you ask for an AI summary.
@@ -254,15 +279,14 @@ asserts the thing that would regress it, with a comment saying why.
   declaring file — so one import line can be named differently in the two views.
 - Summaries are cached per project. The same code in two checkouts is summarised twice.
 - HTML/CSS are out of scope for the graph model.
-- The bundle still carries scaffold identifiers — `productName: scalpel-scaffold` and `authors: ["you"]` in
-  `src-tauri/tauri.conf.json` and `Cargo.toml` — so the window titles itself `scalpel-scaffold`. The product name is
-  SyntaxScalpel; renaming means touching both manifests together.
+- The Cargo crate is still named `scalpel-scaffold` (internal only — the app, the window and the installers are all
+  `SyntaxScalpel`).
 
 ## Roadmap
 
 Go, C, C++, Java, and C# support are planned. Summarising with a local model (no key, nothing sent anywhere) and
-streaming answers are planned. There is no CI workflow yet, and the app has no LICENSE file — both are worth adding
-before this is shared more widely.
+streaming answers are planned. Code signing and notarisation are the main gap in the release setup; auto-update
+(Tauri's updater, which needs its own signing key) is not configured.
 
 ## Documentation
 
