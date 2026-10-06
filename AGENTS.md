@@ -127,7 +127,7 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 
 ## Frontend rules
 
-- React 18 + TypeScript strict (`noUnusedLocals`). No comments unless asked.
+- React 19 + TypeScript strict (`noUnusedLocals`). No comments unless asked.
 - **Rules of Hooks**: every hook runs before any early return — violating this has blanked the whole app.
 - React Flow v12 (`@xyflow/react`): `nodes`/`edges` are controlled, so use `useNodesState`/`useEdgesState` and
   wire `onNodesChange`/`onEdgesChange`; do **not** pass the `fitView` prop when centring programmatically

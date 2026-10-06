@@ -26,7 +26,7 @@ Repo folder is `SyntaxScalper` (older name); the product name is **SyntaxScalpel
 
 ## 2. Tech stack
 
-- **Shell/runtime:** Tauri v2 (WebView2), React 18 + TypeScript (strict, `noUnusedLocals`), Vite.
+- **Shell/runtime:** Tauri v2 (WebView2), React 19 + TypeScript (strict, `noUnusedLocals`), Vite.
 - **Backend:** Rust; `tree-sitter` 0.25 (+ python/typescript/javascript/rust grammars); `serde`/`serde_json`;
   **`serde_norway`** (YAML, for OpenAPI/YAML specs and `@openapi` blocks).
 - **Frontend libs:** `@xyflow/react` (React Flow v12), `react-resizable-panels` v4, `react-markdown` +
