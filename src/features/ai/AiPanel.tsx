@@ -20,6 +20,8 @@ interface Props {
   /** The Definition selected in the file graph, if any: the Relationship section
    *  follows it. */
   selectedDefinitionId?: string | null;
+  /** The block selected in the folder graph: a file, or a folder inside the scope. */
+  selectedProjectId?: string | null;
   /** What has already been generated this session, by request key. */
   results: Record<string, { request: AiRequest; result: AiSummary }>;
   onResult: (request: AiRequest, result: AiSummary) => void;
@@ -50,6 +52,7 @@ export function AiPanel({
   scope,
   file,
   selectedDefinitionId = null,
+  selectedProjectId = null,
   results,
   onResult,
   onShow,
@@ -89,6 +92,18 @@ export function AiPanel({
     mode === "definitions" || focus || selectedDefinitionId ? file : null
   );
 
+  /** A block picked in the folder graph. Only one focus is live — the newest —
+   *  so the two canvases cannot both claim the section. */
+  const [projectFocus, setProjectFocus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      return;
+    }
+    setProjectFocus(selectedProjectId);
+    setFocus(null);
+  }, [selectedProjectId]);
+
   useEffect(() => {
     if (!selectedDefinitionId || !fileGraph.graph) {
       return;
@@ -102,6 +117,7 @@ export function AiPanel({
       );
     if (known) {
       setFocus(selectedDefinitionId);
+      setProjectFocus(null);
     }
   }, [selectedDefinitionId, fileGraph.graph]);
 
@@ -114,6 +130,7 @@ export function AiPanel({
     definitions,
     graph: fileGraph.graph,
     focus,
+    projectFocus,
   });
 
   // Everything the panel could offer to show: the Tasks for this target, and one
@@ -361,7 +378,7 @@ export function AiPanel({
             busy={checking}
             note={relationships.note}
             empty={
-              focus
+              focus || projectFocus
                 ? "nothing connected to this yet"
                 : mode === "definitions" && definitions.length === 0
                   ? "pick a definition to see what it connects to"

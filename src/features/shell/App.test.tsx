@@ -12,6 +12,7 @@ import App from "./App";
 const mocks = vi.hoisted(() => ({
   openDialog: vi.fn(),
   contentProps: vi.fn(),
+  projectProps: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.openDialog }));
@@ -24,7 +25,10 @@ vi.mock("react-resizable-panels", () => ({
 }));
 
 vi.mock("../project/ProjectGraph", () => ({
-  ProjectGraph: () => <div />,
+  ProjectGraph: (props: { onSelect?: (id: string | null) => void }) => {
+    mocks.projectProps(props);
+    return <div />;
+  },
 }));
 
 vi.mock("../explorer/FileExplorer", () => ({
@@ -36,6 +40,7 @@ vi.mock("./ContentPane", () => ({
     root: string | null;
     filePath: string | null;
     initialSelectedId?: string | null;
+    onSelect?: (id: string | null) => void;
   }) => {
     mocks.contentProps(props);
     return <div />;
@@ -62,6 +67,22 @@ afterEach(() => {
   cleanup();
   mocks.openDialog.mockReset();
   mocks.contentProps.mockReset();
+  mocks.projectProps.mockReset();
+});
+
+describe("App wiring for the graph selections", () => {
+  it("gives both canvases a way to report what is selected", async () => {
+    mocks.openDialog.mockResolvedValue("proj");
+    render(<App />);
+
+    fireEvent.click(screen.getByText("Open Folder…"));
+
+    // The folder graph is the home view, so it renders as soon as a root exists.
+    await waitFor(() => expect(mocks.projectProps).toHaveBeenCalled());
+    const projectCalls = mocks.projectProps.mock.calls;
+    const project = projectCalls[projectCalls.length - 1]?.[0];
+    expect(project.onSelect).toEqual(expect.any(Function));
+  });
 });
 
 describe("App open-handler navigation", () => {
@@ -83,6 +104,7 @@ describe("App open-handler navigation", () => {
     expect(last).toMatchObject({
       filePath: "app/api/pets/route.ts",
       initialSelectedId: "GET",
+      onSelect: expect.any(Function),
     });
   });
 });

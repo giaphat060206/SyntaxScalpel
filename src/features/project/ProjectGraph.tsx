@@ -40,21 +40,41 @@ interface Props {
   scope: string;
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
   focus?: { id: string; nonce: number };
+  /** Told which block is selected, so panels outside the canvas can follow it. */
+  onSelect?: (id: string | null) => void;
 }
 
-export function ProjectGraph({ root, scope, onNavigate, focus }: Props) {
+export function ProjectGraph({ root, scope, onNavigate, focus, onSelect }: Props) {
   return (
     <ReactFlowProvider>
-      <ProjectGraphInner root={root} scope={scope} onNavigate={onNavigate} focus={focus} />
+      <ProjectGraphInner
+        root={root}
+        scope={scope}
+        onNavigate={onNavigate}
+        focus={focus}
+        onSelect={onSelect}
+      />
     </ReactFlowProvider>
   );
 }
 
-function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
+function ProjectGraphInner({ root, scope, onNavigate, focus, onSelect }: Props) {
   const [data, setData] = useState<ProjectGraphData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  /** Selection is local to the canvas; a cleared one is not reported, so panning
+   *  away does not empty a panel that is following it. */
+  const select = useCallback(
+    (id: string | null) => {
+      setSelectedId(id);
+      if (id) {
+        onSelect?.(id);
+      }
+    },
+    [onSelect]
+  );
   const [startsOpen, setStartsOpen] = useState(true);
 
   useEffect(() => {
@@ -167,17 +187,17 @@ function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
     if (!data || !focus) {
       return;
     }
-    setSelectedId(focus.id);
+    select(focus.id);
     canvas.focusNode(focus.id);
-  }, [focus, data, canvas.focusNode]);
+  }, [focus, data, canvas.focusNode, select]);
 
   // Centre the viewport on an entry-point block (used by the Start chip).
   const focusEntry = useCallback(
     (id: string) => {
-      setSelectedId(id);
+      select(id);
       canvas.centerOn(id, 1.2, 400);
     },
-    [canvas.centerOn]
+    [canvas.centerOn, select]
   );
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
@@ -250,12 +270,12 @@ function ProjectGraphInner({ root, scope, onNavigate, focus }: Props) {
   // Picking from the panel's own search box zooms to the block and selects it.
   const handlePanelSearchPick = useCallback(
     (id: string) => {
-      setSelectedId(id);
+      select(id);
       if (!canvas.zoomToNode(id)) {
         canvas.fitView();
       }
     },
-    [canvas.fitView, canvas.zoomToNode]
+    [canvas.fitView, canvas.zoomToNode, select]
   );
 
   const handleOpenFromMenu = useCallback(() => {
@@ -352,14 +372,21 @@ className="relative h-full bg-bg"
         onNodesChange={canvas.onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
-        onNodeClick={(_event, node) => setSelectedId(node.id)}
+        onNodeClick={(_event, node) => select(node.id)}
         onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={() => {
           canvas.closeMenu();
-          setSelectedId(null);
+          select(null);
         }}
         onPaneContextMenu={(event) => canvas.openMenu(event)}
         onNodeContextMenu={(event, node) => canvas.openMenu(event, node.id)}
+        // React Flow passes no event for its own programmatic moves, so a real
+        // one means the user took over the viewport.
+        onMoveStart={(event) => {
+          if (event) {
+            canvas.noteManualMove();
+          }
+        }}
         minZoom={0.05}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}

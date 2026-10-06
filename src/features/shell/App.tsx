@@ -197,10 +197,19 @@ export default function App() {
    *  Relationship section follows. */
   const [graphSelection, setGraphSelection] = useState<string | null>(null);
   const handleGraphSelection = useCallback((id: string | null) => {
-    // A cleared canvas keeps the last definition: panning away should not empty
+    // A cleared canvas keeps the last selection: panning away should not empty
     // the panel.
     if (id) {
       setGraphSelection(id);
+    }
+  }, []);
+
+  /** The block selected in the folder graph, which the Relationship section
+   *  follows the same way it follows the file graph. */
+  const [projectSelection, setProjectSelection] = useState<string | null>(null);
+  const handleProjectSelection = useCallback((id: string | null) => {
+    if (id) {
+      setProjectSelection(id);
     }
   }, []);
 
@@ -269,6 +278,7 @@ export default function App() {
           scope={aiScope}
           file={aiFile}
           selectedDefinitionId={graphSelection}
+          selectedProjectId={projectSelection}
           results={aiResults}
           onResult={handleAiResult}
           onShow={showAiResult}
@@ -366,6 +376,7 @@ export default function App() {
                   scope={location.path}
                   onNavigate={setLocationState}
                   focus={focusRequest ?? undefined}
+                  onSelect={handleProjectSelection}
                 />
               </ErrorBoundary>
             ) : location.kind === "endpoints" ? (

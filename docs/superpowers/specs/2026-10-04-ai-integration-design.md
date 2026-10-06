@@ -230,12 +230,14 @@ egress notice in §8 has to be honest in the meantime.
   an edit that changes what the Task reads takes the mark away on its own. The store remains the authority on what
   is reused, and reading a stored answer needs no Provider Key and no egress notice, because nothing leaves the
   machine.
-- **The Relationship section follows the file graph.** Selecting a Definition on the canvas — a function, a method,
-  a class, or one shown in a dashed block — makes that Definition the subject of the section, whatever target the
-  Tasks are set to; the Tasks keep their own target so a whole-scope overview is not silently re-pointed. The
-  selection sticks: clearing the canvas to pan does not empty the section. A dashed **file** block names a path
-  rather than a Definition, so it is ignored. An imported Definition's id reaches the frontend already qualified
-  (`path::local`) — the same string the Cross-file Call Edges use — and must be passed through unchanged.
+- **The Relationship section follows both graphs.** Selecting a Definition on the file canvas — a function, a
+  method, a class, or one shown in a dashed block — makes that Definition the subject of the section, whatever
+  target the Tasks are set to; the Tasks keep their own target so a whole-scope overview is not silently re-pointed.
+  Selecting a block on the **folder** canvas does the same: a file shows its own `imports` / `imported by`, a folder
+  shows its edges. Only one focus is live — whichever canvas reported last — and both stick: clearing either canvas
+  to pan does not empty the section. A dashed **file** block names a path rather than a Definition, so the file
+  canvas's focus ignores it. An imported Definition's id reaches the frontend already qualified (`path::local`) —
+  the same string the Cross-file Call Edges use — and must be passed through unchanged.
 - **The Relationship section** sits under the target choice and lists the counterparts of what is selected, grouped
   by how they connect: `calls` and `called by` for Definitions from the Function Graph's Cross-file Call Edges,
   `imports` and `imported by` for files. A Scope lists every edge with an end inside it as **two** rows — `a`

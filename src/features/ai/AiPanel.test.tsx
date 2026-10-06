@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   aiCached,
+  analyzeImports,
   aiSettings,
   aiSummary,
   functionGraph,
@@ -49,18 +50,20 @@ const answer = {
 function renderPanel(
   results: Record<string, { request: AiRequest; result: AiSummary }> = {},
   file: string | null = null,
-  selectedDefinitionId: string | null = null
+  selectedDefinitionId: string | null = null,
+  selectedProjectId: string | null = null
 ) {
   const onResult = vi.fn();
   const onShow = vi.fn();
   const onHover = vi.fn();
   const onClose = vi.fn();
-  const element = (selected: string | null) => (
+  const element = (definition: string | null, project: string | null) => (
     <AiPanel
       root="/project"
       scope=""
       file={file}
-      selectedDefinitionId={selected}
+      selectedDefinitionId={definition}
+      selectedProjectId={project}
       results={results}
       onResult={onResult}
       onShow={onShow}
@@ -68,15 +71,17 @@ function renderPanel(
       onClose={onClose}
     />
   );
-  const view = render(element(selectedDefinitionId));
+  const view = render(element(selectedDefinitionId, selectedProjectId));
   return {
     onResult,
     onShow,
     onHover,
     onClose,
     unmount: view.unmount,
-    /** Pick another node in the graph, as the canvas would report it. */
-    select: (id: string | null) => view.rerender(element(id)),
+    /** Pick another node in the file graph, as the canvas would report it. */
+    select: (id: string | null) => view.rerender(element(id, null)),
+    /** Pick another block in the folder graph. */
+    selectProject: (id: string | null) => view.rerender(element(selectedDefinitionId, id)),
   };
 }
 
@@ -108,6 +113,17 @@ beforeEach(() => {
   vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: false });
   vi.mocked(setAiKey).mockResolvedValue({ provider: "openrouter", hasKey: true });
   vi.mocked(aiSummary).mockResolvedValue(answer);
+  // `clearAllMocks` does not undo an implementation, so the graphs are restored
+  // here: a test that mocks one cannot leak it into the next.
+  vi.mocked(aiCached).mockImplementation(async () => []);
+  vi.mocked(projectGraph).mockResolvedValue({
+    root: "/project",
+    folders: [],
+    files: [],
+    edges: [],
+    truncated: false,
+  });
+  vi.mocked(analyzeImports).mockResolvedValue({ imports: [], importedBy: [] });
 });
 
 afterEach(() => {
@@ -497,6 +513,67 @@ describe("AiPanel relationships", () => {
 
     expect(await screen.findByText("nothing connected to this yet")).toBeTruthy();
   });
+
+  it("follows a file picked in the folder graph", async () => {
+    vi.mocked(projectGraph).mockResolvedValue({
+      root: "/project",
+      folders: [],
+      files: [
+        {
+          id: "algorithms/pathfinder.py",
+          name: "pathfinder.py",
+          folderId: "algorithms",
+          kind: "code",
+          imports: [
+            { targetId: "utils/helpers.py", specifier: "utils.helpers", names: ["MinHeap"] },
+          ],
+        },
+        {
+          id: "utils/helpers.py",
+          name: "helpers.py",
+          folderId: "utils",
+          kind: "code",
+          imports: [],
+        },
+      ],
+      edges: [],
+      truncated: false,
+    });
+    vi.mocked(analyzeImports).mockResolvedValue({
+      imports: [],
+      importedBy: [{ path: "tests/test_algorithms.py", names: ["PathFinder"] }],
+    });
+
+    renderPanel({}, null, null, "algorithms/pathfinder.py");
+
+    // What it imports, and what imports it — the file's own two halves.
+    expect(await screen.findByText("utils/helpers.py")).toBeTruthy();
+    expect(screen.getByText("tests/test_algorithms.py")).toBeTruthy();
+    expect(screen.getByText("imports")).toBeTruthy();
+    expect(screen.getByText("imported by")).toBeTruthy();
+  });
+
+  it("follows a folder picked in the folder graph", async () => {
+    vi.mocked(projectGraph).mockResolvedValue({
+      root: "/project",
+      folders: [],
+      files: ["algorithms/pathfinder.py", "utils/helpers.py"].map((id) => ({
+        id,
+        name: id.split("/")[1],
+        folderId: id.split("/")[0],
+        kind: "code" as const,
+        imports: [],
+      })),
+      edges: [{ source: "algorithms/pathfinder.py", target: "utils/helpers.py" }],
+      truncated: false,
+    });
+
+    renderPanel({}, null, null, "algorithms");
+
+    expect(
+      await screen.findByText("algorithms/pathfinder.py -> utils/helpers.py")
+    ).toBeTruthy();
+  });
 });
 
 describe("AiPanel marks from the store", () => {
@@ -505,7 +582,7 @@ describe("AiPanel marks from the store", () => {
   });
 
   it("lets a long import label wrap rather than cutting the file name off", async () => {
-    vi.mocked(projectGraph).mockResolvedValueOnce({
+    vi.mocked(projectGraph).mockResolvedValue({
       root: "/project",
       folders: [],
       files: [
@@ -572,7 +649,7 @@ describe("AiPanel marks from the store", () => {
       imports: [],
       external: true,
     });
-    vi.mocked(projectGraph).mockResolvedValueOnce({
+    vi.mocked(projectGraph).mockResolvedValue({
       root: "/project",
       folders: [],
       files,
@@ -592,7 +669,7 @@ describe("AiPanel marks from the store", () => {
   });
 
   it("puts what imports the file above what the file imports", async () => {
-    vi.mocked(projectGraph).mockResolvedValueOnce({
+    vi.mocked(projectGraph).mockResolvedValue({
       root: "/project",
       folders: [],
       files: ["tests/test_algorithms.py", "algorithms/pathfinder.py"].map((id) => ({
@@ -616,7 +693,7 @@ describe("AiPanel marks from the store", () => {
   });
 
   it("lists a scope's own imports, which is all a self-contained project has", async () => {
-    vi.mocked(projectGraph).mockResolvedValueOnce({
+    vi.mocked(projectGraph).mockResolvedValue({
       root: "/project",
       folders: [],
       files: [

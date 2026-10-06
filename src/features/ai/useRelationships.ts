@@ -37,6 +37,13 @@ export function useFunctionGraph(root: string | null, file: string | null) {
   return { graph, error };
 }
 
+/** What to admit when a listing was cut short by its cap. */
+function capNote(dropped: number): string | null {
+  return dropped > 0
+    ? `showing ${MAX_SCOPE_ROWS} of ${MAX_SCOPE_ROWS + dropped} — open a folder to narrow it`
+    : null;
+}
+
 interface Params {
   root: string | null;
   mode: RelationshipMode;
@@ -47,6 +54,8 @@ interface Params {
   graph: FunctionGraph | null;
   /** A Definition picked in the graph, whose relationships replace the mode's. */
   focus: string | null;
+  /** A block picked in the folder graph: a file, or a folder inside the scope. */
+  projectFocus: string | null;
 }
 
 /** The counterparts the current target connects to, fetched per mode. */
@@ -59,6 +68,7 @@ export function useRelationships({
   definitions,
   graph,
   focus,
+  projectFocus,
 }: Params): { rows: ConnectionRow[]; loading: boolean; error: string | null; note: string | null } {
   const [rows, setRows] = useState<ConnectionRow[]>([]);
   const [note, setNote] = useState<string | null>(null);
@@ -81,6 +91,17 @@ export function useRelationships({
       if (focus && graph && file) {
         return { rows: definitionRows(graph, file, [focus]), note: null };
       }
+      // A block from the folder graph: a file's own imports and importers, or the
+      // edges of a folder standing inside the scope.
+      if (projectFocus) {
+        const project = await projectGraph(root, scope);
+        if (project.files.some((entry) => entry.id === projectFocus)) {
+          const analysis = await analyzeImports(projectFocus, root).catch(() => null);
+          return { rows: fileRows(projectFocus, project, analysis), note: null };
+        }
+        const listing = scopeRows(project, projectFocus);
+        return { rows: listing.rows, note: capNote(listing.dropped) };
+      }
       if (mode === "definitions") {
         return {
           rows: file && graph ? definitionRows(graph, file, definitions) : [],
@@ -101,13 +122,7 @@ export function useRelationships({
         };
       }
       const listing = scopeRows(await projectGraph(root, ""), scope);
-      return {
-        rows: listing.rows,
-        note:
-          listing.dropped > 0
-            ? `showing ${MAX_SCOPE_ROWS} of ${MAX_SCOPE_ROWS + listing.dropped} — open a folder to narrow it`
-            : null,
-      };
+      return { rows: listing.rows, note: capNote(listing.dropped) };
     };
 
     setLoading(true);
@@ -134,7 +149,7 @@ export function useRelationships({
     return () => {
       cancelled = true;
     };
-  }, [root, mode, scope, file, filesKey, definitionsKey, graph, focus]);
+  }, [root, mode, scope, file, filesKey, definitionsKey, graph, focus, projectFocus]);
 
   return { rows, loading, error, note };
 }
