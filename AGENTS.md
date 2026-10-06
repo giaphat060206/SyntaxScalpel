@@ -141,6 +141,15 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   titles are not overlapped.
 - No layout persistence: `.scalpel/metadata.json` is neither read nor written; dragging is temporary and re-runs
   ELK. Do not reintroduce autosave.
+- **The user's viewport wins over a late layout, and framing waits for placement.** The layout effect fires on
+  `sizeSignature` — measured heights — and a re-measure therefore runs ELK ~160 ms later and bumps `layoutVersion`,
+  part of the fit key. A manual pan or zoom must be reported, and React Flow passes a **null event** for its own
+  programmatic moves, so both canvases wire `onMoveStart` to `canvas.noteManualMove()` when the event is real. The
+  two fit shapes need **different** rules, and each is pinned by a test in `useGraphCanvas.test.tsx` that fails if
+  it is removed: a **whole-graph** fit happens once per token and only after `layoutVersion > 0`, because fitting
+  the seeded grid frames bounds ELK is about to replace and leaves the graph off to one side; a **targeted** fit
+  retries until the target is measurable and is redone after a layout lands, because a framing done before the
+  blocks were placed centred where the block used to be.
 - Visual rules: containers z-index `1`, leaf blocks `4`, edges `0` (lines always under blocks); containers are
   transparent **only when they hold an edge endpoint**; palette colour per block; edges arrowed `smoothstep`,
   unrelated edges dim to 12% on selection (no bolding).
@@ -185,6 +194,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   `ContentPane` → `App` → `AiPanel` as `selectedDefinitionId`; the panel accepts it only once it can check the id
   against the loaded graph, and a dashed file block (a path, not a Definition) is ignored. The focus **sticks**:
   panning the canvas clear does not empty the section.
+- The **folder graph reports its selection too** (`ProjectGraph` → `App` → `AiPanel` as `selectedProjectId`), which
+  covers a file and a folder alike: a file gets its own `imports` / `imported by`, a folder gets `scopeRows`. Both
+  canvases share one focus — whichever reported last wins — so they cannot both claim the section, and a cleared
+  selection is not reported, for the same reason as above.
 - The panel's **Relationship** section lists what the current target connects to — `calls` / `called by` for
   selected Definitions, `imports` / `imported by` for files. A Scope turns every edge with an end inside it into
   **two** rows, `a` importing `b` and `b` imported by `a`: one row per pair tags every row `imports` and never names

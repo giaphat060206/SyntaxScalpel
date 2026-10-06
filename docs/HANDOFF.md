@@ -246,9 +246,10 @@ GLOSSARY.md              domain vocabulary
   a Relationship row.
 - AI: selecting a Definition in the file graph focuses the Relationship section on it — the section follows the
   canvas, not the target picker, and the focus sticks when the canvas is cleared. A dashed file block (a path, not a
-  Definition) is ignored. An external Definition's id is already `path::local` when it arrives; the picker passes it
-  through, and prefixing the block path again makes an id nothing can resolve (that was a live bug, not a
-  hypothetical).
+  Definition) is ignored. The **folder graph reports its selection too**: a file shows its own `imports` /
+  `imported by`, a folder shows its edges. An external Definition's id is already `path::local` when it arrives; the
+  picker passes it through, and prefixing the block path again makes an id nothing can resolve (that was a live bug,
+  not a hypothetical).
 - AI: the Relationship list is only as complete as the graph. Namespace-qualified calls (`file2.func2()`) and
   type-annotation-only imports produce no edge, so no row. A Scope turns every edge with an **end** inside it into
   two rows — `a` imports `b`, and `b` imported by `a` — because one row per pair tags everything `imports` and never
@@ -260,6 +261,11 @@ GLOSSARY.md              domain vocabulary
   Definition draws **one** arrow, onto `Thing.run`, and the class box is dropped when nothing else points at it.
   Per caller: a Definition that only constructs the class keeps its class edge
   (`neighborhood::prune_implied_containers`).
+- Graph: the two fit shapes have different rules. A **whole-graph** fit waits for `layoutVersion > 0` and happens
+  once per token — fitting the seeded grid frames bounds ELK is about to replace, which leaves the graph off to one
+  side of the viewport, and re-fitting on every later layout is what made it suddenly zoom out. A **targeted** fit
+  retries until the target is measurable and is redone after a layout lands. A manual pan/zoom is reported through
+  `canvas.noteManualMove()` (both canvases wire a real `onMoveStart` event to it) and suppresses either.
 - AI: hover emphasis reaches the info cards and the Relationship rows but not the residual **IMPORTS / IMPORTERS
   NOT DRAWN** blocks. That is structural, not an omission: ADR-0006 made those rows residuals, so every counterpart
   they name is one with no node to highlight.
