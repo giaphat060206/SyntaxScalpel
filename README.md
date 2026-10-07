@@ -205,7 +205,7 @@ src-tauri/src/
 
 ## Requirements
 
-- Node.js 20.19+
+- Node.js 22.12 or newer — Vitest 5 refuses anything older, and the project is developed on Node 24
 - Rust (stable toolchain)
 - **Windows 10/11** with WebView2 (ships with Windows 11, and is normally present on Windows 10 via Microsoft
   Edge). The stack is cross-platform — Tauri, Rust and Vite all are — but this project is developed and tested on
