@@ -35,6 +35,7 @@ export interface ProjectSummary {
    * describe the repository rather than the code.
    */
   languages: LanguageShare[];
+  /** Code files only, largest first, on the same rule as the ratio. */
   largestFiles: FileSize[];
   truncated: boolean;
 }
@@ -69,7 +70,7 @@ export function summariseProject(graph: ProjectGraph): ProjectSummary {
     .map((entry) => ({ ...entry, share: codeBytes > 0 ? entry.bytes / codeBytes : 0 }))
     .sort((a, b) => b.bytes - a.bytes || a.language.localeCompare(b.language));
 
-  const largestFiles = files
+  const largestFiles = code
     .map((file) => ({ path: file.id, bytes: file.sizeBytes }))
     .sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path))
     .slice(0, LARGEST_FILES);

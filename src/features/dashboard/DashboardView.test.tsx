@@ -111,6 +111,8 @@ describe("DashboardView", () => {
       })
     ).toBeTruthy();
     expect(screen.queryByText("Markdown")).toBeNull();
+    // And it is not offered as one of the largest files either.
+    expect(screen.queryByText("README.md")).toBeNull();
     expect(screen.getByText(/Code files only — 1 doc file \(500 B\) left out/)).toBeTruthy();
     // The project's own size still counts it.
     expect(screen.getByText("1.5 KB")).toBeTruthy();

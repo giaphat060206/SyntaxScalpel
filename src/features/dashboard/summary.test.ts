@@ -54,11 +54,11 @@ describe("summariseProject", () => {
     ]);
   });
 
-  it("keeps doc files out of the ratio but not out of the totals", () => {
+  it("keeps doc files out of the ratio and the largest-files list, but not the totals", () => {
     const summary = summariseProject(
       project([
         file("main.py", "code", 1000),
-        file("README.md", "doc", 500),
+        file("README.md", "doc", 4000),
         file("config.json", "doc", 250),
       ])
     );
@@ -67,11 +67,13 @@ describe("summariseProject", () => {
     expect(summary.languages).toEqual([
       { language: "Python", files: 1, bytes: 1000, share: 1 },
     ]);
+    // A README larger than every code file is still not one of the largest ones.
+    expect(summary.largestFiles).toEqual([{ path: "main.py", bytes: 1000 }]);
     expect(summary.codeBytes).toBe(1000);
     // The docs are still part of the project, and still reported.
     expect(summary.docFiles).toBe(2);
-    expect(summary.docBytes).toBe(750);
-    expect(summary.bytes).toBe(1750);
+    expect(summary.docBytes).toBe(4250);
+    expect(summary.bytes).toBe(5250);
   });
 
   it("has no ratio at all when a project is only docs", () => {

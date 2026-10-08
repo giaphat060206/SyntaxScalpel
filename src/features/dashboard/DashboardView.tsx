@@ -193,9 +193,10 @@ function Dashboard({
 
         <div className="grid gap-5 sm:grid-cols-2">
           <section className="rounded border border-white/10 bg-panel p-4">
-            <h2 className="mb-3 text-xs uppercase tracking-wider text-dimmed">Largest files</h2>
+            <h2 className="text-xs uppercase tracking-wider text-dimmed">Largest files</h2>
+            <p className="mb-3 text-[11px] text-dimmed">Code files only</p>
             {summary.largestFiles.length === 0 ? (
-              <p className="text-xs text-dimmed">No files to measure.</p>
+              <p className="text-xs text-dimmed">No code files to measure.</p>
             ) : (
               <Bars
                 items={summary.largestFiles.map((entry) => ({
