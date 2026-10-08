@@ -41,6 +41,10 @@ pub struct ProjectFile {
     pub folder_id: String,
     /// `"code"` for parsed languages, `"doc"` for markdown/config/text files.
     pub kind: String,
+    /// Size on disk in bytes, read during the walk that already visits every
+    /// file. Zero for an external file, which is outside the scope and is not
+    /// counted in the project's totals.
+    pub size_bytes: u64,
     pub imports: Vec<FileImport>,
     /// True for a file outside the scope that some in-scope file imports; shown
     /// so the import can still be drawn as an edge.
@@ -185,11 +189,13 @@ fn collect(
                 return;
             }
             let id = id_of(root, &path, scope_id);
+            let size_bytes = std::fs::metadata(&path).map(|meta| meta.len()).unwrap_or(0);
             graph.files.push(ProjectFile {
                 id: id.clone(),
                 name,
                 folder_id: folder_id.to_string(),
                 kind: kind.to_string(),
+                size_bytes,
                 imports: Vec::new(),
                 external: false,
             });
@@ -281,6 +287,7 @@ pub fn project_graph(root: &str, scope_rel: &str) -> Result<ProjectGraph, String
                                     .unwrap_or_else(|| target_id.clone()),
                                 folder_id: graph.root.clone(),
                                 kind: external_kind.to_string(),
+                                size_bytes: 0,
                                 imports: Vec::new(),
                                 external: true,
                             });
@@ -1099,5 +1106,30 @@ mod tests {
             .iter()
             .any(|edge| edge.source == "src/lib.rs" && edge.target == "src/parser/mod.rs"));
         assert!(graph.entry.is_some());
+    }
+
+    /// The dashboard's language ratio is measured in bytes, so every file has to
+    /// report what it occupies — including one that is empty, which is different
+    /// from one that could not be read.
+    #[test]
+    fn reports_each_files_size_in_bytes() {
+        let root = temp_project("file-sizes");
+        std::fs::write(root.join("big.py"), "x".repeat(1234)).unwrap();
+        std::fs::write(root.join("empty.py"), "").unwrap();
+        std::fs::write(root.join("notes.md"), "hello").unwrap();
+
+        let graph = project_graph(&root.to_string_lossy(), "").unwrap();
+        let size_of = |name: &str| {
+            graph
+                .files
+                .iter()
+                .find(|file| file.name == name)
+                .unwrap_or_else(|| panic!("{name} missing from the graph"))
+                .size_bytes
+        };
+
+        assert_eq!(size_of("big.py"), 1234);
+        assert_eq!(size_of("empty.py"), 0);
+        assert_eq!(size_of("notes.md"), 5);
     }
 }

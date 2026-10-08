@@ -17,14 +17,15 @@ const scope: ProjectGraph = {
     { id: "core", name: "core", parentId: "", depth: 1 },
   ],
   files: [
-    { id: "core/graph.py", name: "graph.py", folderId: "core", kind: "code", imports: [] },
-    { id: "core/path.py", name: "path.py", folderId: "core", kind: "code", imports: [] },
-    { id: "main.py", name: "main.py", folderId: "", kind: "code", imports: [] },
+    { id: "core/graph.py", name: "graph.py", folderId: "core", kind: "code", sizeBytes: 0, imports: [] },
+    { id: "core/path.py", name: "path.py", folderId: "core", kind: "code", sizeBytes: 0, imports: [] },
+    { id: "main.py", name: "main.py", folderId: "", kind: "code", sizeBytes: 0, imports: [] },
     {
       id: "outside/lib.py",
       name: "lib.py",
       folderId: "outside",
       kind: "code",
+      sizeBytes: 0,
       imports: [],
       external: true,
     },

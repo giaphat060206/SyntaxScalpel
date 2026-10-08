@@ -10,8 +10,8 @@ const data: ProjectGraph = {
     { id: "src", name: "src", parentId: ".", depth: 1 },
   ],
   files: [
-    { id: "src/a.ts", name: "a.ts", folderId: "src", kind: "code", imports: [] },
-    { id: "src/b.ts", name: "b.ts", folderId: "src", kind: "code", imports: [{ targetId: "src/a.ts", specifier: "./a", names: ["x"] }] },
+    { id: "src/a.ts", name: "a.ts", folderId: "src", kind: "code", sizeBytes: 0, imports: [] },
+    { id: "src/b.ts", name: "b.ts", folderId: "src", kind: "code", sizeBytes: 0, imports: [{ targetId: "src/a.ts", specifier: "./a", names: ["x"] }] },
   ],
   edges: [{ source: "src/b.ts", target: "src/a.ts" }],
   entry: "src/b.ts",

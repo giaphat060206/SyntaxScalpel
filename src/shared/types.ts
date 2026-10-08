@@ -85,6 +85,8 @@ export interface ProjectFile {
   name: string;
   folderId: string;
   kind: "code" | "doc";
+  /** Size on disk in bytes; 0 for an external file, which is not counted. */
+  sizeBytes: number;
   imports: FileImport[];
   /** True for a file outside the scope that an in-scope file imports. */
   external?: boolean;

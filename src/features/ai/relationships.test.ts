@@ -102,6 +102,7 @@ describe("relationship rows", () => {
           name: "graph.py",
           folderId: "core",
           kind: "code",
+          sizeBytes: 0,
           imports: [
             { targetId: "utils/constants.py", specifier: "utils.constants", names: ["WEIGHT"] },
             { targetId: "", specifier: "os", names: ["path"] },
@@ -131,9 +132,9 @@ describe("relationship rows", () => {
       root: "/project",
       folders: [],
       files: [
-        { id: "core/graph.py", name: "graph.py", folderId: "core", kind: "code", imports: [] },
-        { id: "outside.py", name: "outside.py", folderId: "", kind: "code", imports: [], external: true },
-        { id: "core/other.py", name: "other.py", folderId: "core", kind: "code", imports: [] },
+        { id: "core/graph.py", name: "graph.py", folderId: "core", kind: "code", sizeBytes: 0, imports: [] },
+        { id: "outside.py", name: "outside.py", folderId: "", kind: "code", sizeBytes: 0, imports: [], external: true },
+        { id: "core/other.py", name: "other.py", folderId: "core", kind: "code", sizeBytes: 0, imports: [] },
       ],
       edges: [
         { source: "core/graph.py", target: "core/other.py" },
@@ -167,6 +168,7 @@ describe("relationship rows", () => {
         name: id,
         folderId: "",
         kind: "code" as const,
+        sizeBytes: 0,
         imports: [],
       })),
       edges: [
@@ -194,8 +196,8 @@ describe("relationship rows", () => {
       root: "/project",
       folders: [],
       files: [
-        { id: "a.py", name: "a.py", folderId: "", kind: "code", imports: [] },
-        { id: "b.py", name: "b.py", folderId: "", kind: "code", imports: [] },
+        { id: "a.py", name: "a.py", folderId: "", kind: "code", sizeBytes: 0, imports: [] },
+        { id: "b.py", name: "b.py", folderId: "", kind: "code", sizeBytes: 0, imports: [] },
       ],
       edges: [
         { source: "a.py", target: "b.py" },
@@ -219,6 +221,7 @@ describe("relationship rows", () => {
         name: id,
         folderId: id.split("/")[0],
         kind: "code" as const,
+        sizeBytes: 0,
         imports: [],
       })),
       edges: [
@@ -238,7 +241,7 @@ describe("relationship rows", () => {
       root: "/project",
       folders: [],
       files: [
-        { id: "core/a.py", name: "a.py", folderId: "core", kind: "code", imports: [] },
+        { id: "core/a.py", name: "a.py", folderId: "core", kind: "code", sizeBytes: 0, imports: [] },
       ],
       edges: [{ source: "../outside.py", target: "core/a.py" }],
       truncated: false,
@@ -255,6 +258,7 @@ describe("relationship rows", () => {
         name: `f${index}.py`,
         folderId: "",
         kind: "code" as const,
+        sizeBytes: 0,
         imports: [],
       })
     );
@@ -263,6 +267,7 @@ describe("relationship rows", () => {
       name: "outside.py",
       folderId: "",
       kind: "code" as const,
+      sizeBytes: 0,
       imports: [],
       external: true,
     });

@@ -12,6 +12,7 @@ function file(
     name: id.split("/").pop() ?? id,
     folderId,
     kind: id.endsWith(".md") ? "doc" : "code",
+    sizeBytes: 0,
     imports: targets.map((targetId) => ({
       targetId,
       specifier: targetId,
