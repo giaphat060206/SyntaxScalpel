@@ -137,3 +137,105 @@ describe("TourPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+/** Only the shape the panel reads: it takes the prose as a prop, so these tests need
+ *  no IPC at all and stay honest about a tour being useful without any. */
+function proseFixture(overrides: Record<string, unknown> = {}) {
+  return {
+    state: {},
+    cached: () => false,
+    checking: false,
+    needsKey: false,
+    providerLabel: "OpenRouter",
+    pending: null,
+    explain: vi.fn(),
+    confirm: vi.fn(),
+    cancel: vi.fn(),
+    ...overrides,
+  };
+}
+
+function showWithProse(prose: ReturnType<typeof proseFixture>) {
+  const plan = planOf(graph([file("app.py")], "app.py"));
+  render(
+    <TourPanel
+      plan={plan}
+      steps={plan.steps}
+      index={1}
+      scopePath="/home/me/pathfinder"
+      prose={prose}
+      onGoTo={() => {}}
+      onClose={() => {}}
+    />
+  );
+  return prose;
+}
+
+describe("TourPanel explanations", () => {
+  it("asks for the step the reader is on", () => {
+    const prose = showWithProse(proseFixture());
+
+    fireEvent.click(screen.getByRole("button", { name: "Explain this step" }));
+    expect(prose.explain).toHaveBeenCalledWith(expect.objectContaining({ nodeId: "app.py" }));
+  });
+
+  it("says what would leave the machine, and names where it goes", () => {
+    const prose = showWithProse(proseFixture({ pending: "app.py" }));
+
+    // Both the notice and its paragraph contain this text, so name the paragraph.
+    const notice = screen.getByText(/This sends a digest of/, { selector: "p" });
+    expect(notice.textContent).toContain("app.py");
+    expect(notice.textContent).toContain("OpenRouter");
+    expect(notice.textContent).toContain("It leaves this machine");
+    expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send to OpenRouter" }));
+    expect(prose.confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an explanation with the ids that really exist, and counts the rest", () => {
+    showWithProse(
+      proseFixture({
+        state: {
+          "app.py": {
+            status: "ready",
+            cached: true,
+            prose: {
+              title: "Entry point",
+              why: "Wires the pieces together.",
+              lookAt: ["util.py"],
+              dropped: 2,
+            },
+          },
+        },
+      })
+    );
+
+    expect(screen.getByText("Entry point")).toBeTruthy();
+    expect(screen.getByText("Wires the pieces together.")).toBeTruthy();
+    expect(screen.getByText(/also worth opening: util\.py/)).toBeTruthy();
+    expect(screen.getByText(/2 ids it named are not in this project/)).toBeTruthy();
+    expect(screen.getByText(/already generated — no request was made/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
+  });
+
+  it("offers nothing to ask for while a key is missing", () => {
+    showWithProse(proseFixture({ needsKey: true }));
+
+    expect(screen.getByText(/Add an API key in the AI panel/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
+  });
+
+  it("copies the tour as Markdown, with the order and no prose it does not have", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    showWithProse(proseFixture());
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy as Markdown" }));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const document = writeText.mock.calls[0][0] as string;
+    expect(document).toContain("# Tour: /home/me/pathfinder");
+    expect(document).toContain("**app.py**");
+  });
+});

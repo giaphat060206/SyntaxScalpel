@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { MarkdownView } from "../markdown/MarkdownView";
+import { tourMarkdown } from "./markdown";
 import type { TourPlan, TourStep } from "./plan";
 import type { TourProseApi } from "./useTourProse";
 
@@ -76,13 +77,26 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
           </p>
           <p className="text-[11px] text-dimmed">A suggested reading order, not documentation.</p>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 hover:border-accent/50 hover:text-accent"
-        >
-          Close
-        </button>
+        <div className="flex shrink-0 gap-1">
+          <button
+            type="button"
+            onClick={() =>
+              void navigator.clipboard?.writeText(
+                tourMarkdown({ plan, steps, prose: prose?.state ?? {}, scopePath })
+              )
+            }
+            className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 hover:border-accent/50 hover:text-accent"
+          >
+            Copy as Markdown
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 hover:border-accent/50 hover:text-accent"
+          >
+            Close
+          </button>
+        </div>
       </header>
 
       {prose?.pending != null && (
@@ -188,7 +202,10 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
                       </div>
                     )}
 
+                    {/* While the notice is up, it is the affordance: offering the
+                        button too would only raise the same notice again. */}
                     {state.status === "idle" &&
+                      prose.pending === null &&
                       (prose.needsKey ? (
                         <p className="text-[11px] text-dimmed">
                           Add an API key in the AI panel to have steps explained.
