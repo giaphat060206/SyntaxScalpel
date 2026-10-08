@@ -93,8 +93,8 @@ function Dashboard({
   const largestMax = summary.largestFiles[0]?.bytes ?? 0;
 
   return (
-    <div className="h-full overflow-auto bg-bg p-5">
-      <div className="mx-auto flex max-w-3xl flex-col gap-5">
+    <div className="h-full overflow-auto bg-bg px-3 py-4">
+      <div className="mx-auto flex max-w-5xl flex-col gap-5">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-[12rem] flex-1">
             <h1 className="truncate text-lg font-medium text-white">

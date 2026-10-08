@@ -224,6 +224,21 @@ describe("DashboardView", () => {
     expect(title?.className).toContain("flex-1");
   });
 
+  it("wraps a file path in the largest-files list instead of cutting it off", () => {
+    show(
+      project([
+        file("src/parser/neighborhood/cross/file/edges.py", "code", 900),
+        file("a.py", "code", 100),
+      ])
+    );
+
+    // A path is one unbroken token, so truncating it hides the only thing the row
+    // is for. jsdom cannot see layout, so the class is what a test can hold.
+    const label = screen.getByTitle("src/parser/neighborhood/cross/file/edges.py");
+    expect(label.className).toContain("break-all");
+    expect(label.className).not.toContain("truncate");
+  });
+
   it("opens the graph and the AI panel from its own buttons", () => {
     const { onOpenGraph, onOpenAi } = show(project([file("a.py", "code", 4)]));
 

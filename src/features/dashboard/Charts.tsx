@@ -75,7 +75,7 @@ export function Bars({ items, max, label }: { items: Bar[]; max: number; label: 
     <ul role="img" aria-label={label} className="m-0 list-none space-y-1.5 p-0">
       {items.map((item) => (
         <li key={item.label} className="flex items-center gap-2 text-xs">
-          <span className="w-24 shrink-0 truncate text-white/80" title={item.label}>
+          <span className="w-36 shrink-0 break-all text-white/80" title={item.label}>
             {item.label}
           </span>
           <svg className="h-2.5 min-w-0 flex-1" role="presentation">
