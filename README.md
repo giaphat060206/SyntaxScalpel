@@ -13,11 +13,11 @@
 
 [![local-first](https://img.shields.io/badge/local--first-yes-3DF0A8)](#privacy)
 [![platform](https://img.shields.io/badge/developed%20on-Windows-0078D6?logo=windows&logoColor=white)](#requirements)
-[![last commit](https://img.shields.io/github/last-commit/giaphat060206/SyntaxScalper)](https://github.com/giaphat060206/SyntaxScalpel/commits)
+[![last commit](https://img.shields.io/github/last-commit/giaphat060206/SyntaxScalpel)](https://github.com/giaphat060206/SyntaxScalpel/commits)
 [![commit activity](https://img.shields.io/github/commit-activity/m/giaphat060206/SyntaxScalpel)](https://github.com/giaphat060206/SyntaxScalpel/commits)
-[![stars](https://img.shields.io/github/stars/giaphat060206/SyntaxScalpel)](https://github.com/giaphat060206/SyntaxScalpel/stargazers)
+[![stars](https://badgen.net/github/stars/giaphat060206/SyntaxScalpel)](https://github.com/giaphat060206/SyntaxScalpel/stargazers)
 [![issues](https://img.shields.io/github/issues/giaphat060206/SyntaxScalpel)](https://github.com/giaphat060206/SyntaxScalpel/issues)
-[![license](https://img.shields.io/github/license/giaphat060206/SyntaxScalpel)](LICENSE)
+[![license](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A local-first desktop app that dissects a source tree into interactive node graphs and renders Markdown
 documentation beside them. Built for fast onboarding onto undocumented codebases: you open a folder and get a graph
