@@ -116,9 +116,19 @@ GLOSSARY.md              domain vocabulary
   The query persists after a pick.
 
 ### Top bar / Welcome
-- `File` menu (Open Folder/File, Recent Folders flyout anchored to its row, Close Folder) and an **API** button
-  (visible when a folder is open) that opens the Endpoints view.
+- `File` menu (Open Folder/File, Recent Folders flyout anchored to its row, Close Folder), and **Dashboard**,
+  **Graph**, **API** and **AI** buttons (visible when a folder is open); the project view that is showing is marked.
 - Welcome screen with recents persisted in `localStorage`.
+
+### Dashboard
+- A project opens here: totals (files, folders, size, import edges), a code/doc split, a language donut with share,
+  file count and size per language, storage bars, the ten largest files, entry points, and buttons to the graph and
+  the AI panel.
+- Charts are hand-rolled SVG. A truncated scan says so; a project with no measured bytes falls back to a ratio by
+  file count and labels which measure it used; files imported from outside the folder are excluded from every number
+  and counted in a footnote.
+- `Graph` shows the project graph for the same folder, and switching between the two does **not** rescan: `App` owns
+  one `useProjectGraph(root, scope)` and hands it to both views.
 
 ### Project graph
 - Folder blocks contain files/subfolders; file→file import edges; entry-point Start panel; external nodes.
@@ -209,8 +219,12 @@ GLOSSARY.md              domain vocabulary
   the `function_graph` command, the `FunctionGraph` payload, dashed external blocks in the Function Graph, and the
   JS/TS `export` fix the feature depended on.
 - The Endpoints spec is GitHub issue **#1**; its tickets **#2–#7** are closed.
-- Suites green at the time of writing: `npm test`, `npm run build`, `cargo test`. The dashed blocks are unit-tested
-  (including that the outline is dashed) but have **not** been visually reviewed.
+- The project **Dashboard** landed on `main` in six commits: `ProjectFile.sizeBytes`, `features/dashboard/`
+  (`languages.ts`, `summary.ts`, `Charts.tsx`, `DashboardView.tsx`), `useProjectGraph` owning the one project scan,
+  and the dashboard `Location` with the top-bar buttons. A project now opens on the dashboard.
+- Suites green at the time of writing: `npm test` (**236** tests in 33 files), `npm run build`, `cargo test`
+  (**277** tests). The dashed blocks are unit-tested (including that the outline is dashed) but have **not** been
+  visually reviewed, and neither has the dashboard.
 
 ## 8. Known gaps / next steps
 

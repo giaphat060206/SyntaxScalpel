@@ -162,9 +162,10 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - A Function Graph is loaded with a single `functionGraph(path, root)` call per file — do not add a second import
   scan beside it. Picking a Definition from another file reads **that** file's source into the code pane; the
   dashed block itself has no source section.
-- Navigation is a `Location` (`empty | folder | code | endpoints`); the top-bar **API** button opens the Endpoints
-  view. Canvas viewport helpers on `useGraphCanvas`: `fitView` (whole graph), `zoomToNode` (fit a block's bounds),
-  `focusNode` (pan to a block at the current zoom), `centerOn` (centre at an explicit zoom).
+- Navigation is a `Location` (`empty | dashboard | folder | code | endpoints`); the top-bar **API** button opens the
+  Endpoints view, and **Dashboard** / **Graph** switch between the two project views. Canvas viewport helpers on
+  `useGraphCanvas`: `fitView` (whole graph), `zoomToNode` (fit a block's bounds), `focusNode` (pan to a block at the
+  current zoom), `centerOn` (centre at an explicit zoom).
 - Adding a language touches four places: `parser/<lang>.rs` with a `Language` variant, `shared/extensions.ts`
   (`FileRoute` + `CODE_ROUTES`), `shared/ipc.ts` + `shell/useFileContent.ts`, and `code/highlight.ts`. The payload
   shapes stay language-agnostic. See ADR-0005.
@@ -217,6 +218,25 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   **visual only** — never a Selection, never a code pane, never a request. `App` owns the one piece of state and the
   provider is controlled, so both sources drive it. The residual Imports and Imported-By Blocks do not participate:
   the counterpart they name is the one with no node.
+- A project opens on its **Dashboard** (`{ kind: "dashboard"; path }`), with **Dashboard** and **Graph** buttons in
+  the top bar marking which is active. A subfolder picked in the explorer still opens the graph, so both views are
+  reachable at any depth. `Location` lives in `features/shell/location.ts` with `folderScope`, `hasPath` (a type
+  predicate) and `projectView`; the leaf navigation props stay **narrow**, because a breadcrumb must not be able to
+  point at the endpoint list.
+- **The project payload is scanned once**, by `useProjectGraph(root, scope)` in `App`, and handed to both the
+  dashboard and the canvas. Its key is the root and the scope **together**, which is what makes changing which view
+  is showing not a second walk of the project. The canvas keeps only the view state a new scope resets (collapsed
+  blocks, selection).
+- The dashboard's numbers come from `summariseProject`, which **excludes external files** — they are what the project
+  imports, not what it is — and counts them separately. A **truncated** scan must say so, because a ratio over part of
+  a project is wrong; and a project that measures no bytes falls back to a ratio by file count and names the measure
+  it used rather than drawing an empty ring. `ProjectFile.sizeBytes` is filled by one `metadata` call in the walk
+  that already visits every file, and is 0 for an external file.
+- Charts are **hand-rolled SVG** (`features/dashboard/Charts.tsx`); the donut is stroke dashes on one circle, and each
+  chart's `aria-label` repeats the numbers it encodes, which is what makes the drawing assertable. Do not add a
+  charting dependency: it would grow a bundle already past the chunk warning and make the chart untestable.
+- `vitest.config.ts` sets no `globals`, so Testing Library's automatic cleanup never registers: **a suite that renders
+  more than once must call `afterEach(cleanup)`**, or the previous test's DOM answers the next test's queries.
 
 ## Style and workflow
 
