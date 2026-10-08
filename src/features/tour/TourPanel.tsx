@@ -1,5 +1,7 @@
 import { useEffect } from "react";
+import { MarkdownView } from "../markdown/MarkdownView";
 import type { TourPlan, TourStep } from "./plan";
+import type { TourProseApi } from "./useTourProse";
 
 interface Props {
   plan: TourPlan | null;
@@ -7,6 +9,12 @@ interface Props {
   index: number;
   /** The folder being toured, so the panel says which one. */
   scopePath: string;
+  /**
+   * Asking for prose, and the notice that guards it. Optional on purpose: the plan
+   * is the tour, so a panel without prose is a tour without explanations rather
+   * than a broken one — which is exactly what a project with no key gets.
+   */
+  prose?: TourProseApi;
   onGoTo: (index: number) => void;
   onClose: () => void;
 }
@@ -37,7 +45,7 @@ function describe(step: TourStep): string {
   return parts.join(" · ");
 }
 
-export function TourPanel({ plan, steps, index, scopePath, onGoTo, onClose }: Props) {
+export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClose }: Props) {
   const atStart = index === 0;
   const atEnd = steps.length === 0 || index >= steps.length - 1;
 
@@ -73,6 +81,31 @@ export function TourPanel({ plan, steps, index, scopePath, onGoTo, onClose }: Pr
         </button>
       </header>
 
+      {prose?.pending != null && (
+        <div className="border-b border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-100">
+          <p>
+            This sends a digest of <strong>{prose.pending}</strong> to{" "}
+            <strong>{prose.providerLabel}</strong>. It leaves this machine.
+          </p>
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void prose.confirm()}
+              className="rounded border border-amber-300/40 px-2 py-0.5 text-[11px] hover:bg-amber-400/20"
+            >
+              Send to {prose.providerLabel}
+            </button>
+            <button
+              type="button"
+              onClick={prose.cancel}
+              className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {plan?.truncated && (
         <p className="border-b border-white/10 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200">
           {plan.dropped} more {plan.dropped === 1 ? "file" : "files"} would not fit in one tour — open a
@@ -99,6 +132,76 @@ export function TourPanel({ plan, steps, index, scopePath, onGoTo, onClose }: Pr
               <span className="block break-all text-white/90">{step.nodeId}</span>
               <span className="block text-[11px] text-dimmed">{describe(step)}</span>
             </button>
+            {position === index &&
+              prose &&
+              (() => {
+                const state = prose.state[step.nodeId] ?? { status: "idle" as const };
+                return (
+                  <div className="border-t border-white/5 px-3 py-2">
+                    {state.status === "running" && <p className="text-[11px] text-dimmed">asking…</p>}
+
+                    {state.status === "error" && (
+                      <div className="space-y-1">
+                        <p className="break-words text-[11px] text-red-400">{state.message}</p>
+                        <button
+                          type="button"
+                          onClick={() => void prose.explain(step)}
+                          className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 hover:border-accent/50 hover:text-accent"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    )}
+
+                    {state.status === "ready" && (
+                      <div className="space-y-1">
+                        {state.prose.title !== "" && (
+                          <p className="text-xs text-white/90">{state.prose.title}</p>
+                        )}
+                        {state.prose.why !== "" && (
+                          <div className="text-[11px] text-white/75">
+                            <MarkdownView content={state.prose.why} />
+                          </div>
+                        )}
+                        {state.prose.lookAt.length > 0 && (
+                          <p className="break-all text-[10px] text-dimmed">
+                            also worth opening: {state.prose.lookAt.join(", ")}
+                          </p>
+                        )}
+                        {state.prose.dropped > 0 && (
+                          <p className="text-[10px] text-amber-200">
+                            {state.prose.dropped} id
+                            {state.prose.dropped === 1 ? "" : "s"} it named{" "}
+                            {state.prose.dropped === 1 ? "is" : "are"} not in this project, so{" "}
+                            {state.prose.dropped === 1 ? "it was" : "they were"} left out.
+                          </p>
+                        )}
+                        {state.cached && (
+                          <p className="text-[10px] text-dimmed">
+                            already generated — no request was made
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {state.status === "idle" &&
+                      (prose.needsKey ? (
+                        <p className="text-[11px] text-dimmed">
+                          Add an API key in the AI panel to have steps explained.
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void prose.explain(step)}
+                          disabled={prose.checking}
+                          className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/85 enabled:hover:border-accent/50 enabled:hover:text-accent disabled:opacity-40"
+                        >
+                          {prose.checking ? "checking what is already generated…" : "Explain this step"}
+                        </button>
+                      ))}
+                  </div>
+                );
+              })()}
           </li>
         ))}
         {steps.length === 0 && (

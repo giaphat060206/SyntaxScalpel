@@ -14,6 +14,7 @@ import { useProjectGraph } from "../project/useProjectGraph";
 import { DashboardView } from "../dashboard/DashboardView";
 import { TourPanel } from "../tour/TourPanel";
 import { useTour } from "../tour/useTour";
+import { useTourProse } from "../tour/useTourProse";
 import { folderScope, hasPath, projectView, type Location } from "./location";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
@@ -102,6 +103,14 @@ export default function App() {
   // request at all and works with no API key.
   const [tourOpen, setTourOpen] = useState(false);
   const tour = useTour(projectState.status === "ready" ? projectState.value : null);
+  // Nothing is looked up until the tour is open: with no steps the probe has nothing
+  // to ask about, so a project you are not touring costs no request at all.
+  const tourProse = useTourProse(
+    root ?? "",
+    folderScope(location) ?? "",
+    projectState.status === "ready" ? projectState.value : null,
+    tourOpen ? tour.steps : []
+  );
   const tourStep = tour.step;
 
   // Moving to a step moves the canvas, through the same focus request a search pick
@@ -475,6 +484,7 @@ export default function App() {
                 steps={tour.steps}
                 index={tour.index}
                 scopePath={scopePath}
+                prose={tourProse}
                 onGoTo={tour.goTo}
                 onClose={closeTour}
               />
