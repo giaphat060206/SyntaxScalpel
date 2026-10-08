@@ -10,6 +10,7 @@ import { Welcome } from "./Welcome";
 import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
+import { useProjectGraph } from "../project/useProjectGraph";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
 import { AiResultView } from "../ai/AiResultView";
@@ -87,6 +88,13 @@ export default function App() {
   }, [explorerPanel]);
 
   const codeFile = location.kind === "code" ? location.path : null;
+
+  // One scan of the open folder, shared by every view that describes it. It is
+  // told nothing when a file is on screen, so reading code costs no project walk.
+  const projectState = useProjectGraph(
+    root,
+    location.kind === "folder" ? location.path : null
+  );
 
   const handleOpenFolder = useCallback(
     (nextRoot: string) => {
@@ -374,6 +382,7 @@ export default function App() {
                 <ProjectGraph
                   root={root ?? ""}
                   scope={location.path}
+                  state={projectState}
                   onNavigate={setLocationState}
                   focus={focusRequest ?? undefined}
                   onSelect={handleProjectSelection}

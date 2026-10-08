@@ -1,4 +1,4 @@
-import { afterEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   cleanup,
   render,
@@ -13,9 +13,15 @@ const mocks = vi.hoisted(() => ({
   openDialog: vi.fn(),
   contentProps: vi.fn(),
   projectProps: vi.fn(),
+  projectGraph: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.openDialog }));
+
+vi.mock("../../shared/ipc", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../shared/ipc")>()),
+  projectGraph: mocks.projectGraph,
+}));
 
 vi.mock("react-resizable-panels", () => ({
   Group: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
@@ -68,6 +74,37 @@ afterEach(() => {
   mocks.openDialog.mockReset();
   mocks.contentProps.mockReset();
   mocks.projectProps.mockReset();
+  mocks.projectGraph.mockReset();
+});
+
+function projectPayload(root: string) {
+  return { root, folders: [], files: [], edges: [], truncated: false };
+}
+
+// Every test that opens a folder now triggers the one project scan, so it needs
+// an answer even when that test is about something else entirely.
+beforeEach(() => {
+  mocks.projectGraph.mockResolvedValue(projectPayload("proj"));
+});
+
+describe("App project scan", () => {
+  it("scans the open folder above the views, and hands the scan to the canvas", async () => {
+    mocks.openDialog.mockResolvedValue("proj");
+    mocks.projectGraph.mockImplementation((root: string) =>
+      Promise.resolve(projectPayload(root))
+    );
+    render(<App />);
+
+    fireEvent.click(screen.getByText("Open Folder…"));
+
+    await waitFor(() => expect(mocks.projectGraph).toHaveBeenCalledWith("proj", ""));
+    expect(mocks.projectGraph).toHaveBeenCalledTimes(1);
+
+    // The canvas is given the scan rather than performing one itself.
+    const calls = mocks.projectProps.mock.calls;
+    const project = calls[calls.length - 1]?.[0];
+    await waitFor(() => expect(project.state).toMatchObject({ status: "ready" }));
+  });
 });
 
 describe("App wiring for the graph selections", () => {

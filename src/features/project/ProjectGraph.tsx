@@ -14,8 +14,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { ProjectGraph as ProjectGraphData } from "../../shared/types";
-import { projectGraph } from "../../shared/ipc";
 import { selectionInfo } from "./selection";
+import type { LoadState } from "../shell/useAsyncLoad";
 import { buildProjectNodes, decorateProjectNodes } from "./nodes";
 import { emphasisVisibility, useEmphasis } from "../graph/emphasis";
 import { CodeNode } from "../graph/CodeNode";
@@ -38,18 +38,21 @@ const edgeTypes = { elk: ElkEdge };
 interface Props {
   root: string;
   scope: string;
+  /** The one scan of this folder, owned above so the dashboard can share it. */
+  state: LoadState<ProjectGraphData>;
   onNavigate: (location: { kind: "folder" | "code"; path: string }) => void;
   focus?: { id: string; nonce: number };
   /** Told which block is selected, so panels outside the canvas can follow it. */
   onSelect?: (id: string | null) => void;
 }
 
-export function ProjectGraph({ root, scope, onNavigate, focus, onSelect }: Props) {
+export function ProjectGraph({ root, scope, state, onNavigate, focus, onSelect }: Props) {
   return (
     <ReactFlowProvider>
       <ProjectGraphInner
         root={root}
         scope={scope}
+        state={state}
         onNavigate={onNavigate}
         focus={focus}
         onSelect={onSelect}
@@ -58,9 +61,9 @@ export function ProjectGraph({ root, scope, onNavigate, focus, onSelect }: Props
   );
 }
 
-function ProjectGraphInner({ root, scope, onNavigate, focus, onSelect }: Props) {
-  const [data, setData] = useState<ProjectGraphData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function ProjectGraphInner({ root, scope, state, onNavigate, focus, onSelect }: Props) {
+  const data = state.status === "ready" ? state.value : null;
+  const error = state.status === "error" ? state.message : null;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -78,21 +81,8 @@ function ProjectGraphInner({ root, scope, onNavigate, focus, onSelect }: Props) 
   const [startsOpen, setStartsOpen] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    setError(null);
     setCollapsed(new Set());
     setSelectedId(null);
-    projectGraph(root, scope)
-      .then((next) => {
-        if (!cancelled) setData(next);
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled) setError(String(reason));
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [root, scope]);
 
   const toggleCollapse = useCallback((id: string) => {
