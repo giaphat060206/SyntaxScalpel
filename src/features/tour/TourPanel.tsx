@@ -40,7 +40,11 @@ function describe(step: TourStep): string {
         : `${step.depth} hop${step.depth === 1 ? "" : "s"} from the entry`,
   ];
   if (step.dependents > 0) {
-    parts.push(`${step.dependents} file${step.dependents === 1 ? "" : "s"} import this`);
+    parts.push(
+      `${step.dependents} file${step.dependents === 1 ? "" : "s"} import${
+        step.dependents === 1 ? "s" : ""
+      } this`
+    );
   }
   return parts.join(" · ");
 }
