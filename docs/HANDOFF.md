@@ -139,8 +139,10 @@ GLOSSARY.md              domain vocabulary
 - A step's explanation is one request on the AI panel's terms: a stored answer is read locally and needs no notice,
   anything else asks first and names the provider and the file. Ids the answer names that are not in the payload are
   dropped and counted rather than highlighted.
-- `tourMarkdown` writes the tour out as a document. The panel does **not** offer it yet — there is no button — and
-  the Explain flow has no behavioural test, only the compiler guard on the wiring.
+- `tourMarkdown` writes the tour out as a document, and the panel copies it — the clipboard rather than a save
+  dialog, so a tour needs no fs plugin and no permission. The explanations have behavioural tests: the notice naming
+  the file and the provider, a ready answer with the ids that really exist and a count of those that did not, no
+  affordance while a key is missing, and the copy carrying the order.
 
 ### Project graph
 - Folder blocks contain files/subfolders; file→file import edges; entry-point Start panel; external nodes.
