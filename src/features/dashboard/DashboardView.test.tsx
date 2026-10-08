@@ -179,12 +179,16 @@ describe("DashboardView", () => {
   it("lets the header wrap instead of squeezing the title to nothing", () => {
     show(project([file("a.py", "code", 4)]));
 
-    // The buttons are shrink-0, so without wrapping every pixel of a narrow pane
-    // comes off the title block, and `truncate` then draws a bare ellipsis where
-    // the project name and path should be. jsdom has no layout, so the class that
-    // prevents it is the only thing a test can hold onto.
+    // The buttons are shrink-0, so a narrow pane used to take every pixel off the
+    // title block; `truncate` then drew a bare ellipsis where the project name and
+    // path should be. The title now claims the leftover space and cannot be
+    // squeezed below a readable width. jsdom has no layout, so these two classes
+    // are the only thing a test can hold onto.
     const header = screen.getByRole("heading", { name: "pathfinder" }).closest("header");
     expect(header?.className).toContain("flex-wrap");
+    const title = header?.firstElementChild;
+    expect(title?.className).toContain("min-w-[12rem]");
+    expect(title?.className).toContain("flex-1");
   });
 
   it("opens the graph and the AI panel from its own buttons", () => {
