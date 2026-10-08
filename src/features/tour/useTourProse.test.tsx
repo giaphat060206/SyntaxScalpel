@@ -15,6 +15,7 @@ vi.mock("../../shared/ipc", () => ({
 }));
 
 vi.mock("../ai/useAiSettings", () => ({
+  PROVIDERS: [{ id: "openrouter", label: "OpenRouter", defaultModel: "some/model" }],
   useAiSettings: () => ({
     provider: mocks.settings.provider,
     model: mocks.settings.model,
@@ -171,6 +172,8 @@ describe("useTourProse", () => {
     const { result } = tour();
 
     expect(result.current.needsKey).toBe(true);
+    // The notice has to be able to name where the code would go.
+    expect(result.current.providerLabel).toBe("OpenRouter");
   });
 
   it("can be told to stop waiting for the notice", async () => {

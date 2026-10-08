@@ -3,7 +3,7 @@ import { aiSummary, type AiSummary } from "../../shared/ipc";
 import type { ProjectGraph } from "../../shared/types";
 import { isConfirmed, rememberConfirmed } from "../ai/egress";
 import { requestSignature } from "../ai/requests";
-import { useAiSettings } from "../ai/useAiSettings";
+import { PROVIDERS, useAiSettings } from "../ai/useAiSettings";
 import { useCachedMarks } from "../ai/useCachedMarks";
 import type { TourStep } from "./plan";
 import { knownNodeIds, parseTourStop, tourStopRequest, type TourProse } from "./prose";
@@ -20,6 +20,8 @@ export interface TourProseApi {
   cached: (nodeId: string) => boolean;
   checking: boolean;
   needsKey: boolean;
+  /** Named in the notice, which is not allowed to be vague about where code goes. */
+  providerLabel: string;
   /** The step whose request is waiting for the egress notice to be agreed. */
   pending: string | null;
   explain: (step: TourStep) => Promise<void>;
@@ -113,6 +115,8 @@ export function useTourProse(
     cached: (nodeId: string) => Boolean(marks[requestSignature(requestFor(nodeId))]),
     checking,
     needsKey: settings.ready && !settings.hasKey,
+    providerLabel:
+      PROVIDERS.find((entry) => entry.id === settings.provider)?.label ?? settings.provider,
     pending,
     explain,
     confirm,
