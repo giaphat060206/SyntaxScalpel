@@ -3,10 +3,14 @@ import { useState } from "react";
 interface Props {
   hasFolder: boolean;
   recents: string[];
+  /** Which project view is showing, so its button reads as the current one. */
+  view?: "dashboard" | "graph" | null;
   onOpenFolder: () => void;
   onOpenFile: () => void;
   onOpenRecent: (path: string) => void;
   onCloseFolder: () => void;
+  onOpenDashboard: () => void;
+  onOpenGraph: () => void;
   onOpenEndpoints: () => void;
   onOpenAi: () => void;
 }
@@ -15,14 +19,23 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function tabClass(active: boolean): string {
+  return active
+    ? "rounded px-2 py-0.5 text-accent"
+    : "rounded px-2 py-0.5 text-white/85 hover:bg-white/10";
+}
+
 /** Application top bar with a File menu and a recent-folders flyout. */
 export function TopBar({
   hasFolder,
   recents,
+  view = null,
   onOpenFolder,
   onOpenFile,
   onOpenRecent,
   onCloseFolder,
+  onOpenDashboard,
+  onOpenGraph,
   onOpenEndpoints,
   onOpenAi,
 }: Props) {
@@ -43,6 +56,28 @@ export function TopBar({
       >
         File
       </button>
+
+      {hasFolder && (
+        <button
+          type="button"
+          onClick={onOpenDashboard}
+          aria-pressed={view === "dashboard"}
+          className={tabClass(view === "dashboard")}
+        >
+          Dashboard
+        </button>
+      )}
+
+      {hasFolder && (
+        <button
+          type="button"
+          onClick={onOpenGraph}
+          aria-pressed={view === "graph"}
+          className={tabClass(view === "graph")}
+        >
+          Graph
+        </button>
+      )}
 
       {hasFolder && (
         <button

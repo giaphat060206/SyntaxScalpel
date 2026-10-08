@@ -11,18 +11,14 @@ import { TopBar } from "./TopBar";
 import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
 import { useProjectGraph } from "../project/useProjectGraph";
+import { DashboardView } from "../dashboard/DashboardView";
+import { folderScope, hasPath, projectView, type Location } from "./location";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
 import { AiResultView } from "../ai/AiResultView";
 import { requestKey } from "../ai/requests";
 import { EmphasisProvider, type Emphasis } from "../graph/emphasis";
 import { aiSummary, type AiRequest, type AiSummary } from "../../shared/ipc";
-
-type Location =
-  | { kind: "empty" }
-  | { kind: "folder"; path: string }
-  | { kind: "code"; path: string; select?: string }
-  | { kind: "endpoints" };
 
 const iconButton =
   "flex h-6 w-6 items-center justify-center rounded-full border border-accent/40 bg-panel text-accent hover:bg-accent/10";
@@ -91,10 +87,7 @@ export default function App() {
 
   // One scan of the open folder, shared by every view that describes it. It is
   // told nothing when a file is on screen, so reading code costs no project walk.
-  const projectState = useProjectGraph(
-    root,
-    location.kind === "folder" ? location.path : null
-  );
+  const projectState = useProjectGraph(root, folderScope(location));
 
   const handleOpenFolder = useCallback(
     (nextRoot: string) => {
@@ -102,8 +95,9 @@ export default function App() {
       setDocFile(null);
       setSelectedFile(null);
       remember(nextRoot);
-      // Show the project graph for the newly opened folder straight away.
-      setLocationState({ kind: "folder", path: "" });
+      // Land on the dashboard: it says what the project is, and the graph is one
+      // click away in the top bar.
+      setLocationState({ kind: "dashboard", path: "" });
     },
     [remember]
   );
@@ -197,7 +191,9 @@ export default function App() {
 
   const showDocs = Boolean((codeFile && docFile) || aiResult) && !docsCollapsed;
   const mainFile = showDocs && !aiResult ? codeFile : (codeFile ?? docFile);
-  const isPathLocation = location.kind === "folder" || location.kind === "code";
+  const isPathLocation = hasPath(location);
+  /** The path a path-shaped view is showing, so the narrowing happens once. */
+  const locationPath = hasPath(location) ? location.path : "";
 
   // What a Task may be pointed at. Which of it is chosen happens in the panel:
   // the Scope, a set of files in it, or Definitions in the open file.
@@ -261,10 +257,13 @@ export default function App() {
         <TopBar
           hasFolder={Boolean(root)}
           recents={recents}
+          view={projectView(location)}
           onOpenFolder={pickFolder}
           onOpenFile={handleOpenFile}
           onOpenRecent={handleOpenFolder}
           onCloseFolder={handleCloseFolder}
+          onOpenDashboard={() => setLocationState({ kind: "dashboard", path: folderScope(location) ?? "" })}
+          onOpenGraph={() => setLocationState({ kind: "folder", path: folderScope(location) ?? "" })}
           onOpenEndpoints={handleOpenEndpoints}
           onOpenAi={() => setAiOpen((value) => !value)}
         />
@@ -355,7 +354,7 @@ export default function App() {
                     onSelectFile={handleSelectFile}
                     onSelectFolder={handleSelectFolder}
                     onFocusFolder={handleFocusFolder}
-                    selectedFile={isPathLocation ? location.path : selectedFile}
+                    selectedFile={isPathLocation ? locationPath : selectedFile}
                     revealFolder={revealRequest}
                   />
                 </div>
@@ -367,7 +366,7 @@ export default function App() {
         <Panel minSize="20%" className="relative">
           {location.kind !== "empty" && (
             <Breadcrumb
-              path={isPathLocation ? location.path : ""}
+              path={isPathLocation ? locationPath : ""}
               kind={location.kind === "code" ? "code" : "folder"}
               onNavigate={setLocationState}
             />
@@ -377,7 +376,15 @@ export default function App() {
               location.kind === "empty" ? "h-full" : "h-[calc(100%-28px)]"
             }
           >
-            {location.kind === "folder" ? (
+            {location.kind === "dashboard" ? (
+              <ErrorBoundary>
+                <DashboardView
+                  state={projectState}
+                  onOpenGraph={() => setLocationState({ kind: "folder", path: location.path })}
+                  onOpenAi={() => setAiOpen(true)}
+                />
+              </ErrorBoundary>
+            ) : location.kind === "folder" ? (
               <ErrorBoundary>
                 <ProjectGraph
                   root={root ?? ""}

@@ -88,22 +88,31 @@ beforeEach(() => {
 });
 
 describe("App project scan", () => {
-  it("scans the open folder above the views, and hands the scan to the canvas", async () => {
+  it("lands on the dashboard, and shows the graph without scanning again", async () => {
     mocks.openDialog.mockResolvedValue("proj");
-    mocks.projectGraph.mockImplementation((root: string) =>
-      Promise.resolve(projectPayload(root))
-    );
     render(<App />);
 
     fireEvent.click(screen.getByText("Open Folder…"));
 
-    await waitFor(() => expect(mocks.projectGraph).toHaveBeenCalledWith("proj", ""));
+    // The project opens at its dashboard, not at the canvas.
+    expect(await screen.findByRole("heading", { name: "proj" })).toBeTruthy();
+    expect(mocks.projectGraph).toHaveBeenCalledWith("proj", "");
     expect(mocks.projectGraph).toHaveBeenCalledTimes(1);
+    expect(mocks.projectProps).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph" }));
+    await waitFor(() => expect(mocks.projectProps).toHaveBeenCalledTimes(1));
 
     // The canvas is given the scan rather than performing one itself.
     const calls = mocks.projectProps.mock.calls;
     const project = calls[calls.length - 1]?.[0];
-    await waitFor(() => expect(project.state).toMatchObject({ status: "ready" }));
+    expect(project.state).toMatchObject({ status: "ready" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard" }));
+    expect(await screen.findByRole("heading", { name: "proj" })).toBeTruthy();
+
+    // Two views of one folder, one walk of the project.
+    expect(mocks.projectGraph).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -114,7 +123,9 @@ describe("App wiring for the graph selections", () => {
 
     fireEvent.click(screen.getByText("Open Folder…"));
 
-    // The folder graph is the home view, so it renders as soon as a root exists.
+    // A project opens on its dashboard now, so reach the canvas from the top bar.
+    fireEvent.click(await screen.findByRole("button", { name: "Graph" }));
+
     await waitFor(() => expect(mocks.projectProps).toHaveBeenCalled());
     const projectCalls = mocks.projectProps.mock.calls;
     const project = projectCalls[projectCalls.length - 1]?.[0];
