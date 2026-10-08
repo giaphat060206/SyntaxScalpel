@@ -20,6 +20,8 @@ const DOC_DRIFT: &str = "You compare documentation against code. Using the docum
 
 const RELATIONSHIP: &str = "You explain how two parts of a codebase depend on each other. From the signatures, the import and the exact call sites given, say what passes between them, what each expects of the other, and what would have to change together. Quote a call site when it is the evidence for a claim.";
 
+const TOUR_STOP: &str = "You explain one stop on a guided reading tour of a codebase, to someone reading it in this order for the first time. Ignore the house rule about the answer format: this task answers with a single JSON object and nothing else, shaped {\"title\": \"a few words naming this part\", \"why\": \"two or three sentences on what it does and why it comes here, in Markdown\", \"lookAt\": [\"project-relative file or folder ids worth opening next\"]}. Every id in lookAt must appear in the input. Never invent one: an empty list is better than a guess.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Task {
@@ -29,16 +31,18 @@ pub enum Task {
     Impact,
     DocDrift,
     Relationship,
+    TourStop,
 }
 
 impl Task {
-    pub const ALL: [Task; 6] = [
+    pub const ALL: [Task; 7] = [
         Task::ExplainSelection,
         Task::ExplainArchitecture,
         Task::ProjectOverview,
         Task::Impact,
         Task::DocDrift,
         Task::Relationship,
+        Task::TourStop,
     ];
 
     pub fn id(self) -> &'static str {
@@ -49,6 +53,7 @@ impl Task {
             Task::Impact => "impact",
             Task::DocDrift => "doc-drift",
             Task::Relationship => "relationship",
+            Task::TourStop => "tour-stop",
         }
     }
 
@@ -64,6 +69,7 @@ impl Task {
             Task::Impact => IMPACT,
             Task::DocDrift => DOC_DRIFT,
             Task::Relationship => RELATIONSHIP,
+            Task::TourStop => TOUR_STOP,
         };
         body
     }
@@ -80,6 +86,9 @@ pub fn default_options(task: Task) -> Options {
         Task::Impact => Options { signatures: true, bodies: false, docs: false },
         Task::DocDrift => Options { signatures: true, bodies: false, docs: true },
         Task::Relationship => Options { signatures: true, bodies: false, docs: false },
+        // A stop explains what a piece of code does, so it needs the bodies; a
+        // tour is a reading order, not a documentation review.
+        Task::TourStop => Options { signatures: true, bodies: true, docs: false },
     }
 }
 
@@ -136,8 +145,22 @@ mod tests {
         unique.sort_unstable();
         unique.dedup();
 
-        assert_eq!(instructions.len(), 6);
-        assert_eq!(unique.len(), 6);
+        // Derived from ALL rather than a number: the property is that no two tasks
+        // share an instruction, and adding a task should not mean editing a count.
+        assert_eq!(unique.len(), Task::ALL.len());
+    }
+
+    #[test]
+    fn the_tour_task_asks_for_json_and_knows_it_overrides_the_house_rules() {
+        let instruction = Task::TourStop.instruction();
+
+        assert!(instruction.contains("JSON"));
+        // The house rules say to answer in Markdown, so the tour task has to say so.
+        assert!(instruction.contains("Ignore the house rule about the answer format"));
+        assert!(instruction.contains("Never invent one"));
+        // A stop explains what code does, so it pays for bodies.
+        let options = default_options(Task::TourStop);
+        assert!(options.signatures && options.bodies && !options.docs);
     }
 
     #[test]
