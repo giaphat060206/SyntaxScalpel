@@ -19,11 +19,21 @@ export interface ProjectSummary {
   codeFiles: number;
   docFiles: number;
   folders: number;
+  /** Every in-scope file, code and docs together. */
   bytes: number;
+  /** What the language ratio measures, so its shares add up to the whole. */
+  codeBytes: number;
+  /** Bytes in doc files: reported, and deliberately not part of the ratio. */
+  docBytes: number;
   edges: number;
   externalFiles: number;
   entryPoints: string[];
-  /** Sorted by bytes, largest first; ties broken by name so it cannot flap. */
+  /**
+   * Sorted by bytes, largest first; ties broken by name so it cannot flap.
+   * Code files only: a Markdown file or a lockfile belongs to the project, but it
+   * is not a language the project is written in, and counting it makes the ratio
+   * describe the repository rather than the code.
+   */
   languages: LanguageShare[];
   largestFiles: FileSize[];
   truncated: boolean;
@@ -43,9 +53,11 @@ function inScope(graph: ProjectGraph): ProjectFile[] {
 export function summariseProject(graph: ProjectGraph): ProjectSummary {
   const files = inScope(graph);
   const bytes = files.reduce((total, file) => total + file.sizeBytes, 0);
+  const code = files.filter((file) => file.kind === "code");
+  const codeBytes = code.reduce((total, file) => total + file.sizeBytes, 0);
 
   const grouped = new Map<string, LanguageShare>();
-  for (const file of files) {
+  for (const file of code) {
     const language = languageForName(file.name);
     const entry = grouped.get(language) ?? { language, files: 0, bytes: 0, share: 0 };
     entry.files += 1;
@@ -54,7 +66,7 @@ export function summariseProject(graph: ProjectGraph): ProjectSummary {
   }
 
   const languages = [...grouped.values()]
-    .map((entry) => ({ ...entry, share: bytes > 0 ? entry.bytes / bytes : 0 }))
+    .map((entry) => ({ ...entry, share: codeBytes > 0 ? entry.bytes / codeBytes : 0 }))
     .sort((a, b) => b.bytes - a.bytes || a.language.localeCompare(b.language));
 
   const largestFiles = files
@@ -64,10 +76,12 @@ export function summariseProject(graph: ProjectGraph): ProjectSummary {
 
   return {
     files: files.length,
-    codeFiles: files.filter((file) => file.kind === "code").length,
-    docFiles: files.filter((file) => file.kind === "doc").length,
+    codeFiles: code.length,
+    docFiles: files.length - code.length,
     folders: graph.folders.length,
     bytes,
+    codeBytes,
+    docBytes: bytes - codeBytes,
     edges: graph.edges.length,
     externalFiles: graph.files.length - files.length,
     entryPoints: graph.entries ?? (graph.entry ? [graph.entry] : []),

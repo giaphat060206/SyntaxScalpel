@@ -51,8 +51,38 @@ describe("summariseProject", () => {
     expect(summary.languages.map((entry) => [entry.language, entry.files, entry.bytes])).toEqual([
       ["Python", 2, 1100],
       ["TypeScript", 1, 400],
-      ["Text", 1, 5],
     ]);
+  });
+
+  it("keeps doc files out of the ratio but not out of the totals", () => {
+    const summary = summariseProject(
+      project([
+        file("main.py", "code", 1000),
+        file("README.md", "doc", 500),
+        file("config.json", "doc", 250),
+      ])
+    );
+
+    // The ratio is what the project is written in, so it is Python and nothing else.
+    expect(summary.languages).toEqual([
+      { language: "Python", files: 1, bytes: 1000, share: 1 },
+    ]);
+    expect(summary.codeBytes).toBe(1000);
+    // The docs are still part of the project, and still reported.
+    expect(summary.docFiles).toBe(2);
+    expect(summary.docBytes).toBe(750);
+    expect(summary.bytes).toBe(1750);
+  });
+
+  it("has no ratio at all when a project is only docs", () => {
+    const summary = summariseProject(
+      project([file("README.md", "doc", 500), file("LICENSE", "doc", 100)])
+    );
+
+    expect(summary.languages).toEqual([]);
+    expect(summary.codeFiles).toBe(0);
+    expect(summary.docFiles).toBe(2);
+    expect(summary.bytes).toBe(600);
   });
 
   it("measures a share by bytes, and the shares add up to the whole", () => {

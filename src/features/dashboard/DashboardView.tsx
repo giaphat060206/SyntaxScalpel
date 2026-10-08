@@ -42,23 +42,23 @@ function Dashboard({
 }) {
   const summary = summariseProject(graph);
 
-  // An empty project measures zero bytes, so the ratio falls back to file counts
-  // and says which measure it used rather than drawing an empty ring.
-  const byBytes = summary.bytes > 0;
+  // The ratio covers code files, so it counts those when none of them has a
+  // measured size, and falls back to file counts rather than drawing an empty ring.
+  const byBytes = summary.codeBytes > 0;
   const measure = byBytes ? "bytes" : "file count";
   const slices = summary.languages.map((entry) => ({
     label: entry.language,
     share: byBytes
       ? entry.share
-      : summary.files > 0
-        ? entry.files / summary.files
+      : summary.codeFiles > 0
+        ? entry.files / summary.codeFiles
         : 0,
     color: colorForNode(entry.language),
   }));
   const ratioLabel =
     slices.length === 0
-      ? "Language ratio: no files"
-      : `Language ratio by ${measure}: ${slices
+      ? "Language ratio: no code files"
+      : `Language ratio by ${measure} (code files): ${slices
           .map((slice) => `${slice.label} ${percent(slice.share)}`)
           .join(", ")}`;
 
@@ -145,11 +145,19 @@ function Dashboard({
         </section>
 
         <section className="rounded border border-white/10 bg-panel p-4">
-          <h2 className="mb-3 text-xs uppercase tracking-wider text-dimmed">
+          <h2 className="text-xs uppercase tracking-wider text-dimmed">
             Languages by {measure}
           </h2>
+          <p className="mb-3 text-[11px] text-dimmed">
+            Code files only
+            {summary.docFiles > 0
+              ? ` — ${summary.docFiles} doc ${
+                  summary.docFiles === 1 ? "file" : "files"
+                } (${formatBytes(summary.docBytes)}) left out`
+              : ""}
+          </p>
           {slices.length === 0 ? (
-            <p className="text-xs text-dimmed">No files to measure.</p>
+            <p className="text-xs text-dimmed">No code files to measure.</p>
           ) : (
             <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
               <Donut slices={slices} label={ratioLabel} />

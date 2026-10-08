@@ -95,8 +95,25 @@ describe("DashboardView", () => {
     show(project([file("a.py", "code", 750), file("b.ts", "code", 250)]));
 
     expect(
-      screen.getByRole("img", { name: /^Language ratio by bytes: Python 75%, TypeScript 25%$/ })
+      screen.getByRole("img", {
+        name: /^Language ratio by bytes \(code files\): Python 75%, TypeScript 25%$/,
+      })
     ).toBeTruthy();
+  });
+
+  it("leaves doc files out of the ratio and says what they weigh", () => {
+    show(project([file("main.py", "code", 1000), file("README.md", "doc", 500)]));
+
+    // Python is the whole ratio: a README is not a language the project is written in.
+    expect(
+      screen.getByRole("img", {
+        name: /^Language ratio by bytes \(code files\): Python 100%$/,
+      })
+    ).toBeTruthy();
+    expect(screen.queryByText("Markdown")).toBeNull();
+    expect(screen.getByText(/Code files only — 1 doc file \(500 B\) left out/)).toBeTruthy();
+    // The project's own size still counts it.
+    expect(screen.getByText("1.5 KB")).toBeTruthy();
   });
 
   it("says when the scan was cut short, and stays quiet when it was not", () => {
@@ -117,7 +134,9 @@ describe("DashboardView", () => {
   it("falls back to file counts when the project measures no bytes at all", () => {
     show(project([file("a.py", "code", 0), file("b.ts", "code", 0)]));
 
-    expect(screen.getByRole("img", { name: /^Language ratio by file count:/ })).toBeTruthy();
+    expect(
+      screen.getByRole("img", { name: /^Language ratio by file count \(code files\):/ })
+    ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Languages by file count" })).toBeTruthy();
   });
 
