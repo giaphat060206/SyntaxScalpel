@@ -29,7 +29,8 @@ function project(
   overrides: Partial<ProjectGraph> = {}
 ): ProjectGraph {
   return {
-    root: "/home/me/pathfinder",
+    // The payload's root is the scope id, not a path: "." is the whole project.
+    root: ".",
     folders: [],
     files,
     edges: [],
@@ -38,11 +39,18 @@ function project(
   };
 }
 
-function show(graph: ProjectGraph) {
+const PROJECT_ROOT = "/home/me/pathfinder";
+
+function show(graph: ProjectGraph, root = PROJECT_ROOT) {
   const onOpenGraph = vi.fn();
   const onOpenAi = vi.fn();
   render(
-    <DashboardView state={{ status: "ready", value: graph }} onOpenGraph={onOpenGraph} onOpenAi={onOpenAi} />
+    <DashboardView
+      root={root}
+      state={{ status: "ready", value: graph }}
+      onOpenGraph={onOpenGraph}
+      onOpenAi={onOpenAi}
+    />
   );
   return { onOpenGraph, onOpenAi };
 }
@@ -50,7 +58,12 @@ function show(graph: ProjectGraph) {
 describe("DashboardView", () => {
   it("says it is reading the project before the payload arrives", () => {
     render(
-      <DashboardView state={{ status: "loading" }} onOpenGraph={() => {}} onOpenAi={() => {}} />
+      <DashboardView
+        root={PROJECT_ROOT}
+        state={{ status: "loading" }}
+        onOpenGraph={() => {}}
+        onOpenAi={() => {}}
+      />
     );
 
     expect(screen.getByText(/reading the project/)).toBeTruthy();
@@ -59,6 +72,7 @@ describe("DashboardView", () => {
   it("shows the load error instead of a dashboard", () => {
     render(
       <DashboardView
+        root={PROJECT_ROOT}
         state={{ status: "error", message: "permission denied" }}
         onOpenGraph={() => {}}
         onOpenAi={() => {}}
@@ -91,6 +105,23 @@ describe("DashboardView", () => {
     expect(screen.getByText("412 B")).toBeTruthy();
   });
 
+  it("titles a subfolder dashboard for that subfolder, and shows its full path", () => {
+    show(project([file("a.py", "code", 4)], { root: "src/parser" }));
+
+    expect(screen.getByRole("heading", { name: "parser" })).toBeTruthy();
+    expect(screen.getByText("/home/me/pathfinder/src/parser")).toBeTruthy();
+  });
+
+  it("never prints the payload's scope id as the project name", () => {
+    show(project([file("a.py", "code", 4)]));
+
+    // The regression: the payload's root is the scope id, "." for the whole
+    // project, and using it as a path made the header read as two stray dots.
+    expect(screen.getByRole("heading", { name: "pathfinder" })).toBeTruthy();
+    expect(screen.getByText("/home/me/pathfinder")).toBeTruthy();
+    expect(screen.queryByText(".")).toBeNull();
+  });
+
   it("labels the donut with each language's share of the bytes", () => {
     show(project([file("a.py", "code", 750), file("b.ts", "code", 250)]));
 
@@ -121,6 +152,7 @@ describe("DashboardView", () => {
   it("says when the scan was cut short, and stays quiet when it was not", () => {
     const { unmount } = render(
       <DashboardView
+        root={PROJECT_ROOT}
         state={{ status: "ready", value: project([file("a.py", "code", 1)], { truncated: true }) }}
         onOpenGraph={() => {}}
         onOpenAi={() => {}}
@@ -160,6 +192,7 @@ describe("DashboardView", () => {
   it("lists entry points in its own section, and says when there are none", () => {
     const { unmount } = render(
       <DashboardView
+        root={PROJECT_ROOT}
         state={{
           status: "ready",
           value: project([file("main.py", "code", 4)], { entry: "main.py" }),

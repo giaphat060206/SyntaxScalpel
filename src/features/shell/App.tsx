@@ -379,6 +379,7 @@ export default function App() {
             {location.kind === "dashboard" ? (
               <ErrorBoundary>
                 <DashboardView
+                  root={root ?? ""}
                   state={projectState}
                   onOpenGraph={() => setLocationState({ kind: "folder", path: location.path })}
                   onOpenAi={() => setAiOpen(true)}

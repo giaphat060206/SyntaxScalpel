@@ -6,6 +6,12 @@ import { formatBytes, summariseProject } from "./summary";
 import { Bars, Donut, Split } from "./Charts";
 
 interface Props {
+  /**
+   * The absolute project root. The payload's own `root` is the scope id — `"."`
+   * for the whole project, the same convention as a folder id — so it names the
+   * folder being described, not a path a reader would recognise.
+   */
+  root: string;
   state: LoadState<ProjectGraph>;
   onOpenGraph: () => void;
   onOpenAi: () => void;
@@ -21,26 +27,40 @@ function percent(share: number): string {
 
 /** What a project is made of, at a glance. Read-only: everything here is derived
  *  from the project graph the canvas already needs. */
-export function DashboardView({ state, onOpenGraph, onOpenAi }: Props) {
+export function DashboardView({ root, state, onOpenGraph, onOpenAi }: Props) {
   if (state.status === "idle" || state.status === "loading") {
     return <EmptyState message="reading the project…" />;
   }
   if (state.status === "error") {
     return <ErrorState message={state.message} />;
   }
-  return <Dashboard graph={state.value} onOpenGraph={onOpenGraph} onOpenAi={onOpenAi} />;
+  return (
+    <Dashboard
+      root={root}
+      graph={state.value}
+      onOpenGraph={onOpenGraph}
+      onOpenAi={onOpenAi}
+    />
+  );
 }
 
 function Dashboard({
+  root,
   graph,
   onOpenGraph,
   onOpenAi,
 }: {
+  root: string;
   graph: ProjectGraph;
   onOpenGraph: () => void;
   onOpenAi: () => void;
 }) {
   const summary = summariseProject(graph);
+
+  // The graph's own root is the scope id, so the folder this dashboard describes is
+  // the project root plus that scope — and a subfolder dashboard is titled for it.
+  const scope = graph.root;
+  const scopedPath = scope === "." || scope === "" ? root : `${root}/${scope}`;
 
   // The ratio covers code files, so it counts those when none of them has a
   // measured size, and falls back to file counts rather than drawing an empty ring.
@@ -78,10 +98,10 @@ function Dashboard({
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-[12rem] flex-1">
             <h1 className="truncate text-lg font-medium text-white">
-              {baseName(graph.root)}
+              {baseName(scopedPath)}
             </h1>
-            <p className="truncate text-xs text-dimmed" title={graph.root}>
-              {graph.root}
+            <p className="truncate text-xs text-dimmed" title={scopedPath}>
+              {scopedPath}
             </p>
           </div>
           <div className="ml-auto flex shrink-0 gap-2">
