@@ -88,6 +88,40 @@ beforeEach(() => {
 });
 
 describe("App project scan", () => {
+  it("opens a tour from the top bar and moves the canvas to its first step", async () => {
+    mocks.openDialog.mockResolvedValue("proj");
+    mocks.projectGraph.mockResolvedValue({
+      root: ".",
+      folders: [{ id: ".", name: "proj", depth: 0 }],
+      files: [
+        {
+          id: "main.py",
+          name: "main.py",
+          folderId: ".",
+          kind: "code",
+          sizeBytes: 10,
+          imports: [],
+        },
+      ],
+      edges: [],
+      truncated: false,
+      entry: "main.py",
+    });
+    render(<App />);
+
+    fireEvent.click(screen.getByText("Open Folder…"));
+    await screen.findByRole("heading", { name: "proj" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Tour" }));
+
+    // The screen changes to the project graph, with the tour beside it.
+    expect(await screen.findByText(/A suggested reading order/)).toBeTruthy();
+    const calls = mocks.projectProps.mock.calls;
+    const canvas = calls[calls.length - 1]?.[0];
+    // Step one is the scope's own folder, and a fresh nonce is what re-triggers it.
+    expect(canvas.focus).toMatchObject({ id: "." });
+    expect(canvas.focus.nonce).toBeGreaterThan(0);
+  });
   it("lands on the dashboard, and shows the graph without scanning again", async () => {
     mocks.openDialog.mockResolvedValue("proj");
     render(<App />);

@@ -58,6 +58,12 @@ function depthsFrom(graph: ProjectGraph, entry: string, inScope: Set<string>): M
  */
 export function planTour(graph: ProjectGraph): TourPlan {
   const code = graph.files.filter((file) => !file.external && file.kind === "code");
+  // Nothing to read in order: a project of docs has no tour, and saying so beats a
+  // one-step tour that only names the folder you are already looking at.
+  if (code.length === 0) {
+    return { steps: [], dropped: 0, truncated: false };
+  }
+
   const inScope = new Set(code.map((file) => file.id));
   const folderIds = new Set(graph.folders.map((folder) => folder.id));
   const folderOf = new Map(code.map((file) => [file.id, file.folderId]));

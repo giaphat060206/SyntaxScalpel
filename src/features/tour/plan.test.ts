@@ -177,6 +177,14 @@ describe("planTour", () => {
     expect(plan.steps.map((step) => step.nodeId)).toEqual(["src", "src/app.py", "src/util.py"]);
   });
 
+  it("has no steps at all when there is no code to tour", () => {
+    const plan = planTour(graph([file("README.md", "", "doc"), file("LICENSE", "", "doc")]));
+
+    // A one-step tour that only names the folder would read as a tour that failed.
+    expect(plan.steps).toEqual([]);
+    expect(plan.truncated).toBe(false);
+  });
+
   it("still gives a usable first step when the payload's root is not a node", () => {
     const plan = planTour(
       graph([file("app.py")], [], {

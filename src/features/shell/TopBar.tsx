@@ -5,12 +5,16 @@ interface Props {
   recents: string[];
   /** Which project view is showing, so its button reads as the current one. */
   view?: "dashboard" | "graph" | null;
+  /** The tour panel is open, so its button reads as the current one. */
+  tourOpen?: boolean;
   onOpenFolder: () => void;
   onOpenFile: () => void;
   onOpenRecent: (path: string) => void;
   onCloseFolder: () => void;
   onOpenDashboard: () => void;
   onOpenGraph: () => void;
+  /** Absent until the shell can open a tour, so the button is not offered unwired. */
+  onOpenTour?: () => void;
   onOpenEndpoints: () => void;
   onOpenAi: () => void;
 }
@@ -30,12 +34,14 @@ export function TopBar({
   hasFolder,
   recents,
   view = null,
+  tourOpen = false,
   onOpenFolder,
   onOpenFile,
   onOpenRecent,
   onCloseFolder,
   onOpenDashboard,
   onOpenGraph,
+  onOpenTour,
   onOpenEndpoints,
   onOpenAi,
 }: Props) {
@@ -76,6 +82,17 @@ export function TopBar({
           className={tabClass(view === "graph")}
         >
           Graph
+        </button>
+      )}
+
+      {hasFolder && onOpenTour && (
+        <button
+          type="button"
+          onClick={onOpenTour}
+          aria-pressed={tourOpen}
+          className={tabClass(tourOpen)}
+        >
+          Tour
         </button>
       )}
 

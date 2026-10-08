@@ -12,6 +12,8 @@ import { useRecents } from "./useRecents";
 import { ProjectGraph } from "../project/ProjectGraph";
 import { useProjectGraph } from "../project/useProjectGraph";
 import { DashboardView } from "../dashboard/DashboardView";
+import { TourPanel } from "../tour/TourPanel";
+import { useTour } from "../tour/useTour";
 import { folderScope, hasPath, projectView, type Location } from "./location";
 import { EndpointsPane } from "../endpoints/EndpointsPane";
 import { AiPanel } from "../ai/AiPanel";
@@ -88,6 +90,43 @@ export default function App() {
   // One scan of the open folder, shared by every view that describes it. It is
   // told nothing when a file is on screen, so reading code costs no project walk.
   const projectState = useProjectGraph(root, folderScope(location));
+
+  // The folder on screen, as a path a reader recognises (the payload's root id is
+  // the scope, not a path).
+  const scopePath = (() => {
+    const scope = folderScope(location) ?? "";
+    return scope === "." || scope === "" || !root ? (root ?? "") : `${root}/${scope}`;
+  })();
+
+  // A tour plans itself from the payload the canvas already has, so it opens with no
+  // request at all and works with no API key.
+  const [tourOpen, setTourOpen] = useState(false);
+  const tour = useTour(projectState.status === "ready" ? projectState.value : null);
+  const tourStep = tour.step;
+
+  // Moving to a step moves the canvas, through the same focus request a search pick
+  // and a relationship row already use — which selects the node as well as centring
+  // it — plus an emphasis on the step's folder, so a step shows where its file lives.
+  useEffect(() => {
+    if (!tourOpen || !tourStep) {
+      return;
+    }
+    setEmphasis({ ids: [tourStep.nodeId, ...tourStep.alsoIds] });
+    setFocusRequest((prev) => ({ id: tourStep.nodeId, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, [tourOpen, tourStep]);
+
+  const openTour = useCallback(() => {
+    setTourOpen(true);
+    // A tour describes the graph, so open it where the graph is.
+    setLocationState((current) =>
+      current.kind === "empty" ? current : { kind: "folder", path: folderScope(current) ?? "" }
+    );
+  }, []);
+
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    setEmphasis(null);
+  }, []);
 
   const handleOpenFolder = useCallback(
     (nextRoot: string) => {
@@ -264,6 +303,8 @@ export default function App() {
           onCloseFolder={handleCloseFolder}
           onOpenDashboard={() => setLocationState({ kind: "dashboard", path: folderScope(location) ?? "" })}
           onOpenGraph={() => setLocationState({ kind: "folder", path: folderScope(location) ?? "" })}
+          tourOpen={tourOpen}
+          onOpenTour={openTour}
           onOpenEndpoints={handleOpenEndpoints}
           onOpenAi={() => setAiOpen((value) => !value)}
         />
@@ -425,7 +466,21 @@ export default function App() {
           )}
         </Panel>
 
-        {showDocs && (
+        {tourOpen ? (
+          <>
+            <Separator className="w-1 bg-white/10 transition-colors hover:bg-accent/50" />
+            <Panel defaultSize="32%" minSize="15%">
+              <TourPanel
+                plan={tour.plan}
+                steps={tour.steps}
+                index={tour.index}
+                scopePath={scopePath}
+                onGoTo={tour.goTo}
+                onClose={closeTour}
+              />
+            </Panel>
+          </>
+        ) : showDocs && (
           <>
             <Separator className="w-1 bg-white/10 transition-colors hover:bg-accent/50" />
             <Panel defaultSize="40%" minSize="15%">
