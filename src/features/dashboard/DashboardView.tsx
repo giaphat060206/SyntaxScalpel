@@ -75,7 +75,7 @@ function Dashboard({
   return (
     <div className="h-full overflow-auto bg-bg p-5">
       <div className="mx-auto flex max-w-3xl flex-col gap-5">
-        <header className="flex items-start justify-between gap-4">
+        <header className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <h1 className="truncate text-lg font-medium text-white">
               {baseName(graph.root)}
@@ -84,7 +84,7 @@ function Dashboard({
               {graph.root}
             </p>
           </div>
-          <div className="flex shrink-0 gap-2">
+          <div className="ml-auto flex shrink-0 gap-2">
             <button
               type="button"
               onClick={onOpenGraph}

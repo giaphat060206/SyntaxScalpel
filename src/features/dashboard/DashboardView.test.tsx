@@ -176,6 +176,17 @@ describe("DashboardView", () => {
     expect(screen.getByText("None detected.")).toBeTruthy();
   });
 
+  it("lets the header wrap instead of squeezing the title to nothing", () => {
+    show(project([file("a.py", "code", 4)]));
+
+    // The buttons are shrink-0, so without wrapping every pixel of a narrow pane
+    // comes off the title block, and `truncate` then draws a bare ellipsis where
+    // the project name and path should be. jsdom has no layout, so the class that
+    // prevents it is the only thing a test can hold onto.
+    const header = screen.getByRole("heading", { name: "pathfinder" }).closest("header");
+    expect(header?.className).toContain("flex-wrap");
+  });
+
   it("opens the graph and the AI panel from its own buttons", () => {
     const { onOpenGraph, onOpenAi } = show(project([file("a.py", "code", 4)]));
 
