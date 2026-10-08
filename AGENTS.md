@@ -237,6 +237,22 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   charting dependency: it would grow a bundle already past the chunk warning and make the chart untestable.
 - `vitest.config.ts` sets no `globals`, so Testing Library's automatic cleanup never registers: **a suite that renders
   more than once must call `afterEach(cleanup)`**, or the previous test's DOM answers the next test's queries.
+- A **Tour** is a reading order, not documentation. The steps are computed, never asked for: `features/tour/plan.ts`
+  takes the scope's own folder, then the detected entry point, then outward by import hops and in-degree, with ties
+  broken by path so two runs cannot produce different tours. External files and docs are left out, a step carries the
+  folder its file lives in so both highlight together, and the cap reports `dropped` rather than truncating quietly.
+  The model writes each stop's prose and **never chooses the order**.
+- **A tour works with no API key**, because the plan is derived from the payload the canvas already holds. `tour-stop`
+  is the one Task whose answer is JSON rather than Markdown — its instruction says outright that it overrides the
+  house rules, or the appended ones would have the last word — and `features/tour/prose.ts` is the other half of that
+  contract: it tolerates a fenced or chatty answer and **drops any id that is not in the payload, counting it**.
+  Change the prompt's shape and that parser together.
+- The tour adds **no second way out of the machine**: it uses `useAiSettings`, `useCachedMarks` and
+  `features/ai/egress.ts` exactly as the AI panel does, so a step already stored is read locally without a notice and
+  a step that would reach the provider asks first. Any new AI surface must reuse those three, never re-implement them.
+- A step points at a canvas **node id** and highlights its folder beside it (`alsoIds`), through the same `focus` and
+  `emphasis` mechanics a search pick and a relationship row already use. A step's identity is always the real id and
+  path; an AI-named title is a subtitle, never the identity.
 
 ## Style and workflow
 

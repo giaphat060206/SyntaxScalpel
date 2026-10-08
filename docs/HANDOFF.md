@@ -130,6 +130,18 @@ GLOSSARY.md              domain vocabulary
 - `Graph` shows the project graph for the same folder, and switching between the two does **not** rescan: `App` owns
   one `useProjectGraph(root, scope)` and hands it to both views.
 
+### Tour
+- A reading order for the code: the scope's own folder, then the detected entry point, then outward by import hops
+  and in-degree, capped at 12 steps with the number left out shown. The order is **computed, never asked for**, so
+  two runs agree and a project with no API key still has a tour; a project of docs plans no steps at all.
+- The **Tour** button opens the panel beside the graph and switches to it. Each step moves the canvas, selects the
+  node and highlights its folder beside it. Arrow keys move, and the counter says where you are.
+- A step's explanation is one request on the AI panel's terms: a stored answer is read locally and needs no notice,
+  anything else asks first and names the provider and the file. Ids the answer names that are not in the payload are
+  dropped and counted rather than highlighted.
+- `tourMarkdown` writes the tour out as a document. The panel does **not** offer it yet — there is no button — and
+  the Explain flow has no behavioural test, only the compiler guard on the wiring.
+
 ### Project graph
 - Folder blocks contain files/subfolders; file→file import edges; entry-point Start panel; external nodes.
 - Right-click menu: Re-align, Fit view, Open folder/file graph. Double-click a block navigates.
@@ -222,9 +234,13 @@ GLOSSARY.md              domain vocabulary
 - The project **Dashboard** landed on `main` in six commits: `ProjectFile.sizeBytes`, `features/dashboard/`
   (`languages.ts`, `summary.ts`, `Charts.tsx`, `DashboardView.tsx`), `useProjectGraph` owning the one project scan,
   and the dashboard `Location` with the top-bar buttons. A project now opens on the dashboard.
-- Suites green at the time of writing: `npm test` (**236** tests in 33 files), `npm run build`, `cargo test`
-  (**277** tests). The dashed blocks are unit-tested (including that the outline is dashed) but have **not** been
-  visually reviewed, and neither has the dashboard.
+- The **Tour** landed on `main` in seven commits: the plan computed from the parse
+  (`features/tour/plan.ts`), the panel wired to the canvas focus and emphasis, the `tour-stop` Task and
+  `features/tour/prose.ts`, the prose path that reuses the AI panel's settings, marks and egress helpers, the
+  provider label its notice names, the panel side of the explanations, and the Markdown export.
+- Suites green at the time of writing: `npm test` (**284** tests in 38 files), `npm run build`, `cargo test`
+  (**278** tests). The dashed blocks are unit-tested (including that the outline is dashed) but have **not** been
+  visually reviewed; neither has the dashboard, and neither has the tour.
 
 ## 8. Known gaps / next steps
 
