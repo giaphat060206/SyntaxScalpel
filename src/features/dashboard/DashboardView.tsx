@@ -172,11 +172,6 @@ function Dashboard({
                 <ul className="m-0 mt-3 list-none space-y-1 p-0">
                   {summary.languages.map((entry) => (
                     <li key={entry.language} className="flex items-center gap-2 text-xs">
-                      <span
-                        aria-hidden="true"
-                        className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                        style={{ background: colorForNode(entry.language) }}
-                      />
                       <span className="min-w-0 flex-1 truncate text-white/85">{entry.language}</span>
                       <span className="text-dimmed">{percent(entry.share)}</span>
                       <span className="w-16 text-right text-dimmed">
