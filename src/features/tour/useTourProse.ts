@@ -114,7 +114,9 @@ export function useTourProse(
     state,
     cached: (nodeId: string) => Boolean(marks[requestSignature(requestFor(nodeId))]),
     checking,
-    needsKey: settings.ready && !settings.hasKey,
+    // `ready` is the panel's shorthand for "a key is held", so asking it here as well
+    // made this false whenever it mattered. The key that counts is this provider's.
+    needsKey: !settings.hasKey,
     providerLabel:
       PROVIDERS.find((entry) => entry.id === settings.provider)?.label ?? settings.provider,
     pending,
