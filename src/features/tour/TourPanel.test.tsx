@@ -222,7 +222,22 @@ describe("TourPanel explanations", () => {
   it("offers nothing to ask for while a key is missing", () => {
     showWithProse(proseFixture({ needsKey: true }));
 
-    expect(screen.getByText(/Add an API key in the AI panel/)).toBeTruthy();
+    expect(screen.getByText(/No OpenRouter key yet/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
+  });
+
+  it("says which provider the tour would send to, so it is never a surprise", () => {
+    showWithProse(proseFixture({ providerLabel: "DeepSeek" }));
+
+    // The tour has no provider of its own: it says which one it inherited.
+    expect(screen.getByText(/via DeepSeek/)).toBeTruthy();
+  });
+
+  it("names the provider whose key is missing, and says where to change it", () => {
+    showWithProse(proseFixture({ needsKey: true, providerLabel: "DeepSeek" }));
+
+    expect(screen.getByText(/No DeepSeek key yet/)).toBeTruthy();
+    expect(screen.getByText(/pick another provider there/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
   });
 

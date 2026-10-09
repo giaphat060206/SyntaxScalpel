@@ -74,6 +74,10 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
         <div className="min-w-0">
           <p className="truncate text-xs text-white/85" title={scopePath}>
             Tour · {baseName(scopePath)}
+            {/* The tour has no provider of its own — it uses the one the AI panel has
+                selected — so it says which that is, rather than leaving it to be
+                discovered at the notice. */}
+            {prose && <span className="text-dimmed"> · via {prose.providerLabel}</span>}
           </p>
           <p className="text-[11px] text-dimmed">A suggested reading order, not documentation.</p>
         </div>
@@ -208,7 +212,8 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
                       prose.pending === null &&
                       (prose.needsKey ? (
                         <p className="text-[11px] text-dimmed">
-                          Add an API key in the AI panel to have steps explained.
+                          No {prose.providerLabel} key yet — add one in the AI panel to
+                          have steps explained, or pick another provider there.
                         </p>
                       ) : (
                         <button
