@@ -236,16 +236,33 @@ GLOSSARY.md              domain vocabulary
 - The project **Dashboard** landed on `main` in six commits: `ProjectFile.sizeBytes`, `features/dashboard/`
   (`languages.ts`, `summary.ts`, `Charts.tsx`, `DashboardView.tsx`), `useProjectGraph` owning the one project scan,
   and the dashboard `Location` with the top-bar buttons. A project now opens on the dashboard.
-- The **Tour** landed on `main` in seven commits: the plan computed from the parse
+- The **Tour** landed on `main` in twelve commits: the plan computed from the parse
   (`features/tour/plan.ts`), the panel wired to the canvas focus and emphasis, the `tour-stop` Task and
   `features/tour/prose.ts`, the prose path that reuses the AI panel's settings, marks and egress helpers, the
-  provider label its notice names, the panel side of the explanations, and the Markdown export.
-- Suites green at the time of writing: `npm test` (**284** tests in 38 files), `npm run build`, `cargo test`
-  (**278** tests). The dashed blocks are unit-tested (including that the outline is dashed) but have **not** been
-  visually reviewed; neither has the dashboard, and neither has the tour.
+  provider label its notice names, the panel side of the explanations, the Markdown export, and the ticks and
+  highlight that show which steps are already stored.
+- After it, on `main`: the AI settings became a **shared store** (the tour had been reading a provider chosen when
+  the app started, and never saw a change), the provider and key moved to a top-bar **Settings** popover, every Task
+  gained a named **answer shape** in `prompts.rs`, OpenRouter's public **model catalogue** became a picker, and the
+  AI panel stopped keeping its own copy of the connection fields.
+- Suites green at the time of writing: `npm test` (**301** tests in 40 files), `npm run build`, `cargo test`
+  (**285** tests). The dashed blocks are unit-tested (including that the outline is dashed) but have **not** been
+  visually reviewed; neither has the dashboard, nor the tour, nor the settings popover.
 
 ## 8. Known gaps / next steps
 
+- **No UI test for the model suggestions, or for the cached-step highlight.** `parse_models` has five Rust tests;
+  nothing asserts that a model field offers suggestions, or that a stored step is marked and tinted. The negative
+  check for the highlight could not bite without one, which is how this was noticed.
+- **A provider or model change silently invalidates stored answers.** The cache key is
+  `cache_input(provider.id, model, prompt)`, so switching either genuinely re-asks the provider — correct, but
+  invisible, and the likeliest reason a step looks like it regenerated for nothing. The fix is small: when a step is
+  stored for a *different* model, say so rather than offering a bare "Explain this step".
+- **The tasks' answer shapes are unverified against a real provider.** The skeletons live in `prompts.rs` and the
+  tests guard the instructions, not the model's compliance with them. Judging them needs a key and a few runs — and
+  changing an instruction afterwards invalidates that task's stored answers again.
+- **`v0.1.0` still points at `5a499bc`**, before the bundle-identifier and Node 24 fixes; it needs
+  `git tag -f v0.1.0` and a push. `main` is ahead of `origin`.
 - `@openapi` handler navigation resolves the controller import file but keeps the route-local handler id; it only
   selects correctly when the controller module names the object as the import alias does.
 - Multiple spec files with different API bases use the first declared base.
