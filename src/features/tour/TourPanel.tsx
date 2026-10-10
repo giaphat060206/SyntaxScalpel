@@ -150,6 +150,14 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
             >
               <span className="text-[10px] uppercase tracking-wider text-dimmed">
                 {position + 1}. {KIND[step.kind]}
+                {/* A step whose answer is already stored costs nothing to open, and
+                    saying so is the difference between a tour that resumes and one
+                    that looks like it starts from nothing every session. */}
+                {prose?.cached(step.nodeId) === true && (
+                  <span className="ml-1 text-accent" title="already generated">
+                    ✓
+                  </span>
+                )}
               </span>
               <span className="block break-all text-white/90">{step.nodeId}</span>
               <span className="block text-[11px] text-dimmed">{describe(step)}</span>

@@ -241,6 +241,20 @@ describe("TourPanel explanations", () => {
     expect(screen.queryByRole("button", { name: "Explain this step" })).toBeNull();
   });
 
+  it("marks the steps whose answers are already stored", () => {
+    // A stored answer is read from this machine, so those steps cost nothing to open.
+    // The marker is what tells a reader the tour resumes rather than restarts.
+    showWithProse(proseFixture({ cached: () => true }));
+
+    expect(screen.getAllByTitle("already generated").length).toBeGreaterThan(0);
+  });
+
+  it("marks nothing when no step has an answer stored", () => {
+    showWithProse(proseFixture());
+
+    expect(screen.queryAllByTitle("already generated")).toHaveLength(0);
+  });
+
   it("copies the tour as Markdown, with the order and no prose it does not have", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
