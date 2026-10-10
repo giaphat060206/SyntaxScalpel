@@ -253,6 +253,14 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
 - A step points at a canvas **node id** and highlights its folder beside it (`alsoIds`), through the same `focus` and
   `emphasis` mechanics a search pick and a relationship row already use. A step's identity is always the real id and
   path; an AI-named title is a subtitle, never the identity.
+- **Answer shape belongs to the prompt, never the frontend.** Each task names its own sections in `ai/prompts.rs`, and
+  `render` appends one shared clause through `Task::shape`: the first line is the answer, the sections in that order,
+  omit one rather than pad it, and bullets only for genuinely parallel items. `Task::TourStop` returns `None` there
+  because it answers in JSON and overrides the format rules in its own instruction — a test walks every task and
+  asserts exactly that split. So do not reformat a Markdown answer inside a component, and do not move the layout into
+  `HOUSE_RULES`, where the JSON task would have to argue with it. A skeleton is a nudge rather than a guarantee, so
+  keep readers lenient; and changing an instruction changes its prompt hash, which deliberately unmarks the answers
+  already stored for that task.
 
 ## Style and workflow
 
