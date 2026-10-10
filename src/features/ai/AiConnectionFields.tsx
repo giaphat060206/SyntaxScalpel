@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { aiModels, type ModelChoice } from "../../shared/ipc";
 import { PROVIDERS, useAiSettings } from "./useAiSettings";
 
 // A solid background, matching the panel's own fields. The provider list is drawn by
@@ -22,9 +23,31 @@ export function AiConnectionFields() {
   const settings = useAiSettings();
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelChoice[]>([]);
 
   const label =
     PROVIDERS.find((entry) => entry.id === settings.provider)?.label ?? settings.provider;
+
+  // Suggested models, not a closed list: the field stays typeable, because a model
+  // can be newer than anything this app knows about. A catalogue that cannot be read
+  // is not an error worth showing — it just leaves the field as it was.
+  useEffect(() => {
+    let cancelled = false;
+    aiModels(settings.provider)
+      .then((list) => {
+        if (!cancelled) {
+          setModels(list);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModels([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.provider]);
 
   const save = async () => {
     const key = draft.trim();
@@ -57,11 +80,19 @@ export function AiConnectionFields() {
 
       <input
         aria-label="Model"
+        list="ai-model-suggestions"
         value={settings.model}
         placeholder={PROVIDERS.find((entry) => entry.id === settings.provider)?.defaultModel}
         onChange={(event) => settings.setModel(event.target.value)}
         className={`${FIELD} w-full`}
       />
+      <datalist id="ai-model-suggestions">
+        {models.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.name}
+          </option>
+        ))}
+      </datalist>
 
       <div className="flex items-center gap-1">
         <input
@@ -86,6 +117,7 @@ export function AiConnectionFields() {
         {settings.hasKey
           ? `A ${label} key is in the OS keyring, and is never sent back to this window.`
           : `No ${label} key yet.`}
+        {models.length > 0 && ` ${models.length} models suggested — click the field to see them.`}
       </p>
       {error !== null && <p className="text-[11px] text-red-400">{error}</p>}
     </div>

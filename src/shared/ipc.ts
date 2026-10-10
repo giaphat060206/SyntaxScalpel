@@ -97,6 +97,19 @@ export function aiSettings(provider: string): Promise<AiSettings> {
   return invoke<AiSettings>("ai_settings", { provider });
 }
 
+/** One entry in a provider's model catalogue, as the picker needs it. */
+export interface ModelChoice {
+  id: string;
+  name: string;
+  contextLength: number;
+}
+
+/** What a provider serves, so a model can be chosen rather than remembered. Needs no
+ *  Provider Key: the catalogue is public, and a model is picked before a key exists. */
+export function aiModels(provider: string): Promise<ModelChoice[]> {
+  return invoke<ModelChoice[]>("ai_models", { provider });
+}
+
 export function setAiKey(provider: string, key: string): Promise<AiSettings> {
   return invoke<AiSettings>("set_ai_key", { provider, key });
 }

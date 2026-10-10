@@ -11,6 +11,8 @@ vi.mock("../../shared/ipc", () => ({
   aiSettings: mocks.aiSettings,
   setAiKey: mocks.setAiKey,
   clearAiKey: mocks.clearAiKey,
+  // The model suggestions are a hint; an empty catalogue is a valid answer.
+  aiModels: () => Promise.resolve([]),
 }));
 
 import { AiSettingsMenu } from "./AiSettingsMenu";

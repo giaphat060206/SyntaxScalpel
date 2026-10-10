@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::ai::cache::{self, SummaryCache};
 use crate::ai::digest::{Options, Target};
-use crate::ai::providers::HttpTransport;
+use crate::ai::providers::{self, HttpTransport, ModelChoice};
 use crate::ai::settings::{self, AiSettings, KeyringStore};
 use crate::ai::summary::{self, AiSummary};
 
@@ -19,6 +19,23 @@ pub fn set_ai_key(provider: String, key: String) -> Result<AiSettings, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn clear_ai_key(provider: String) -> Result<AiSettings, String> {
     settings::clear_key(&provider)
+}
+
+/// The models a provider serves, so one can be chosen rather than remembered. Needs
+/// no Provider Key: a catalogue is public, and a model is picked before a key exists.
+#[tauri::command(rename_all = "camelCase")]
+pub async fn ai_models(provider: String) -> Result<Vec<ModelChoice>, String> {
+    let spec =
+        providers::spec(&provider).ok_or_else(|| format!("no provider called {provider}"))?;
+    let transport = HttpTransport::new()?;
+    let response = transport.get(&providers::openai::models_url(spec)).await?;
+    if response.status != 200 {
+        return Err(providers::openai::error_for_status(
+            response.status,
+            &response.body,
+        ));
+    }
+    providers::openai::parse_models(&response.body)
 }
 
 #[tauri::command(rename_all = "camelCase")]

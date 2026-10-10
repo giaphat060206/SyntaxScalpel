@@ -31,6 +31,7 @@ pub fn run() {
             commands::ai::clear_ai_key,
             commands::ai::ai_summary,
             commands::ai::ai_cached,
+            commands::ai::ai_models,
             commands::ai::export_summary,
         ])
         .run(tauri::generate_context!())

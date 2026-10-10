@@ -52,6 +52,15 @@ pub struct Completion {
     pub output_tokens: u64,
 }
 
+/// One entry in a provider's model catalogue, as a picker needs it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelChoice {
+    pub id: String,
+    pub name: String,
+    pub context_length: u64,
+}
+
 /// The network seam: a test answers a request without one being made.
 pub trait Transport: Send + Sync {
     fn post_json<'a>(
@@ -72,6 +81,24 @@ impl HttpTransport {
             .build()
             .map(|client| HttpTransport { client })
             .map_err(|error| format!("could not start the http client: {error}"))
+    }
+
+    /// A plain read, for a catalogue that needs no key. Deliberately not on
+    /// `Transport`: that seam carries a Provider Key and a body, and widening it
+    /// would make every test fake answer a request it will never see.
+    pub async fn get(&self, url: &str) -> Result<HttpResponse, String> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| format!("could not reach the provider: {error}"))?;
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .await
+            .map_err(|error| format!("the provider answer could not be read: {error}"))?;
+        Ok(HttpResponse { status, body })
     }
 }
 

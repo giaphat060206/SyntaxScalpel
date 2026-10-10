@@ -1,5 +1,5 @@
 use super::super::prompts::RenderedPrompt;
-use super::{Completion, ProviderSpec};
+use super::{Completion, ModelChoice, ProviderSpec};
 
 /// The OpenAI-compatible wire format, which OpenRouter, DeepSeek and Ollama all
 /// speak: bearer authorization, a chat-completions path, and the same body.
@@ -19,6 +19,58 @@ pub fn request_for(
     })
     .to_string();
     (url, body)
+}
+
+/// Where a provider publishes the models it serves. OpenRouter's needs no key, which
+/// is what lets a model be chosen before a key has been entered.
+pub fn models_url(provider: &ProviderSpec) -> String {
+    format!("{}/models", provider.base_url.trim_end_matches('/'))
+}
+
+/// Read a model catalogue. Only what a picker shows is kept, and a model that cannot
+/// be sent a chat message is dropped: an image model is not a choice for this app.
+pub fn parse_models(body: &str) -> Result<Vec<ModelChoice>, String> {
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|error| format!("the provider's model list was unreadable: {error}"))?;
+    let data = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "the provider's model list had no models in it".to_string())?;
+
+    let mut models: Vec<ModelChoice> = data
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(serde_json::Value::as_str)?;
+            let speaks_text = entry
+                .pointer("/architecture/output_modalities")
+                .and_then(serde_json::Value::as_array)
+                .map(|modalities| {
+                    modalities
+                        .iter()
+                        .any(|modality| modality.as_str() == Some("text"))
+                })
+                .unwrap_or(true);
+            if !speaks_text {
+                return None;
+            }
+            Some(ModelChoice {
+                id: id.to_string(),
+                name: entry
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(id)
+                    .to_string(),
+                context_length: entry
+                    .get("context_length")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+            })
+        })
+        .collect();
+
+    models.sort_by(|left, right| left.id.cmp(&right.id));
+    models.dedup_by(|left, right| left.id == right.id);
+    Ok(models)
 }
 
 pub fn error_for_status(status: u16, body: &str) -> String {
@@ -50,6 +102,71 @@ pub fn parse_response(body: &str) -> Result<Completion, String> {
         input_tokens: count("prompt_tokens"),
         output_tokens: count("completion_tokens"),
     })
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+    use crate::ai::providers::spec;
+
+    #[test]
+    fn reads_a_catalogue_into_choices_sorted_by_id() {
+        let body = r#"{"data":[
+            {"id":"z/model","name":"Zed","context_length":8000},
+            {"id":"a/model","name":"Aye","context_length":200000}
+        ]}"#;
+
+        let models = parse_models(body).unwrap();
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "a/model");
+        assert_eq!(models[0].name, "Aye");
+        assert_eq!(models[0].context_length, 200000);
+        assert_eq!(models[1].id, "z/model");
+    }
+
+    #[test]
+    fn leaves_out_a_model_that_cannot_answer_with_text() {
+        // An image model is in OpenRouter's catalogue and is not a choice here.
+        let body = r#"{"data":[
+            {"id":"img/model","name":"Images","architecture":{"output_modalities":["image"]}},
+            {"id":"txt/model","name":"Text","architecture":{"output_modalities":["text"]}}
+        ]}"#;
+
+        let models = parse_models(body).unwrap();
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "txt/model");
+    }
+
+    #[test]
+    fn keeps_a_model_that_says_nothing_about_its_modalities() {
+        let body = r#"{"data":[{"id":"quiet/model"}]}"#;
+
+        let models = parse_models(body).unwrap();
+
+        assert_eq!(models.len(), 1);
+        // Its name falls back to the id rather than being empty.
+        assert_eq!(models[0].name, "quiet/model");
+    }
+
+    #[test]
+    fn refuses_an_answer_that_is_not_a_catalogue() {
+        assert!(parse_models("not json").is_err());
+        assert!(parse_models(r#"{"models":[]}"#).is_err());
+    }
+
+    #[test]
+    fn asks_each_provider_where_it_publishes_its_models() {
+        assert_eq!(
+            models_url(spec("openrouter").unwrap()),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert_eq!(
+            models_url(spec("deepseek").unwrap()),
+            "https://api.deepseek.com/models"
+        );
+    }
 }
 
 #[cfg(test)]
