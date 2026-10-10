@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { PROVIDERS, useAiSettings } from "./useAiSettings";
 
+// A solid background, matching the panel's own fields. The provider list is drawn by
+// the platform, and a transparent select gives white text on the popup's own light
+// background: unreadable options in the one control that names where code goes.
 const FIELD =
-  "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-1 text-xs text-white/90";
+  "min-w-0 flex-1 rounded border border-white/15 bg-bg px-2 py-1 text-xs text-white/90 outline-none focus:border-accent";
 const ACTION =
   "shrink-0 rounded border border-white/15 px-2 py-1 text-[11px] text-white/85 hover:border-accent/50 hover:text-accent";
 
