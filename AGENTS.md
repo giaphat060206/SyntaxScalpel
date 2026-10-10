@@ -261,6 +261,13 @@ Run `npm test`, `npm run build`, and `cargo test` before claiming work is done.
   `HOUSE_RULES`, where the JSON task would have to argue with it. A skeleton is a nudge rather than a guarantee, so
   keep readers lenient; and changing an instruction changes its prompt hash, which deliberately unmarks the answers
   already stored for that task.
+- **AI connection settings are app-wide and live in the top bar.** Provider, model and key are shared state
+  (`features/ai/useAiSettings.ts` — one store, every change announced), not something a panel owns: the AI panel and
+  the tour both read it, so a change in one is a change in the other. `AiSettingsMenu` is a popover rather than a
+  `Location`, because these settings have no path and no scope, and it is deliberately **not** gated on a project being
+  open — a missing key is exactly what a user with no project has to fix. The panel's own key field stays reachable for
+  the same reason. A key is **write-only**: Rust reports only whether one exists, so no surface may render a stored key
+  back, and the field clears on save.
 
 ## Style and workflow
 
