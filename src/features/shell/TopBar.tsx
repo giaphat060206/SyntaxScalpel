@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { AiSettingsMenu } from "../ai/AiSettingsMenu";
+
 interface Props {
   hasFolder: boolean;
   recents: string[];
@@ -115,6 +117,10 @@ export function TopBar({
           AI
         </button>
       )}
+
+      {/* Not gated on a project being open: a key is what an empty AI panel is
+          missing, so the place to set one has to be reachable without a project. */}
+      <AiSettingsMenu />
 
       {menuOpen && (
         <>
