@@ -8,19 +8,24 @@ pub const PROMPT_VERSION: u32 = 1;
 
 const HOUSE_RULES: &str = "Answer in Markdown, in prose a developer can act on. Be brief: no line-by-line restatement. Never invent a file path, name, or behaviour that the input does not contain, and say plainly when the input is not enough to answer.";
 
-const EXPLAIN_SELECTION: &str = "You explain code to a developer reading an unfamiliar codebase. Explain what the selected definitions do, how they relate to each other, and what is not obvious from their names. The call and use lines in the input are the actual relationships: use them to say how these pieces interact rather than guessing.";
+/// What every prose answer must look like, whatever the task. Deliberately not in
+/// HOUSE_RULES: the tour answers in JSON and has to override the format rules
+/// outright, rather than argue with a second set of them.
+const SHAPE: &str = "Lay the answer out like this. The first line is the answer itself, in one sentence, with no heading — a reader who stops there still knows the point. Then the sections named above, in that order, each with a `##` heading. Omit a section rather than padding it, and never add one that was not asked for. Use bullets only for genuinely parallel items, never to break a paragraph into pieces.";
 
-const EXPLAIN_ARCHITECTURE: &str = "You explain the architecture of part of a codebase to a developer new to it. Describe what each part is responsible for, how the parts depend on each other, and the main flow through them. Base every claim on the given structure, imports and signatures. Point out anything that reads as a boundary, a cycle, or a responsibility in the wrong place.";
+const EXPLAIN_SELECTION: &str = "You explain code to a developer reading an unfamiliar codebase. Explain what the selected definitions do, how they relate to each other, and what is not obvious from their names. The call and use lines in the input are the actual relationships: use them to say how these pieces interact rather than guessing. Answer under `## What it does`, then `## How it fits` with at most three bullets, one relationship each, then `## Watch out for` — only when the input shows something surprising.";
 
-const PROJECT_OVERVIEW: &str = "You summarise a codebase for a developer seeing it for the first time. State its purpose, the tech stack its imports and file types imply, how the code is organised, and where execution starts. Separate what the structure shows from what you are inferring.";
+const EXPLAIN_ARCHITECTURE: &str = "You explain the architecture of part of a codebase to a developer new to it. Describe what each part is responsible for, how the parts depend on each other, and the main flow through them. Base every claim on the given structure, imports and signatures. Point out anything that reads as a boundary, a cycle, or a responsibility in the wrong place. Answer under `## What each part is responsible for`, `## How they depend on each other`, `## The main flow`.";
 
-const IMPACT: &str = "You report the impact of changing the given code. Use the imports, calls and defined names in the input to say what depends on it and what would have to change alongside it. State what cannot be determined from structure alone.";
+const PROJECT_OVERVIEW: &str = "You summarise a codebase for a developer seeing it for the first time. State its purpose, the tech stack its imports and file types imply, how the code is organised, and where execution starts. Separate what the structure shows from what you are inferring. Answer under `## Purpose`, `## Stack`, `## How it is organised`, `## Where execution starts`.";
 
-const DOC_DRIFT: &str = "You compare documentation against code. Using the documentation and the code structure given, report where the documentation is wrong, out of date, or silent about something that matters. Quote the specific claim that no longer holds.";
+const IMPACT: &str = "You report the impact of changing the given code. Use the imports, calls and defined names in the input to say what depends on it and what would have to change alongside it. State what cannot be determined from structure alone. Answer under `## What depends on it`, `## What would change with it`, `## What cannot be determined from structure`.";
 
-const RELATIONSHIP: &str = "You explain how two parts of a codebase depend on each other. From the signatures, the import and the exact call sites given, say what passes between them, what each expects of the other, and what would have to change together. Quote a call site when it is the evidence for a claim.";
+const DOC_DRIFT: &str = "You compare documentation against code. Using the documentation and the code structure given, report where the documentation is wrong, out of date, or silent about something that matters. Quote the specific claim that no longer holds. Answer under `## Claims that no longer hold`, quoting each claim, then `## Silent about`.";
 
-const TOUR_STOP: &str = "You explain one stop on a guided reading tour of a codebase, to someone reading it in this order for the first time. Ignore the house rule about the answer format: this task answers with a single JSON object and nothing else, shaped {\"title\": \"a few words naming this part\", \"why\": \"two or three sentences on what it does and why it comes here, in Markdown\", \"lookAt\": [\"project-relative file or folder ids worth opening next\"]}. Every id in lookAt must appear in the input. Never invent one: an empty list is better than a guess.";
+const RELATIONSHIP: &str = "You explain how two parts of a codebase depend on each other. From the signatures, the import and the exact call sites given, say what passes between them, what each expects of the other, and what would have to change together. Quote a call site when it is the evidence for a claim. Answer under `## What passes between them`, `## What each expects of the other`, `## What would have to change together`.";
+
+const TOUR_STOP: &str = "You explain one stop on a guided reading tour of a codebase, to someone reading it in this order for the first time. Ignore the house rule about the answer format: this task answers with a single JSON object and nothing else, shaped {\"title\": \"a few words naming this part, never empty\", \"why\": \"two or three sentences, in Markdown, on why this stop comes here: what it depends on, what the reader should have read first, and what it unlocks\", \"lookAt\": [\"project-relative file or folder ids worth opening next\"]}. Every id in lookAt must appear in the input. Never invent one: an empty list is better than a guess. Say what this stop is for in the order rather than restating what the file does, which the reader can see for themselves.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -73,6 +78,16 @@ impl Task {
         };
         body
     }
+
+    /// The layout this task's answer takes, or None when the answer is not prose:
+    /// the tour returns JSON and says so in its own instruction, so handing it a
+    /// Markdown skeleton would be a second set of rules to argue with.
+    pub fn shape(self) -> Option<&'static str> {
+        match self {
+            Task::TourStop => None,
+            _ => Some(SHAPE),
+        }
+    }
 }
 
 /// Which Digest layers a Task is worth paying for. It lives here rather than in
@@ -106,10 +121,11 @@ pub fn render(task: Task, digest: &str) -> Result<RenderedPrompt, String> {
     if digest.trim().is_empty() {
         return Err("nothing to explain: the digest is empty".to_string());
     }
-    Ok(RenderedPrompt {
-        system: format!("{}\n\n{HOUSE_RULES}", task.instruction()),
-        user: digest.to_string(),
-    })
+    let system = match task.shape() {
+        Some(shape) => format!("{}\n\n{shape}\n\n{HOUSE_RULES}", task.instruction()),
+        None => format!("{}\n\n{HOUSE_RULES}", task.instruction()),
+    };
+    Ok(RenderedPrompt { system, user: digest.to_string() })
 }
 
 /// Everything a cached summary is keyed by: the version, the answer's audience
@@ -169,6 +185,42 @@ mod tests {
             assert_eq!(Task::from_id(task.id()), Some(task));
         }
         assert_eq!(Task::from_id("explain-everything"), None);
+    }
+
+    /// The layout is only useful if the instruction it refers to names sections, and
+    /// the one task that answers in JSON must not be handed a Markdown skeleton at
+    /// all — it resolves that by overriding the format rules, and a second set would
+    /// only muddy which wins.
+    #[test]
+    fn every_prose_task_carries_its_layout_and_the_json_task_carries_none() {
+        for task in Task::ALL {
+            let system = render(task, "a digest").unwrap().system;
+            match task.shape() {
+                Some(shape) => {
+                    assert!(system.contains(shape), "{task:?} lost its layout rules");
+                    assert!(
+                        task.instruction().contains("## "),
+                        "{task:?} asks for sections it never names"
+                    );
+                    assert!(system.contains("The first line is the answer"));
+                }
+                None => {
+                    assert!(!system.contains("The first line is the answer"));
+                    assert!(system.contains("JSON"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_tour_stop_says_what_the_stop_is_for_in_the_order() {
+        let instruction = Task::TourStop.instruction();
+
+        // Positional, not descriptive: the panel's summary tasks already say what a
+        // file does, so the tour has to say why it comes here.
+        assert!(instruction.contains("what it depends on"));
+        assert!(instruction.contains("what it unlocks"));
+        assert!(instruction.contains("never empty"));
     }
 
     #[test]
