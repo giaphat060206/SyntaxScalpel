@@ -137,30 +137,40 @@ export function TourPanel({ plan, steps, index, scopePath, prose, onGoTo, onClos
 
       <ol className="m-0 min-h-0 flex-1 list-none overflow-auto p-0">
         {steps.map((step, position) => (
-          <li key={step.nodeId} className="border-b border-white/5">
+          <li
+            key={step.nodeId}
+            className={
+              prose?.cached(step.nodeId) === true
+                ? "border-b border-white/5 bg-accent/5"
+                : "border-b border-white/5"
+            }
+          >
             <button
               type="button"
               onClick={() => onGoTo(position)}
               aria-current={position === index ? "step" : undefined}
               className={
                 position === index
-                  ? "block w-full px-3 py-2 text-left text-xs text-accent"
-                  : "block w-full px-3 py-2 text-left text-xs text-white/80 hover:bg-white/5"
+                  ? "flex w-full items-start gap-2 px-3 py-2 text-left text-xs text-accent"
+                  : "flex w-full items-start gap-2 px-3 py-2 text-left text-xs text-white/80 hover:bg-white/5"
               }
             >
-              <span className="text-[10px] uppercase tracking-wider text-dimmed">
-                {position + 1}. {KIND[step.kind]}
-                {/* A step whose answer is already stored costs nothing to open, and
-                    saying so is the difference between a tour that resumes and one
-                    that looks like it starts from nothing every session. */}
-                {prose?.cached(step.nodeId) === true && (
-                  <span className="ml-1 text-accent" title="already generated">
-                    ✓
-                  </span>
-                )}
+              <span className="min-w-0 flex-1">
+                <span className="block text-[10px] uppercase tracking-wider text-dimmed">
+                  {position + 1}. {KIND[step.kind]}
+                </span>
+                <span className="block break-all text-white/90">{step.nodeId}</span>
+                <span className="block text-[11px] text-dimmed">{describe(step)}</span>
               </span>
-              <span className="block break-all text-white/90">{step.nodeId}</span>
-              <span className="block text-[11px] text-dimmed">{describe(step)}</span>
+              {/* A step whose answer is already stored costs nothing to open, and
+                  saying so is the difference between a tour that resumes and one
+                  that looks like it starts from nothing. Outside the dimmed line,
+                  where it can actually be seen. */}
+              {prose?.cached(step.nodeId) === true && (
+                <span className="shrink-0 text-sm text-accent" title="already generated">
+                  ✓
+                </span>
+              )}
             </button>
             {position === index &&
               prose &&
