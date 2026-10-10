@@ -23,6 +23,7 @@ vi.mock("../../shared/ipc", () => ({
   clearAiKey: vi.fn(),
   aiSummary: vi.fn(),
   aiCached: vi.fn(async () => []),
+  aiModels: vi.fn(async () => []),
   projectGraph: vi.fn(async () => ({
     root: "/project",
     folders: [],
@@ -158,6 +159,9 @@ describe("AiPanel gating", () => {
     await waitFor(() => expect(task.disabled).toBe(true));
 
     fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-1" } });
+    // Saving announces, so every surface asks Rust again about the key. The two
+    // mocks have to agree, or this test describes a state the app cannot reach.
+    vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: true });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(vi.mocked(setAiKey)).toHaveBeenCalledWith("openrouter", "sk-1"));
