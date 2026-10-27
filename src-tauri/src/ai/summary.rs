@@ -55,15 +55,71 @@ fn resolve(
     provider_id: &str,
     model: &str,
 ) -> Result<Resolved, String> {
+    resolve_with(
+        &mut digest::Scan::new(),
+        root,
+        target,
+        options,
+        task_id,
+        provider_id,
+        model,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_with(
+    scan: &mut digest::Scan,
+    root: &str,
+    target: &Target,
+    options: Option<&Options>,
+    task_id: &str,
+    provider_id: &str,
+    model: &str,
+) -> Result<Resolved, String> {
     let task = Task::from_id(task_id).ok_or_else(|| format!("unknown AI task: {task_id}"))?;
     let provider =
         providers::spec(provider_id).ok_or_else(|| format!("unknown provider: {provider_id}"))?;
     let model = resolved_model(provider, model).to_string();
     let options = options.cloned().unwrap_or_else(|| prompts::default_options(task));
-    let digest = digest::build(root, target, &options)?;
+    let digest = digest::build_with(scan, root, target, &options)?;
     let prompt = prompts::render(task, &digest.text)?;
     let key = SummaryCache::key_for(&prompts::cache_input(provider.id, &model, &prompt));
     Ok(Resolved { task, provider, model, digest, prompt, key })
+}
+
+/// One request a mark probe asks about, as the panel would ask it.
+pub struct Probe<'a> {
+    pub target: &'a Target,
+    pub task: &'a str,
+    pub provider: &'a str,
+    pub model: &'a str,
+}
+
+/// Which of these requests the store can already answer, sharing one scan.
+///
+/// A panel asks about every option at once, and every answer is a Digest. Built
+/// one walk at a time, the panel's own questions were the slowest thing in the
+/// app — a batch now costs one parse of the project instead of one per request.
+/// Layering stays each Task's default, which is what a click would use too.
+pub fn is_cached_many(root: &str, probes: &[Probe<'_>]) -> Vec<bool> {
+    let mut scan = digest::Scan::new();
+    let store = SummaryCache::new(root);
+    probes
+        .iter()
+        .map(|probe| {
+            resolve_with(
+                &mut scan,
+                root,
+                probe.target,
+                None,
+                probe.task,
+                probe.provider,
+                probe.model,
+            )
+            .map(|resolved| store.get(&resolved.key).is_some())
+            .unwrap_or(false)
+        })
+        .collect()
 }
 
 /// Whether the store already holds the answer this request would be served.
@@ -722,5 +778,65 @@ mod tests {
         .unwrap();
 
         assert!(summary.truncated);
+    }
+
+    #[test]
+    fn a_batch_probe_answers_each_request_and_agrees_with_asking_alone() {
+        let root = fixture("batch-marks");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let transport = FakeTransport::answering(200, ANSWER);
+        let store = with_key("openrouter");
+
+        // Store one answer, so the batch has something to find and something not to.
+        let stored = Target::Definitions { file: "a.py".into(), ids: vec!["one".into()] };
+        tauri::async_runtime::block_on(summarize(
+            root.to_str().unwrap(),
+            &stored,
+            Some(&options()),
+            "explain-selection",
+            "openrouter",
+            "",
+            false,
+            &store,
+            &transport,
+        ))
+        .unwrap();
+
+        let fresh = Target::Scope { scope: String::new() };
+        let probes = vec![
+            Probe { target: &stored, task: "explain-selection", provider: "openrouter", model: "" },
+            Probe { target: &fresh, task: "project-overview", provider: "openrouter", model: "" },
+        ];
+
+        let marks = is_cached_many(root.to_str().unwrap(), &probes);
+
+        assert_eq!(marks, vec![true, false]);
+        // A batch is an optimisation, not a second opinion: it has to agree with
+        // asking about each request on its own, or a mark contradicts its click.
+        assert_eq!(
+            marks[0],
+            is_cached(root.to_str().unwrap(), &stored, None, "explain-selection", "openrouter", "")
+                .unwrap()
+        );
+        assert_eq!(
+            marks[1],
+            is_cached(root.to_str().unwrap(), &fresh, None, "project-overview", "openrouter", "")
+                .unwrap()
+        );
+        // And asking costs no provider request: marks are read from this machine.
+        assert_eq!(transport.call_count(), 1);
+    }
+
+    #[test]
+    fn a_batch_probe_that_cannot_be_resolved_is_simply_unmarked() {
+        let root = fixture("batch-unresolvable");
+        write(&root, "a.py", "def one():\n    return 1\n");
+        let missing = Target::Files { scope: String::new(), files: vec!["nope.py".into()] };
+        let probes = vec![
+            Probe { target: &missing, task: "tour-stop", provider: "openrouter", model: "" },
+            Probe { target: &missing, task: "not-a-task", provider: "openrouter", model: "" },
+        ];
+
+        assert_eq!(is_cached_many(root.to_str().unwrap(), &probes), vec![false, false]);
     }
 }

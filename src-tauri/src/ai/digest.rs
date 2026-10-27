@@ -1,12 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::models::NodeKind;
 use crate::parser::function_graph::Def;
+use crate::parser::imports::{extract_imports, AliasMap, Resolver};
 use crate::parser::neighborhood::EXTERNAL_SEPARATOR;
-use crate::parser::project::{project_graph, ProjectFile};
+use crate::parser::project::{build_tree, project_graph, FileImport, ProjectFile, ProjectGraph};
 
 pub const MAX_STRUCTURE_BYTES: usize = 24 * 1024;
 pub const MAX_SIGNATURE_BYTES: usize = 64 * 1024;
@@ -92,13 +94,168 @@ impl Writer {
     }
 }
 
+/// One parse of the project, shared by every request in a batch.
+///
+/// A mark probe is answered by building the Digest the click would build, and a
+/// Digest is made from the project's own source. Asking five Tasks about one
+/// scope used to read and parse the whole project five times; a batch of tour
+/// steps used to do it once per step. The scan is what makes those one parse,
+/// and it is the difference between a panel that answers and one that appears
+/// to hang.
+#[derive(Default)]
+pub struct Scan {
+    projects: HashMap<(String, String), Arc<ProjectGraph>>,
+    trees: HashMap<(String, String), Arc<ProjectGraph>>,
+    resolvers: HashMap<(String, String), Arc<Resolver>>,
+    sources: HashMap<(String, String), Arc<String>>,
+    definitions: HashMap<(String, String), Arc<Vec<Def>>>,
+}
+
+impl Scan {
+    pub fn new() -> Scan {
+        Scan::default()
+    }
+
+    /// The whole project graph, which a scope Digest needs.
+    fn project(&mut self, root: &str, scope: &str) -> Result<Arc<ProjectGraph>, String> {
+        let key = (root.to_string(), scope.to_string());
+        if let Some(found) = self.projects.get(&key) {
+            return Ok(found.clone());
+        }
+        let graph = Arc::new(project_graph(root, scope)?);
+        self.projects.insert(key, graph.clone());
+        Ok(graph)
+    }
+
+    /// The scope's file list, without parsing any file's imports.
+    fn tree(&mut self, root: &str, scope: &str) -> Result<Arc<ProjectGraph>, String> {
+        let key = (root.to_string(), scope.to_string());
+        if let Some(found) = self.trees.get(&key) {
+            return Ok(found.clone());
+        }
+        let tree = Arc::new(build_tree(Path::new(root), scope)?.graph);
+        self.trees.insert(key, tree.clone());
+        Ok(tree)
+    }
+
+    /// A resolver over the scope's code files — the same set `project_graph`
+    /// builds one from, so a name resolves to the same file either way.
+    fn resolver(&mut self, root: &str, scope: &str) -> Result<Arc<Resolver>, String> {
+        let key = (root.to_string(), scope.to_string());
+        if let Some(found) = self.resolvers.get(&key) {
+            return Ok(found.clone());
+        }
+        let tree = self.tree(root, scope)?;
+        let root_path = Path::new(root);
+        let code_paths: Vec<std::path::PathBuf> = tree
+            .files
+            .iter()
+            .filter(|file| file.kind == "code")
+            .map(|file| root_path.join(&file.id))
+            .collect();
+        let resolver = Arc::new(Resolver::new(root_path, &code_paths, AliasMap::load(root_path)));
+        self.resolvers.insert(key, resolver.clone());
+        Ok(resolver)
+    }
+
+    fn source(&mut self, root: &str, rel: &str) -> Result<Arc<String>, String> {
+        let key = (root.to_string(), rel.to_string());
+        if let Some(found) = self.sources.get(&key) {
+            return Ok(found.clone());
+        }
+        let text = Arc::new(read(root, rel)?);
+        self.sources.insert(key, text.clone());
+        Ok(text)
+    }
+
+    fn defs(&mut self, root: &str, rel: &str) -> Result<Arc<Vec<Def>>, String> {
+        let key = (root.to_string(), rel.to_string());
+        if let Some(found) = self.definitions.get(&key) {
+            return Ok(found.clone());
+        }
+        let source = self.source(root, rel)?;
+        let parsed = Arc::new(crate::parser::definitions(source.as_str(), rel)?);
+        self.definitions.insert(key, parsed.clone());
+        Ok(parsed)
+    }
+}
+
+/// The import edges `project_graph` would resolve for one file, so a Files target
+/// renders the same `->` line without walking the rest of the project.
+fn file_imports(root: &Path, resolver: &Resolver, id: &str, source: &str) -> Vec<FileImport> {
+    let mut imports = Vec::new();
+    for entry in extract_imports(source, id) {
+        let targets = resolver.resolve(&entry, id);
+        if targets.is_empty() {
+            imports.push(FileImport {
+                target_id: String::new(),
+                specifier: entry.specifier,
+                names: entry.names,
+            });
+            continue;
+        }
+        for resolved in targets {
+            let target_id = resolved
+                .target
+                .strip_prefix(root)
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            imports.push(FileImport {
+                target_id,
+                specifier: resolved.specifier,
+                names: resolved.names,
+            });
+        }
+    }
+    imports
+}
+
+/// The files a Files target names, each with its own imports resolved — nothing
+/// else in the project is read, which is what makes a single-file Digest cheap.
+fn named_files(
+    scan: &mut Scan,
+    root: &str,
+    scope: &str,
+    only: &[String],
+) -> Result<Vec<ProjectFile>, String> {
+    let tree = scan.tree(root, scope)?;
+    let resolver = scan.resolver(root, scope)?;
+    let mut selected: Vec<ProjectFile> = Vec::new();
+    for id in only {
+        let Some(file) = tree.files.iter().find(|file| &file.id == id && !file.external) else {
+            continue;
+        };
+        let source = scan.source(root, &file.id)?;
+        let imports = file_imports(Path::new(root), &resolver, &file.id, source.as_str());
+        selected.push(ProjectFile {
+            id: file.id.clone(),
+            name: file.name.clone(),
+            folder_id: file.folder_id.clone(),
+            kind: file.kind.clone(),
+            size_bytes: file.size_bytes,
+            imports,
+            external: false,
+        });
+    }
+    Ok(selected)
+}
+
 pub fn build(root: &str, target: &Target, options: &Options) -> Result<Digest, String> {
+    build_with(&mut Scan::new(), root, target, options)
+}
+
+pub fn build_with(
+    scan: &mut Scan,
+    root: &str,
+    target: &Target,
+    options: &Options,
+) -> Result<Digest, String> {
     match target {
-        Target::Scope { scope } => build_scope(root, scope, &[], options),
-        Target::Files { scope, files } => build_scope(root, scope, files, options),
-        Target::Definitions { file, ids } => build_definitions(root, file, ids, options),
+        Target::Scope { scope } => build_scope(scan, root, scope, &[], options),
+        Target::Files { scope, files } => build_scope(scan, root, scope, files, options),
+        Target::Definitions { file, ids } => build_definitions(scan, root, file, ids, options),
         Target::Connection { source, target } => {
-            build_connection(root, source, target, options)
+            build_connection(scan, root, source, target, options)
         }
     }
 }
@@ -152,6 +309,7 @@ fn render_call_sites(
 /// call sites when both ends are Definitions, and the import when either is a
 /// file.
 fn build_connection(
+    scan: &mut Scan,
     root: &str,
     source: &str,
     target: &str,
@@ -163,8 +321,8 @@ fn build_connection(
     let (caller_file, caller_local) = connection_end(source);
     let (callee_file, callee_local) = connection_end(target);
 
-    let caller_source = read(root, &caller_file)?;
-    let caller_defs = crate::parser::definitions(&caller_source, &caller_file)?;
+    let caller_source = scan.source(root, &caller_file)?;
+    let caller_defs = scan.defs(root, &caller_file)?;
     let mut writer = Writer::new(budget(options, false));
     writer.line(&format!("connection  {source} -> {target}"));
 
@@ -202,12 +360,16 @@ fn build_connection(
     let callee_source = if callee_file == caller_file {
         None
     } else {
-        Some(read(root, &callee_file)?)
+        Some(scan.source(root, &callee_file)?)
     };
-    let callee_defs = crate::parser::definitions(
-        callee_source.as_deref().unwrap_or(&caller_source),
-        &callee_file,
-    )?;
+    let callee_defs = match &callee_source {
+        Some(_) => scan.defs(root, &callee_file)?,
+        None => caller_defs.clone(),
+    };
+    let callee_text: &str = match &callee_source {
+        Some(text) => text.as_str(),
+        None => caller_source.as_str(),
+    };
     let callee_name = match &callee_local {
         Some(local) => {
             definition_count += 1;
@@ -226,11 +388,7 @@ fn build_connection(
         None => {
             writer.line(&format!(
                 "callee  file {callee_file}  {}L",
-                callee_source
-                    .as_deref()
-                    .unwrap_or(&caller_source)
-                    .lines()
-                    .count()
+                callee_text.lines().count()
             ));
             None
         }
@@ -241,12 +399,12 @@ fn build_connection(
             &mut writer,
             caller,
             &callee_name,
-            &caller_source,
+            caller_source.as_str(),
             source,
             target,
         )?,
         _ => {
-            for line in connection_imports(root, &caller_file, &callee_file)? {
+            for line in connection_imports(scan, root, &caller_file, &callee_file)? {
                 writer.line(&line);
             }
         }
@@ -258,16 +416,22 @@ fn build_connection(
 
 /// The import line that connects two files, so a file-level connection still
 /// carries its evidence rather than a bare pair of names.
+///
+/// Reads only the caller: `imports::analyze` would also work out which files
+/// import it, which this never asks, and that answer costs a read of every file
+/// in the project.
 fn connection_imports(
+    scan: &mut Scan,
     root: &str,
     caller_file: &str,
     callee_file: &str,
 ) -> Result<Vec<String>, String> {
-    let analysis = crate::parser::imports::analyze(caller_file, root)?;
+    let source = scan.source(root, caller_file)?;
+    let entries = extract_imports(source.as_str(), caller_file);
     let resolver = crate::parser::imports::resolver_for(Path::new(root));
     let wanted = Path::new(root).join(callee_file);
     let mut lines = Vec::new();
-    for entry in &analysis.imports {
+    for entry in &entries {
         if !resolver
             .resolve(entry, caller_file)
             .iter()
@@ -383,17 +547,20 @@ fn import_labels(file: &ProjectFile) -> Vec<String> {
 }
 
 fn build_scope(
+    scan: &mut Scan,
     root: &str,
     scope: &str,
     only: &[String],
     options: &Options,
 ) -> Result<Digest, String> {
-    let graph = project_graph(root, scope)?;
-    let mut selected: Vec<&ProjectFile> = graph
-        .files
-        .iter()
-        .filter(|file| !file.external && (only.is_empty() || only.contains(&file.id)))
-        .collect();
+    // A Files target names its own files, so the project walk is not needed: the
+    // tree gives the file list and kinds, and only the chosen files are parsed.
+    let mut selected: Vec<ProjectFile> = if only.is_empty() {
+        let graph = scan.project(root, scope)?;
+        graph.files.iter().filter(|file| !file.external).cloned().collect()
+    } else {
+        named_files(scan, root, scope, only)?
+    };
     selected.sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut writer = Writer::new(budget(options, false));
@@ -405,9 +572,9 @@ fn build_scope(
     for file in &selected {
         match file.kind.as_str() {
             "code" => {
-                let source = read(root, &file.id)?;
+                let source = scan.source(root, &file.id)?;
+                let defs = scan.defs(root, &file.id)?;
                 let lines = source.lines().count();
-                let defs = crate::parser::definitions(&source, &file.id)?;
                 total_lines += lines;
                 definition_count += defs.len();
                 body.push(format!("{}  {}L", file.id, lines));
@@ -451,7 +618,7 @@ fn build_scope(
             }
             "doc" => {
                 if options.docs {
-                    let text = read(root, &file.id)?;
+                    let text = scan.source(root, &file.id)?;
                     docs.push((file.id.clone(), text.chars().take(MAX_DOC_FILE_CHARS).collect()));
                 } else {
                     body.push(file.id.clone());
@@ -509,6 +676,7 @@ fn declaring_file(default_file: &str, id: &str) -> (String, String) {
 }
 
 fn build_definitions(
+    scan: &mut Scan,
     root: &str,
     file: &str,
     ids: &[String],
@@ -529,8 +697,7 @@ fn build_definitions(
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     let mut peers: BTreeSet<String> = BTreeSet::new();
     for (owner, locals) in &wanted {
-        let source = read(root, owner)?;
-        let defs = crate::parser::definitions(&source, owner)?;
+        let defs = scan.defs(root, owner)?;
         let selected: Vec<String> = in_source_order(&defs)
             .into_iter()
             .filter(|def| locals.is_empty() || locals.contains(&def.id))
@@ -559,10 +726,11 @@ fn build_definitions(
         if full {
             break;
         }
-        // Re-parsed rather than carried: `Def` is not `Clone`, and a Target
-        // names only the Definitions a person picked, so this is a handful.
-        let source = read(root, owner)?;
-        let defs = crate::parser::definitions(&source, owner)?;
+        // Carried by the scan rather than re-parsed: a Target names only the
+        // Definitions a person picked, so this is a handful, but a batch asks
+        // about the same file more than once.
+        let source = scan.source(root, owner)?;
+        let defs = scan.defs(root, owner)?;
         let picked: Vec<&Def> = in_source_order(&defs)
             .into_iter()
             .filter(|def| selected.contains(&def.id))
@@ -884,6 +1052,36 @@ mod tests {
                 .unwrap()
                 .text
         );
+    }
+
+    /// A Files target is what a tour step and a picked file ask for. It renders
+    /// through its own path now, so this pins the result to the scope's: the same
+    /// file, the same line count, the same `->` imports.
+    #[test]
+    fn a_files_target_renders_one_file_as_the_scope_would() {
+        let root = fixture("files-parity");
+        write(&root, "a.py", "from b import helper\n\n\ndef one():\n    helper()\n");
+        write(&root, "b.py", "def helper():\n    return 2\n");
+        write(&root, "README.md", "# Purpose\n\nA thing.\n");
+
+        let files = build(
+            root.to_str().unwrap(),
+            &Target::Files { scope: String::new(), files: vec!["a.py".into()] },
+            &Options::default(),
+        )
+        .unwrap();
+        let scope = build(root.to_str().unwrap(), &scope(), &Options::default()).unwrap();
+        let a_only: Vec<&str> = scope
+            .text
+            .lines()
+            .skip_while(|line| !line.starts_with("a.py"))
+            .take_while(|line| !line.starts_with("b.py"))
+            .collect();
+
+        assert_eq!(files.text.lines().skip(1).collect::<Vec<&str>>(), a_only);
+        assert!(files.text.contains("-> b.py"), "{}", files.text);
+        assert!(!files.text.contains("README.md"), "{}", files.text);
+        assert_eq!(files.file_count, 1);
     }
 
     #[test]

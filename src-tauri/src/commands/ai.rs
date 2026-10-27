@@ -80,22 +80,22 @@ pub struct CachedRequest {
 /// survive a restart without the panel keeping state of its own. A request that
 /// cannot be resolved is simply not marked: marks are a hint, and a probe must
 /// never be the reason the panel shows nothing.
+///
+/// The whole batch is answered from one scan of the project: the panel asks
+/// about every option at once, and answering each from its own walk made the
+/// marks the most expensive thing the app did.
 #[tauri::command(rename_all = "camelCase")]
 pub async fn ai_cached(root: String, requests: Vec<CachedRequest>) -> Result<Vec<bool>, String> {
-    Ok(requests
-        .into_iter()
-        .map(|request| {
-            summary::is_cached(
-                &root,
-                &request.target,
-                None,
-                &request.task,
-                &request.provider,
-                &request.model,
-            )
-            .unwrap_or(false)
+    let probes: Vec<summary::Probe<'_>> = requests
+        .iter()
+        .map(|request| summary::Probe {
+            target: &request.target,
+            task: &request.task,
+            provider: &request.provider,
+            model: &request.model,
         })
-        .collect())
+        .collect();
+    Ok(summary::is_cached_many(&root, &probes))
 }
 
 /// Writes one cached summary to a path the user picked. The text comes from the
