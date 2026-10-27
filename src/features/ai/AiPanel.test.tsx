@@ -109,6 +109,12 @@ async function unlocked(button: HTMLButtonElement): Promise<HTMLButtonElement> {
   return button;
 }
 
+/** The relationship listing is worked out on request, so a test that wants rows
+ *  asks for them the way a reader does. */
+async function generateRelationships(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Generate relationships" }));
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   vi.mocked(aiSettings).mockResolvedValue({ provider: "openrouter", hasKey: false });
@@ -429,10 +435,26 @@ describe("AiPanel relationships", () => {
     vi.mocked(functionGraph).mockResolvedValue(graph);
   });
 
+  it("works out nothing until asked, and says that asking takes a while", async () => {
+    vi.mocked(projectGraph).mockClear();
+
+    renderPanel();
+
+    expect(await screen.findByText(/Working out what connects/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Generate relationships" })).toBeTruthy();
+    // The whole point: opening the panel is not a request to walk the project.
+    expect(vi.mocked(projectGraph)).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate relationships" }));
+
+    await waitFor(() => expect(vi.mocked(projectGraph)).toHaveBeenCalled());
+  });
+
   async function pickTheCaller() {
     const view = renderPanel({}, "algorithms/pathfinder.py");
     fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
     fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+    await generateRelationships();
     return view;
   }
 
@@ -470,6 +492,7 @@ describe("AiPanel relationships", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
     fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+    await generateRelationships();
 
     fireEvent.click(
       await unlocked((await screen.findByRole("button", { name: "✓ Show" })) as HTMLButtonElement)
@@ -501,6 +524,7 @@ describe("AiPanel relationships", () => {
 
   it("follows the definition selected in the graph, both ways round", async () => {
     const view = renderPanel({}, "algorithms/pathfinder.py", "dijkstra");
+    await generateRelationships();
 
     // The graph's selection is the subject, so only its own relationship shows.
     expect(await screen.findByText("utils/helpers.py::push")).toBeTruthy();
@@ -514,6 +538,7 @@ describe("AiPanel relationships", () => {
 
   it("ignores a dashed file block, which is not a definition", async () => {
     renderPanel({}, "algorithms/pathfinder.py", "utils/helpers.py");
+    await generateRelationships();
 
     expect(await screen.findByText("nothing connected to this yet")).toBeTruthy();
   });
@@ -551,6 +576,7 @@ describe("AiPanel relationships", () => {
     });
 
     renderPanel({}, null, null, "algorithms/pathfinder.py");
+    await generateRelationships();
 
     // What it imports, and what imports it — the file's own two halves.
     expect(await screen.findByText("utils/helpers.py")).toBeTruthy();
@@ -576,6 +602,7 @@ describe("AiPanel relationships", () => {
     });
 
     renderPanel({}, null, null, "algorithms");
+    await generateRelationships();
 
     expect(
       await screen.findByText("algorithms/pathfinder.py -> utils/helpers.py")
@@ -615,6 +642,7 @@ describe("AiPanel marks from the store", () => {
     });
 
     renderPanel();
+    await generateRelationships();
 
     const labels = await screen.findAllByText(
       "tests/test_algorithms.py -> algorithms/pathfinder.py"
@@ -671,6 +699,7 @@ describe("AiPanel marks from the store", () => {
     });
 
     renderPanel();
+    await generateRelationships();
 
     expect(
       await screen.findByText(
@@ -696,6 +725,7 @@ describe("AiPanel marks from the store", () => {
     });
 
     renderPanel();
+    await generateRelationships();
 
     const list = (await screen.findByText("imported by")).closest("ul") as HTMLElement;
     const rows = [...list.querySelectorAll("li")].map((row) => row.textContent ?? "");
@@ -731,6 +761,7 @@ describe("AiPanel marks from the store", () => {
     });
 
     renderPanel();
+    await generateRelationships();
 
     expect(
       await screen.findAllByText("algorithms/pathfinder.py -> core/path.py")
@@ -869,6 +900,7 @@ describe("AiPanel marks from the store", () => {
     renderPanel({}, "algorithms/pathfinder.py");
     fireEvent.click(await screen.findByRole("button", { name: "Definitions" }));
     fireEvent.click(await screen.findByLabelText("fn dijkstra"));
+    await generateRelationships();
 
     expect(await screen.findByRole("button", { name: "✓ Show" })).toBeTruthy();
   });

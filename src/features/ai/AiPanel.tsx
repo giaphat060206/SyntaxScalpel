@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { aiSummary, type AiRequest, type AiSummary, type AiTarget } from "../../shared/ipc";
+import { GenerateGate } from "../../shared/StateViews";
 import { DefinitionPicker } from "./DefinitionPicker";
 import { FilePicker } from "./FilePicker";
 import { RelationshipList } from "./RelationshipList";
@@ -176,6 +177,26 @@ export function AiPanel({
             ? "Pick at least one definition"
             : undefined;
 
+  // A listing is only worth offering when there is something to work out: a
+  // Definition picked in the graph, or a mode with its picks made.
+  const relationshipReady =
+    Boolean(root) &&
+    (focus || projectFocus
+      ? true
+      : mode === "definitions"
+        ? file !== null && definitions.length > 0
+        : mode === "files"
+          ? files.length > 0
+          : true);
+  const relationshipEmpty =
+    focus || projectFocus
+      ? "nothing connected to this yet"
+      : mode === "definitions" && definitions.length === 0
+        ? "pick a definition to see what it connects to"
+        : mode === "files" && files.length === 0
+          ? "pick files to see what they connect to"
+          : "nothing connected to this yet";
+
   const send = async (task: string, request: AiRequest) => {
     setRunning(task);
     setError(null);
@@ -310,7 +331,11 @@ export function AiPanel({
         </p>
       )}
       <div className="mt-1">
-        {root ? (
+        {!root ? (
+          <p className="m-0 text-xs text-dimmed">open a folder to see what connects</p>
+        ) : !relationshipReady ? (
+          <p className="m-0 text-xs text-dimmed">{relationshipEmpty}</p>
+        ) : relationships.generated ? (
           <RelationshipList
             root={root}
             rows={relationships.rows}
@@ -320,15 +345,7 @@ export function AiPanel({
             marks={marks}
             busy={checking}
             note={relationships.note}
-            empty={
-              focus || projectFocus
-                ? "nothing connected to this yet"
-                : mode === "definitions" && definitions.length === 0
-                  ? "pick a definition to see what it connects to"
-                  : mode === "files" && files.length === 0
-                    ? "pick files to see what they connect to"
-                    : "nothing connected to this yet"
-            }
+            empty={relationshipEmpty}
             provider={settings.provider}
             model={settings.model}
             onGenerate={askAbout}
@@ -336,7 +353,11 @@ export function AiPanel({
             onHover={onHover}
           />
         ) : (
-          <p className="m-0 text-xs text-dimmed">open a folder to see what connects</p>
+          <GenerateGate
+            warning="Working out what connects reads the project again, and a folder-sized listing can take a while. It is only done when you ask for it."
+            action="Generate relationships"
+            onGenerate={relationships.generate}
+          />
         )}
       </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { analyzeImports, functionGraph, projectGraph } from "../../shared/ipc";
 import type { FunctionGraph } from "../../shared/types";
 import { definitionRows, fileRows, scopeRows, MAX_SCOPE_ROWS, type ConnectionRow } from "./relationships";
@@ -58,7 +58,10 @@ interface Params {
   projectFocus: string | null;
 }
 
-/** The counterparts the current target connects to, fetched per mode. */
+/** The counterparts the current target connects to, fetched per mode — but only
+ *  once the reader asks. Working the listing out walks the project again (and, for
+ *  files, re-reads them), so doing it on every selection change is what made the
+ *  panel feel stuck. */
 export function useRelationships({
   root,
   mode,
@@ -69,7 +72,15 @@ export function useRelationships({
   graph,
   focus,
   projectFocus,
-}: Params): { rows: ConnectionRow[]; loading: boolean; error: string | null; note: string | null } {
+}: Params): {
+  rows: ConnectionRow[];
+  loading: boolean;
+  error: string | null;
+  note: string | null;
+  /** True when these rows are the ones the reader asked for. */
+  generated: boolean;
+  generate: () => void;
+} {
   const [rows, setRows] = useState<ConnectionRow[]>([]);
   const [note, setNote] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -77,10 +88,27 @@ export function useRelationships({
   const filesKey = files.join("|");
   const definitionsKey = definitions.join("|");
 
+  // Asked for, not assumed. Once the reader turns the listing on it follows the
+  // subject — a graph selection arriving a moment later is the same question, not
+  // a reason to go back to asking. A different project is a different question.
+  const [asked, setAsked] = useState(false);
+  const generate = useCallback(() => setAsked(true), []);
+  const generated = asked;
+
+  useEffect(() => {
+    setAsked(false);
+  }, [root]);
+
   useEffect(() => {
     let cancelled = false;
     setError(null);
     setNote(null);
+
+    if (!root || !asked) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
 
     const load = async () => {
       if (!root) {
@@ -149,7 +177,7 @@ export function useRelationships({
     return () => {
       cancelled = true;
     };
-  }, [root, mode, scope, file, filesKey, definitionsKey, graph, focus, projectFocus]);
+  }, [root, mode, scope, file, filesKey, definitionsKey, graph, focus, projectFocus, asked]);
 
-  return { rows, loading, error, note };
+  return { rows, loading, error, note, generated, generate };
 }
