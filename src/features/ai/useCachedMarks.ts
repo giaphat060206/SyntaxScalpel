@@ -36,7 +36,6 @@ export function useCachedMarks(root: string | null, requests: AiRequest[]): Cach
 
     let cancelled = false;
     const asked = latest.current;
-    let failure: unknown = null;
 
     // The first probe is immediate: opening the panel should answer at once. Later
     // ones wait, so ticking three definitions is one round instead of three.
@@ -46,36 +45,36 @@ export function useCachedMarks(root: string | null, requests: AiRequest[]): Cach
     setChecking(true);
     const timer = setTimeout(
       () => {
-        Promise.all(
-          // One call per request, so an option whose Digest is quick is marked the
-          // moment it lands rather than waiting for the slowest in the batch.
-          asked.map((request) =>
-            aiCached(root, [request])
-              .then((found) => {
-                const key = requestSignature(request);
-                if (!cancelled) {
-                  setMarks((previous) => ({ ...previous, [key]: found[0] === true }));
-                }
-              })
-              .catch((reason: unknown) => {
-                // A probe is a hint: one that cannot run leaves no mark and keeps
-                // every option available.
-                failure = failure ?? reason;
-              })
-          )
-        ).then(() => {
-          if (cancelled) {
-            return;
-          }
-          if (failure) {
+        // The whole batch is one call. Rust answers it from a single scan of the
+        // project, and asking per request made the panel's own questions the
+        // slowest thing in the app — a folder with many rows meant hundreds of
+        // walks. Marks now land together instead of one at a time.
+        aiCached(root, asked)
+          .then((found) => {
+            if (cancelled) {
+              return;
+            }
+            const next: Record<string, boolean> = {};
+            asked.forEach((request, index) => {
+              next[requestSignature(request)] = found[index] === true;
+            });
+            setMarks(next);
+          })
+          .catch((reason: unknown) => {
+            if (cancelled) {
+              return;
+            }
             // Logged, because a probe that cannot run at all — a command the
             // running build does not have — would otherwise be invisible: the panel
             // would simply look as if nothing had ever been generated.
-            console.warn("could not ask the store what is already generated", failure);
+            console.warn("could not ask the store what is already generated", reason);
             setMarks({});
-          }
-          setChecking(false);
-        });
+          })
+          .finally(() => {
+            if (!cancelled) {
+              setChecking(false);
+            }
+          });
       },
       delay
     );

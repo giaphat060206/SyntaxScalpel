@@ -821,29 +821,26 @@ describe("AiPanel marks from the store", () => {
     await waitFor(() => expect(locked.disabled).toBe(false));
   });
 
-  it("marks an option as soon as its own answer lands, without waiting for the rest", async () => {
-    const resolvers: ((found: boolean[]) => void)[] = [];
-    vi.mocked(aiCached).mockImplementation(
-      (_root, requests) =>
-        new Promise<boolean[]>((resolve) => {
-          // The first option answers at once; the rest stay in flight.
-          if (requests[0].task === "explain-selection") {
-            resolve([true]);
-          } else {
-            resolvers.push(resolve);
-          }
-        })
-    );
+  it("asks the store once for the whole panel, carrying every option", async () => {
+    const batches: number[] = [];
+    vi.mocked(aiCached).mockImplementation(async (_root, requests) => {
+      batches.push(requests.length);
+      return requests.map((request) => request.task === "project-overview");
+    });
 
     renderPanel();
 
-    const button = await screen.findByRole("button", { name: /Explain selection/ });
-    await waitFor(() => expect(button.getAttribute("aria-pressed")).toBe("true"));
-    expect(screen.getByText(/asking the store/)).toBeTruthy();
+    const overview = await screen.findByRole("button", { name: /Project overview/ });
+    await waitFor(() => expect(overview.getAttribute("aria-pressed")).toBe("true"));
+    expect(
+      screen.getByRole("button", { name: /Report impact/ }).getAttribute("aria-pressed")
+    ).toBe("false");
 
-    resolvers.forEach((resolve) => resolve([]));
-
-    await waitFor(() => expect(screen.queryByText(/asking the store/)).toBeNull());
+    // One round of probing, carrying the panel's whole question. Asking per
+    // option is what made a folder-sized panel hundreds of project scans, so a
+    // batch of one is a regression, not a detail.
+    expect(batches.length).toBeGreaterThan(0);
+    expect(batches.every((size) => size > 1)).toBe(true);
   });
 
   it("marks a relationship row the store can answer", async () => {
